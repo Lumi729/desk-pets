@@ -12,7 +12,7 @@
   const FOOT = () => 10 * SCALE * size; // GIF 底下透明的那一点，站窗口顶时让脚踩在边上
   const JUMP_REACH = 350;          // 离窗口多远以内可以直接跳上去（像素）
   const SPLAT_HEIGHT = 40;         // 从多高掉下来才会摔趴趴（像素）
-  const TYPING_AFTER = 3_000;      // 连续打字多久开始陪你敲代码（毫秒）
+  const TYPING_AFTER = 0;          // 打字多久开始陪你敲代码（毫秒），0 = 一打字就换
   const SWEAT_EVERY = 30_000;      // CPU 一直很忙时多久冒一次冷汗
   const LOW_BATTERY_EVERY = 10 * 60_000; // 电量低时多久提醒一次
   const NIGHT_EVERY = 20 * 60_000; // 半夜多久催一次睡觉
@@ -540,10 +540,18 @@
   }
 
   // ---- 每一帧 ----
+  // 在发呆、走路、看鼠标、睡觉时一打字就陪你敲代码（看鼠标不会挡住它）
+  const CAN_START_TYPING = ['idle', 'walk', 'look', 'sleep'];
+
   function think(pet, now, dt) {
+    if (CAN_START_TYPING.includes(pet.state) && isTypingLong(now)) {
+      pet.state = 'typing';
+      pet.lastAttention = now;
+      setAnim(pet, '敲代码');
+      return;
+    }
     switch (pet.state) {
       case 'idle':
-        if (isTypingLong(now)) { pet.state = 'typing'; setAnim(pet, '敲代码'); break; }
         if (maybeSweat(pet, now)) break;
         if (maybeDoActivity(pet, now)) break;
         if (now - pet.lastAttention > SLEEP_AFTER) { pet.state = 'sleep'; setAnim(pet, '睡觉'); break; }
@@ -564,7 +572,6 @@
         }
         break;
       case 'walk': {
-        if (isTypingLong(now)) { pet.state = 'typing'; setAnim(pet, '敲代码'); break; }
         const step = WALK_SPEED * (pet.hurry ? 2 : 1) * dt;
         if (Math.abs(pet.target - pet.x) <= step) { pet.x = pet.target; goIdle(pet, now); }
         else pet.x += Math.sign(pet.target - pet.x) * step;

@@ -198,7 +198,7 @@ function checkTyping() {
   if (!lastCursor || p.x !== lastCursor.x || p.y !== lastCursor.y) lastMouseMove = now;
   lastCursor = p;
   const watching = settings.features.activity || settings.features.typing;
-  const typing = watching && powerMonitor.getSystemIdleTime() <= 1 && now - lastMouseMove > 2000;
+  const typing = watching && powerMonitor.getSystemIdleTime() <= 1 && now - lastMouseMove > 600;
   if (typing !== activity.typing) { activity.typing = typing; send('activity', activity); }
 }
 
@@ -409,7 +409,7 @@ function createWindow() {
     const b = win.getBounds();
     win.webContents.send('cursor', { x: p.x - b.x, y: p.y - b.y });
   }, 100);
-  const typingTimer = setInterval(checkTyping, 1000);
+  const typingTimer = setInterval(checkTyping, 300);
   const sitTimer = setInterval(checkSitting, 10_000);
   const cpuTimer = setInterval(checkCpu, 5_000);
   win.on('closed', () => { clearInterval(cursorTimer); clearInterval(typingTimer); clearInterval(sitTimer); clearInterval(cpuTimer); win = null; });
