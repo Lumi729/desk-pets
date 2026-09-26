@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { comboKey, isForbidden, touchingRows, pickHug, canStack, ORDER } = require('../renderer/combos');
+const { comboKey, isForbidden, touchingRows, pickHug, canStack, parseComboFile, ORDER } = require('../renderer/combos');
 
 const dir = path.join(__dirname, '..', '桌宠素材', '贴贴');
 const files = new Set(fs.readdirSync(dir).map(f => f.replace(/\.gif$/, '')));
@@ -48,9 +48,24 @@ test('stacking checks the pet directly underneath and the animation file', () =>
   assert.strictEqual(canStack(['千千猫猫'], '千千猫猫', hasStack), null);
 });
 
+test('file names map to combo and kind', () => {
+  assert.deepStrictEqual(parseComboFile('千千猫猫-梨梨兔兔'), { key: '千千猫猫-梨梨兔兔', kind: 'row' });
+  assert.deepStrictEqual(parseComboFile('千千猫猫-梨梨兔兔_2'), { key: '千千猫猫-梨梨兔兔', kind: 'stack' });
+  assert.deepStrictEqual(parseComboFile('哥哥狗狗-梨梨哥哥_打架'), { key: '哥哥狗狗-梨梨哥哥', kind: 'fight' });
+});
+
+test('the fight is a follow-up to an existing hug, not another hug version', () => {
+  assert.ok(files.has('哥哥狗狗-梨梨哥哥_打架'));
+  for (const name of files) {
+    const { key, kind } = parseComboFile(name);
+    if (kind === 'fight') assert.ok(files.has(key), `${name} 没有对应的贴贴`);
+  }
+});
+
 test('every hug file has both versions and uses known pet names', () => {
   for (const name of files) {
-    const base = name.replace(/_2$/, '');
+    const { key: base, kind } = parseComboFile(name);
+    if (kind === 'fight') continue;
     assert.ok(files.has(base) && files.has(`${base}_2`), base);
     assert.strictEqual(comboKey(base.split('-')), base);
     for (const pet of base.split('-')) assert.ok(ORDER.includes(pet), pet);

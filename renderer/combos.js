@@ -50,7 +50,16 @@
     return canUse(key) ? key : null;
   }
 
-  const api = { ORDER, FORBIDDEN, isForbidden, comboKey, touchingRows, pickHug, canStack };
+  // 贴贴文件夹里的文件名 → 组合名和种类：「组合名.gif」贴贴，「组合名_2.gif」叠叠乐，「组合名_打架.gif」贴贴完的打架剧情
+  const SUFFIX_KINDS = { _2: 'stack', _打架: 'fight' };
+  function parseComboFile(base) {
+    for (const [suffix, kind] of Object.entries(SUFFIX_KINDS)) {
+      if (base.endsWith(suffix)) return { key: base.slice(0, -suffix.length), kind };
+    }
+    return { key: base, kind: 'row' };
+  }
+
+  const api = { ORDER, FORBIDDEN, isForbidden, comboKey, touchingRows, pickHug, canStack, parseComboFile };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PetCombos = api;
 })(this);

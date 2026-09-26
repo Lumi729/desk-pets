@@ -5,6 +5,7 @@ const path = require('node:path');
 const { gifInfo } = require('./lib/gif');
 const { watchForeground } = require('./lib/activity');
 const { createTypingDetector } = require('./lib/typing');
+const { parseComboFile } = require('./renderer/combos');
 const { pixelTrayImage } = require('./lib/pixel-icon');
 const { autoUpdater } = require('electron-updater');
 const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
@@ -21,6 +22,7 @@ const FEATURES = [
   { key: 'system', label: '电脑状态（CPU 很忙冒冷汗 / 电量低）' },
   { key: 'perch', label: '站在窗口顶上' },
   { key: 'update', label: '自动更新' },
+  { key: 'compat', label: '兼容模式（屏幕卡住时试试，重启桌宠后生效）', off: true },
 ];
 // 托盘图标：「托盘图标」文件夹里和宠物同名的图标
 const TRAY_ICONS = PETS;
@@ -36,7 +38,7 @@ const settings = {
   pets: Object.fromEntries(PETS.map(name => [name, true])), // 每只宠物显示不显示
   size: 1,
   trayIcon: '千千猫猫',
-  features: Object.fromEntries(FEATURES.map(f => [f.key, true])),
+  features: Object.fromEntries(FEATURES.map(f => [f.key, !f.off])),
   online: { enabled: false, name: '千千', code: '', server: '' },
 };
 
@@ -83,15 +85,13 @@ function loadAssets() {
     }
     pets[name] = { name, anims };
   }
-  // 贴贴/：「组合名.gif」是排一排的贴贴，「组合名_2.gif」是叠叠乐
+  // 贴贴/：「组合名.gif」贴贴，「组合名_2.gif」叠叠乐，「组合名_打架.gif」贴贴完接着打架
   const combos = {};
   const comboDir = path.join(ASSETS, '贴贴');
   for (const file of fs.existsSync(comboDir) ? fs.readdirSync(comboDir).filter(f => f.toLowerCase().endsWith('.gif')) : []) {
-    const base = path.basename(file, path.extname(file));
-    const stack = base.endsWith('_2');
-    const key = stack ? base.slice(0, -2) : base;
+    const { key, kind } = parseComboFile(path.basename(file, path.extname(file)));
     combos[key] = combos[key] || {};
-    combos[key][stack ? 'stack' : 'row'] = readGif(path.join(comboDir, file));
+    combos[key][kind] = readGif(path.join(comboDir, file));
   }
   return { screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
@@ -138,6 +138,7 @@ function setFeature(key, on) {
   if (key === 'activity' || key === 'perch') updateWatcher();
   refreshTray();
   if (key === 'sit') sitStart = null;
+  if (key === 'compat') send('say', on ? '兼容模式打开啦，退出再打开桌宠就生效' : '兼容模式关掉啦，退出再打开桌宠就生效');
   if (key === 'update' && on) runUpdateCheck();
   if (key === 'system') { hotCount = 0; coolCount = 0; setCpuHot(false); }
   if (key === 'typing' || key === 'activity') checkTyping();
@@ -537,6 +538,8 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.setAppUserModelId('com.lumi729.deskpets'); // Windows 通知要用
+  // 兼容模式：不用显卡画透明窗口。有的电脑上透明窗口会让屏幕卡住，关掉显卡加速通常就好了（会多用一点 CPU）
+  try { if (JSON.parse(fs.readFileSync(settingsFile(), 'utf8')).features?.compat === true) app.disableHardwareAcceleration(); } catch {}
   app.whenReady().then(() => {
     loadSettings();
     createWindow();

@@ -10,6 +10,7 @@
   const HUG_TIME = 3_000;          // 贴贴至少播多久
   const STACK_TIME = 4_000;        // 叠叠乐播多久后散开
   const COMBO_REST = 10_000;       // 刚散开的宠物多久内不参加别的贴贴
+  const FIGHT_COOLDOWN = 120_000;  // 打完架以后这两只多久内不再贴贴
   const MIN_PLAY = 2_000;          // 很短的动作至少播这么久（会重复几遍）
   const GRAVITY = 2_600;           // 重力：拖得越高，落地时越快
   const FOOT = () => 10 * SCALE * size; // GIF 底下透明的那一点，站窗口顶时让脚踩在边上
@@ -287,17 +288,14 @@
     return null;
   }
 
-  let lastMouseSync = 0;
   function updateMouseCatch(force = false) {
     const dragging = pets.some(pet => pet.drag);
     // 已经接住鼠标时，只要还在宠物的方框里就一直接着，不会因为动画换帧、透明的缝一下子漏掉点击
     const over = cursor && (petUnder(cursor.x, cursor.y) || (!ignoringMouse && petBoxUnder(cursor.x, cursor.y)) || overUpdateButton(cursor.x, cursor.y));
     const ignore = !dragging && !over;
-    const now = performance.now();
-    // 状态变了就告诉主程序；没变也每 3 秒再说一次（拖动时不打扰），万一哪里没对上能自己恢复
-    if (force || ignore !== ignoringMouse || (!dragging && now - lastMouseSync > 3000)) {
+    // 只在状态真的变了（或者主程序要求对一下）时才告诉主程序，不反复去动窗口
+    if (force || ignore !== ignoringMouse) {
       ignoringMouse = ignore;
-      lastMouseSync = now;
       api.setIgnoreMouse(ignore);
     }
   }
@@ -610,8 +608,10 @@
     place(combo);
   }
 
-  function endHug(combo, now) {
+  function endHug(combo, now, allowFight = true) {
     removeCombo(combo);
+    // 有「_打架」剧情的组合：贴贴完紧接着打一架
+    if (allowFight && comboClips[combo.key]?.fight && combo.members.every(pet => pet.visible)) return startFight(combo, now);
     const n = combo.members.length;
     combo.members.forEach((pet, i) => {
       pet.x = combo.x + (i - (n - 1) / 2) * pet.w * 0.55;
@@ -621,6 +621,28 @@
     const [left, right] = [combo.members[0], combo.members[n - 1]];
     if (left.visible) walkTo(left, left.x - rand(150, 300));
     if (right.visible) walkTo(right, right.x + rand(150, 300));
+  }
+
+  function startFight(hug, now) {
+    const fight = makeCombo('fight', hug.members, hug.key, hug.x, hug.y, now, 0); // 播一遍
+    fight.si = hug.si;
+    fight.onLedge = hug.onLedge;
+    const s = screenOf(hug.members[0]);
+    fight.x = Math.min(Math.max(hug.x, s.x + fight.w / 2), s.x + s.w - fight.w / 2);
+    place(fight);
+  }
+
+  // 打完了：两只重新出现，朝相反方向各走开一段，走到了就待机；这一对要过很久才会再贴贴
+  function endFight(fight, now) {
+    removeCombo(fight);
+    comboCooldown.set(`row:${fight.key}`, now + FIGHT_COOLDOWN);
+    const n = fight.members.length;
+    fight.members.forEach((pet, i) => {
+      pet.x = fight.x + (i - (n - 1) / 2) * pet.w * 0.55;
+      pet.lastAttention = now;
+      goIdle(pet, now);
+      if (pet.visible) walkTo(pet, pet.x + (i < n / 2 ? -1 : 1) * rand(250, 400));
+    });
   }
 
   // 松手时脚落在谁的头上（一摞叠叠乐，或者一只站着的宠物）
@@ -673,9 +695,14 @@
     });
   }
 
-  function endCombo(combo, now, fallAll = false) {
+  // quiet：宠物被隐藏、窗口挪走这些时候提前结束，不接打架剧情
+  function endCombo(combo, now, fallAll = false, quiet = false) {
     if (combo.kind === 'stack') scatter(combo, now, fallAll);
-    else { endHug(combo, now); if (fallAll) for (const pet of combo.members) if (pet.onLedge) dropFrom(pet); }
+    else {
+      if (combo.kind === 'fight') endFight(combo, now);
+      else endHug(combo, now, !fallAll && !quiet);
+      if (fallAll) for (const pet of combo.members) if (pet.onLedge) dropFrom(pet);
+    }
   }
 
   // ---- 每一帧 ----
@@ -788,7 +815,7 @@
   function applyShow(value) {
     shown = value || {};
     const now = performance.now();
-    for (const combo of [...combos]) if (combo.members.some(pet => !shown[pet.id])) endCombo(combo, now);
+    for (const combo of [...combos]) if (combo.members.some(pet => !shown[pet.id])) endCombo(combo, now, false, true);
     for (const pet of pets) {
       const visible = !!shown[pet.id];
       if (visible && !pet.visible) { pet.si = primaryIndex(); pet.y = floorOf(pet); pet.onLedge = false; pet.lastAttention = now; pet.anim = ''; goIdle(pet, now); }
@@ -815,7 +842,7 @@
     for (const pet of pets) { pet.si = primaryIndex(); pet.y = floorOf(pet); }
     for (const [key, gifs] of Object.entries(data.combos || {})) {
       comboClips[key] = {};
-      for (const kind of ['row', 'stack']) if (gifs[kind]) comboClips[key][kind] = makeClip(gifs[kind]);
+      for (const [kind, gif] of Object.entries(gifs)) comboClips[key][kind] = makeClip(gif); // row 贴贴 / stack 叠叠乐 / fight 打架
     }
     size = data.size || 1;
     peerOnline = !!data.peerOnline;
