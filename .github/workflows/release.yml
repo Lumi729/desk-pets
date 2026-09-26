@@ -1,11 +1,10 @@
-# 发布新版本：推送 v 开头的标签（比如 v1.1.0），或者在 GitHub 的 Actions 页面手动点「Run workflow」。
-# 会在 Windows 上打包 exe，并建一个 GitHub Release 把 exe 放上去；桌宠的「检查更新」就是看这里。
+# 自动发布：推送 v 开头的标签（比如 v1.1.0）时，在云端的 Windows 上打包安装包，发布到 GitHub Releases。
+# 装好的桌宠会从 Releases 自动下载新版本（electron-updater 读的是一起上传的 latest.yml）。
 name: 打包发布
 
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,22 +18,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: 读版本号
-        id: version
+      - name: 检查标签和版本号一致
         shell: bash
         run: |
           version=$(node -p "require('./package.json').version")
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
             echo "::error::标签 $GITHUB_REF_NAME 和 package.json 里的版本 $version 对不上"
             exit 1
           fi
       - run: npm ci
       - run: npm test
-      - run: npx electron-builder --win portable --publish never
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: 千千梨梨桌宠 ${{ steps.version.outputs.tag }}
-          files: dist/*.exe
-          generate_release_notes: true
+      - name: 打包并发布到 Releases
+        run: npx electron-builder --win nsis --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

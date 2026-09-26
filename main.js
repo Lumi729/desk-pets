@@ -1,11 +1,11 @@
-const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, screen, shell } = require('electron');
+const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, screen } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { gifInfo } = require('./lib/gif');
 const { watchForeground } = require('./lib/activity');
 const { pixelTrayImage } = require('./lib/pixel-icon');
-const { checkForUpdate } = require('./lib/update');
+const { autoUpdater } = require('electron-updater');
 const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
 
 const ASSETS = path.join(__dirname, '桌宠素材');
@@ -26,7 +26,7 @@ const FEATURES = [
   { key: 'typing', label: '打字反应（一直打字就陪你敲代码）' },
   { key: 'system', label: '电脑状态（CPU 很忙冒冷汗 / 电量低）' },
   { key: 'perch', label: '站在窗口顶上' },
-  { key: 'update', label: '自动检查更新' },
+  { key: 'update', label: '自动更新' },
 ];
 // 托盘图标：菜单里的名字 → 「托盘图标」文件夹里的文件名（按顺序找第一个有的）
 const TRAY_ICONS = [
@@ -322,23 +322,34 @@ function pokePeer() {
   online.send('poke', settings.online.name);
 }
 
-// ---- 检查更新（GitHub Releases） ----
-let update = null;           // { version, url }
-let updateTold = '';
-async function runUpdateCheck(manual = false) {
-  if (!manual && !settings.features.update) return;
-  try {
-    update = await checkForUpdate(app.getVersion());
+// ---- 自动更新（electron-updater，从 GitHub Releases 下载） ----
+// 启动时查一次，之后每 3 小时查一次；有新版本就在后台下载，下好后提醒重启。
+let updateReady = null;      // 已经下载好的新版本号
+let manualCheck = false;
+
+function setupAutoUpdate() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;   // 就算不点重启，下次退出时也会装好
+  autoUpdater.on('update-available', info => { if (manualCheck) send('say', `发现新版本 ${info.version}，正在悄悄下载…`); manualCheck = false; });
+  autoUpdater.on('update-not-available', () => { if (manualCheck) send('say', '已经是最新版啦 ♡'); manualCheck = false; });
+  autoUpdater.on('update-downloaded', info => {
+    updateReady = info.version;
     refreshTray();
-    if (update && (manual || updateTold !== update.version)) {
-      updateTold = update.version;
-      send('say', `有新版本 ${update.version} 啦，右键托盘图标去下载～`);
-    } else if (!update && manual) {
-      send('say', '已经是最新版啦 ♡');
-    }
-  } catch {
-    if (manual) send('say', '检查更新失败了，等会儿再试试');
-  }
+    send('say', '有新版本啦，重启就能用');
+  });
+  autoUpdater.on('error', () => { if (manualCheck) send('say', '检查更新失败了，等会儿再试试'); manualCheck = false; });
+}
+
+function runUpdateCheck(manual = false) {
+  if (!manual && !settings.features.update) return;
+  if (!app.isPackaged) { if (manual) send('say', '现在是开发模式，装好的版本才会自动更新'); return; }
+  if (updateReady) { if (manual) send('say', '新版本已经下载好啦，重启就能用'); return; }
+  manualCheck = manual;
+  autoUpdater.checkForUpdates().catch(() => {});
+}
+
+function restartToUpdate() {
+  autoUpdater.quitAndInstall(true, true); // 安静地装好，然后自动重新打开
 }
 
 // ---- 多个显示器：一个透明窗口盖住所有屏幕，每块屏幕的底部都是地面 ----
@@ -408,7 +419,7 @@ ipcMain.handle('load', () => loadAssets());
 ipcMain.on('set-ignore', (_event, ignore) => win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }));
 function buildMenu() {
   return Menu.buildFromTemplate([
-    ...(update ? [{ label: `🎉 有新版本 ${update.version}，点这里下载`, click: () => shell.openExternal(update.url) }, { type: 'separator' }] : []),
+    ...(updateReady ? [{ label: `🎉 立即重启更新（${updateReady}）`, click: restartToUpdate }, { type: 'separator' }] : []),
     ...SHOW_CHOICES.map(choice => ({
       label: choice.label,
       type: 'radio',
@@ -509,8 +520,9 @@ if (!app.requestSingleInstanceLock()) {
     updateWatcher();
     createTray();
     startOnline();
-    setTimeout(runUpdateCheck, 15_000);
-    setInterval(runUpdateCheck, 6 * 60 * 60_000);
+    setupAutoUpdate();
+    setTimeout(runUpdateCheck, 10_000);
+    setInterval(runUpdateCheck, 3 * 60 * 60_000);
     screen.on('display-metrics-changed', fitToScreen);
     screen.on('display-added', fitToScreen);
     screen.on('display-removed', fitToScreen);

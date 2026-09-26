@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
-    "dist": "electron-builder --win portable"
+    "dist": "electron-builder --win nsis --publish never"
   },
   "build": {
     "appId": "com.lumi729.deskpets",
@@ -22,10 +22,29 @@
       "桌宠素材/**"
     ],
     "win": {
-      "target": "portable",
-      "icon": "桌宠素材/托盘图标/千千猫猫.ico",
-      "artifactName": "desk-pets-${version}.exe"
-    }
+      "target": "nsis",
+      "icon": "桌宠素材/托盘图标/千千猫猫.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "installerIcon": "桌宠素材/托盘图标/千千猫猫.ico",
+      "uninstallerIcon": "桌宠素材/托盘图标/千千猫猫.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "千千梨梨桌宠",
+      "artifactName": "desk-pets-setup-${version}.${ext}",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Lumi729",
+        "repo": "desk-pets",
+        "releaseType": "release"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^44.4.5",
@@ -34,5 +53,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/Lumi729/desk-pets.git"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }
