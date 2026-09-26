@@ -1,0 +1,33 @@
+{
+  "name": "desk-pets",
+  "version": "1.0.0",
+  "description": "千千猫猫和梨梨兔兔的 Windows 桌宠",
+  "main": "main.js",
+  "author": "千千",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.lumi729.deskpets",
+    "productName": "千千梨梨桌宠",
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**",
+      "renderer/**",
+      "桌宠素材/**"
+    ],
+    "win": {
+      "target": "portable",
+      "artifactName": "千千梨梨桌宠-${version}.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  }
+}
