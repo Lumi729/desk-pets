@@ -54,8 +54,11 @@
   }
 
   // 贴贴文件夹里的文件名 → 组合名和种类：「组合名.gif」贴贴，「组合名_2.gif」叠叠乐，
-  // 「组合名_打架.gif」贴贴完的打架剧情，「组合名_和好.gif」打完架过一阵再见面时先和好
-  const SUFFIX_KINDS = { _2: 'stack', _打架: 'fight', _和好: 'makeup' };
+  // 「组合名_打架.gif」贴贴完的打架剧情，「组合名_和好.gif」打完架过一阵再见面时先和好，
+  // 「组合名_盖被子.gif」哥哥狗狗给睡着的千千猫猫盖被子，「组合名_批改作业.gif」g老师看书时哥哥狗狗凑过来
+  const SUFFIX_KINDS = { _2: 'stack', _打架: 'fight', _和好: 'makeup', _盖被子: 'blanket', _批改作业: 'grading' };
+  // 这些是特别剧情，不是随机的贴贴版本
+  const SPECIAL_KINDS = ['fight', 'makeup', 'blanket', 'grading'];
   function parseComboFile(base) {
     for (const [suffix, kind] of Object.entries(SUFFIX_KINDS)) {
       if (base.endsWith(suffix)) return { key: base.slice(0, -suffix.length), kind };
@@ -63,7 +66,7 @@
     return { key: base, kind: 'row' };
   }
 
-  const api = { ORDER, SOLO, FORBIDDEN, isForbidden, comboKey, touchingRows, pickHug, canStack, parseComboFile };
+  const api = { SPECIAL_KINDS, ORDER, SOLO, FORBIDDEN, isForbidden, comboKey, touchingRows, pickHug, canStack, parseComboFile };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PetCombos = api;
 })(this);

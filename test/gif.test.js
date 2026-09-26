@@ -37,3 +37,8 @@ test('g老师 has all its special animations', () => {
     assert.ok(fs.existsSync(path.join(assets, '灰鸮g老师', `${anim}.gif`)), anim);
   }
 });
+
+test('哥哥狗狗 has its special animations', () => {
+  for (const anim of ['互动_扶起来', '互动_举牌测试通过']) assert.ok(fs.existsSync(path.join(assets, '哥哥狗狗', `${anim}.gif`)), anim);
+  for (const f of ['千千猫猫-哥哥狗狗_盖被子', '哥哥狗狗-灰鸮g老师_批改作业']) assert.ok(fs.existsSync(path.join(assets, '贴贴', `${f}.gif`)), f);
+});

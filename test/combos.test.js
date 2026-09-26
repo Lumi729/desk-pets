@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { comboKey, isForbidden, touchingRows, pickHug, canStack, parseComboFile, ORDER } = require('../renderer/combos');
+const { comboKey, isForbidden, touchingRows, pickHug, canStack, parseComboFile, ORDER, SPECIAL_KINDS } = require('../renderer/combos');
 
 const dir = path.join(__dirname, '..', '桌宠素材', '贴贴');
 const files = new Set(fs.readdirSync(dir).map(f => f.replace(/\.gif$/, '')));
@@ -53,6 +53,8 @@ test('file names map to combo and kind', () => {
   assert.deepStrictEqual(parseComboFile('千千猫猫-梨梨兔兔_2'), { key: '千千猫猫-梨梨兔兔', kind: 'stack' });
   assert.deepStrictEqual(parseComboFile('哥哥狗狗-梨梨哥哥_打架'), { key: '哥哥狗狗-梨梨哥哥', kind: 'fight' });
   assert.deepStrictEqual(parseComboFile('哥哥狗狗-梨梨哥哥_和好'), { key: '哥哥狗狗-梨梨哥哥', kind: 'makeup' });
+  assert.deepStrictEqual(parseComboFile('千千猫猫-哥哥狗狗_盖被子'), { key: '千千猫猫-哥哥狗狗', kind: 'blanket' });
+  assert.deepStrictEqual(parseComboFile('哥哥狗狗-灰鸮g老师_批改作业'), { key: '哥哥狗狗-灰鸮g老师', kind: 'grading' });
 });
 
 test('fight and make-up are follow-ups to an existing hug, not other hug versions', () => {
@@ -60,14 +62,14 @@ test('fight and make-up are follow-ups to an existing hug, not other hug version
   assert.ok(files.has('哥哥狗狗-梨梨哥哥_和好'));
   for (const name of files) {
     const { key, kind } = parseComboFile(name);
-    if (kind === 'fight' || kind === 'makeup') assert.ok(files.has(key), `${name} 没有对应的贴贴`);
+    if (SPECIAL_KINDS.includes(kind)) assert.ok(files.has(key), `${name} 没有对应的贴贴`);
   }
 });
 
 test('every hug file has both versions and uses known pet names', () => {
   for (const name of files) {
     const { key: base, kind } = parseComboFile(name);
-    if (kind === 'fight' || kind === 'makeup') continue;
+    if (SPECIAL_KINDS.includes(kind)) continue;
     if (base.includes('灰鸮g老师')) { assert.strictEqual(kind, 'row', name); continue; } // g老师只有一起看书的贴贴
     assert.ok(files.has(base) && files.has(`${base}_2`), base);
     assert.strictEqual(comboKey(base.split('-')), base);

@@ -71,6 +71,11 @@
   let nextTease = performance.now() + 120_000;
   const TEASE_NEAR = 600;          // 离得多近才会挑衅（像素）
   const G = '灰鸮g老师';
+  const DOG = '哥哥狗狗';
+  const LONG_TYPING = 5 * 60_000;  // 连续打字多久算「写了好久」
+  const TYPING_GAP = 10_000;       // 停下来多久算写完了（中间停不到 10 秒还算连续）
+  let typingRun = null;            // { start, lastEnd } 这一段连续打字
+  let blanketNight = '';           // 今晚盖过被子了没有
   const GLASSES = ['互动_扶眼镜1', '互动_扶眼镜2', '互动_扶眼镜3', '互动_擦眼镜']; // 5 秒内连续点，一下比一下多
   const CURIOUS_AFTER = 3000;      // 鼠标在g老师旁边停多久，它会歪头看
   const READ_TIME = [20_000, 40_000]; // g老师平时偶尔看书看多久
@@ -212,6 +217,7 @@
 
   function wake(pet, now) {
     pet.lastAttention = now;
+    pet.tucked = false;
     if (pet.state === 'sleep') goIdle(pet, now);
   }
 
@@ -446,7 +452,7 @@
     pet.y = floorOf(pet);
     pet.vy = 0;
     pet.lastAttention = now;
-    if (pet.fallFrom >= SPLAT_HEIGHT) playNamed(pet, pet.landAnim, now, 0, afterSplat(pet)); // 播一遍，播完回待机
+    if (pet.fallFrom >= SPLAT_HEIGHT) { playNamed(pet, pet.landAnim, now, 0, afterSplat(pet)); if (pet.landAnim === '摔趴趴') helpUp(pet, now); } // 播一遍，播完回待机
     else goIdle(pet, now);
   }
 
@@ -898,6 +904,7 @@
       if (i === 0 && !fallAll) {
         pet.onLedge = combo.onLedge;
         playNamed(pet, '摔趴趴', now, 0);
+        helpUp(pet, now);
       } else {
         dropFrom(pet);
         pet.fallFrom = Math.max(pet.fallFrom, SPLAT_HEIGHT); // 叠叠乐散开时每只都摔趴趴
@@ -921,6 +928,7 @@
     else {
       if (combo.kind === 'fight') endFight(combo, now);
       else if (combo.kind === 'makeup' && !fallAll && !quiet) endMakeup(combo, now);
+      else if (combo.kind === 'blanket' && !fallAll && !quiet) endBlanket(combo, now);
       else endHug(combo, now, combo.kind === 'row' && !fallAll && !quiet);
       if (fallAll) for (const pet of combo.members) if (pet.onLedge) dropFrom(pet);
     }
@@ -1013,9 +1021,11 @@
     if (!friend) return;
     const pair = [friend, g].sort((a, b) => a.x - b.x);
     const key = Combos.comboKey(pair.map(p => p.name));
-    if (!comboReady(key, 'row')) return;
+    // 哥哥狗狗凑过来就是「批改作业」，别的宠物是一起看书
+    const kind = friend.name === DOG && comboClips[key]?.grading ? 'grading' : 'row';
+    if (!comboReady(key, kind)) return;
     const mid = (friend.x + g.x) / 2;
-    const combo = makeCombo('row', pair, key, mid, g.y, now, READ_HUG_TIME);
+    const combo = makeCombo(kind, pair, key, mid, g.y, now, READ_HUG_TIME);
     const s = screenOf(g);
     combo.x = Math.min(Math.max(mid, s.x + combo.w / 2), s.x + s.w - combo.w / 2);
     place(combo);
@@ -1027,6 +1037,92 @@
     focusHalfAt = Infinity;
     const g = byName(G);
     if (g && g.visible && g.state === 'focus' && g.clips['互动_看书打瞌睡']) playNamed(g, '互动_看书打瞌睡', now, 3000);
+  }
+
+  // ---- 哥哥狗狗 ----
+  // 有宠物摔趴趴了 → 哥哥狗狗跑过去扶起来
+  function helpUp(fallen, now) {
+    const dog = byName(DOG);
+    if (!dog || dog === fallen || fallen.visitor || !isFree(dog) || dog.si !== fallen.si || !onFloor(fallen) || !dog.clips['互动_扶起来']) return;
+    fallen.then = null; // 有人扶，就不用自己假装没摔过了
+    const cast = [dog, fallen];
+    for (const pet of cast) pet.inScene = true;
+    scenes.push({
+      cast, i: -1, done: () => true,
+      steps: [
+        t => approach(dog, fallen),
+        t => () => fallen.state !== 'action', // 等它摔完
+        t => play(dog, '互动_扶起来', t, 0),
+      ],
+    });
+  }
+
+  // 连续打字超过 5 分钟、停下来 10 秒 → 哥哥狗狗举牌「测试通过」
+  function trackLongTyping(now) {
+    if (activity.typing) {
+      if (!typingRun || now - typingRun.lastEnd > TYPING_GAP) typingRun = { start: now, lastEnd: Infinity };
+      typingRun.lastEnd = Infinity;
+      return;
+    }
+    if (!typingRun) return;
+    if (typingRun.lastEnd === Infinity) typingRun.lastEnd = now;
+    if (now - typingRun.lastEnd < TYPING_GAP) return;
+    const long = typingRun.lastEnd - typingRun.start >= LONG_TYPING;
+    typingRun = null;
+    if (long && features.typing) holdUpSign(now);
+  }
+
+  function holdUpSign(now) {
+    const dog = byName(DOG);
+    if (!dog || !dog.visible || dog.combo || dog.inScene || BUSY.includes(dog.state) || !dog.clips['互动_举牌测试通过']) return false;
+    dog.lastAttention = now;
+    playNamed(dog, '互动_举牌测试通过', now, 3000);
+    return true;
+  }
+
+  // 晚上 11 点到早上 6 点，千千猫猫睡着了 → 哥哥狗狗走过去给它盖被子（一晚一次）
+  function checkBlanket(now, force = false) {
+    const date = new Date();
+    const hour = date.getHours();
+    if (!force && hour >= 6 && hour < 23) return false;
+    const night = new Date(date.getTime() - 6 * 3600_000).toDateString(); // 过了半夜还算前一晚
+    if (!force && blanketNight === night) return false;
+    const dog = byName(DOG), cat = byName('千千猫猫');
+    const key = Combos.comboKey(['千千猫猫', DOG]);
+    if (!dog || !cat || !cat.visible || cat.state !== 'sleep' || cat.combo || cat.inScene || !onFloor(cat) || !comboClips[key]?.blanket) return false;
+    if (!(isFree(dog) || (dog.visible && dog.state === 'sleep' && !dog.combo && !dog.inScene)) || dog.si !== cat.si) return false;
+    blanketNight = night;
+    const cast = [dog, cat];
+    for (const pet of cast) pet.inScene = true;
+    scenes.push({
+      cast, i: -1, done: () => true,
+      steps: [
+        t => approach(dog, cat),
+        t => {
+          if (cat.state !== 'sleep') return () => true; // 走过去的时候它醒了
+          const pair = [cat, dog].sort((a, b) => a.x - b.x);
+          const combo = makeCombo('blanket', pair, key, (cat.x + dog.x) / 2, cat.y, t, 3000);
+          const s = screenOf(cat);
+          combo.x = Math.min(Math.max(combo.x, s.x + combo.w / 2), s.x + s.w - combo.w / 2);
+          place(combo);
+          return () => !dog.combo;
+        },
+      ],
+    });
+    return true;
+  }
+
+  // 盖好被子：两只都接着睡，等鼠标来叫醒
+  function endBlanket(combo, now) {
+    removeCombo(combo, false);
+    const n = combo.members.length;
+    combo.members.forEach((pet, i) => {
+      pet.x = combo.x + (i - (n - 1) / 2) * pet.w * 0.55;
+      pet.state = 'sleep';
+      pet.tucked = true; // 盖着被子睡，打字也不会吵醒，只有鼠标能叫醒
+      pet.looking = false;
+      setAnim(pet, '睡觉');
+    });
   }
 
   // ---- 挑衅：千千猫猫挑衅哥哥狗狗，梨梨兔兔挑衅梨梨哥哥 ----
@@ -1289,6 +1385,25 @@
     } else if (type === 'snack') {
       for (const pet of pets) freeForTest(pet, now);
       if (!trySnack(now)) hint('要同时显示千千猫猫和梨梨兔兔，而且在同一块屏幕的地上哦');
+    } else if (type === 'dog-help') {
+      const dog = byName(DOG);
+      const others = pets.filter(p => p !== dog && !p.visitor && p.visible);
+      if (!dog || !freeForTest(dog, now) || !others.length) return hint('要显示哥哥狗狗和另一只宠物哦');
+      const fallen = pick(others);
+      if (!freeForTest(fallen, now)) return;
+      fallen.si = dog.si;
+      fallen.y = floorOf(fallen) + 300;
+      dropFrom(fallen);
+    } else if (type === 'dog-sign') {
+      const dog = byName(DOG);
+      if (!dog || !freeForTest(dog, now) || !holdUpSign(now)) hint('要先显示哥哥狗狗哦');
+    } else if (type === 'dog-blanket') {
+      const dog = byName(DOG), cat = byName('千千猫猫');
+      if (!dog || !cat || !freeForTest(dog, now) || !freeForTest(cat, now)) return hint('要同时显示哥哥狗狗和千千猫猫哦');
+      cat.si = dog.si;
+      cat.state = 'sleep';
+      setAnim(cat, '睡觉');
+      if (!checkBlanket(now, true)) hint('盖被子没成功，再试一次吧');
     } else if (type === 'g-read' || type === 'g-doze' || type === 'g-fall') {
       const g = byName(G);
       if (!g || !freeForTest(g, now)) return hint(`要先在「选择宠物」里勾上${G}哦`);
@@ -1322,7 +1437,7 @@
   const CAN_START_TYPING = ['idle', 'walk', 'sleep'];
 
   function think(pet, now, dt) {
-    if (CAN_START_TYPING.includes(pet.state) && !pet.inScene && isTypingLong(now)) {
+    if (CAN_START_TYPING.includes(pet.state) && !pet.inScene && !pet.tucked && isTypingLong(now)) {
       pet.state = 'typing';
       pet.lastAttention = now;
       setAnim(pet, '敲代码');
@@ -1472,7 +1587,8 @@
   function frame(now) {
     const dt = Math.min((now - lastTime) / 1000, 0.1);
     lastTime = now;
-    if (now >= nextClockCheck) { nextClockCheck = now + 30_000; checkClock(now); checkBattery(now); }
+    if (now >= nextClockCheck) { nextClockCheck = now + 30_000; checkClock(now); checkBattery(now); if (!focusing) checkBlanket(now); }
+    trackLongTyping(now);
     for (const pet of pets) {
       if (pet.visible) {
         if (!['drag', 'fall', 'jump', 'exit', 'enter'].includes(pet.state)) { const [min, max] = xRange(pet); pet.x = Math.min(Math.max(pet.x, min), max); }
