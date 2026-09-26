@@ -30,6 +30,7 @@ const FEATURES = [
   { key: 'weather', label: '天气（下雨 / 大晴天 / 降温换待机）' },
   { key: 'festival', label: '过节（国庆 / 万圣节 / 圣诞 / 春节）' },
   { key: 'birthday', label: '生日' },
+  { key: 'visit', label: '串门（联网配对后，宠物会去对方家玩）' },
   { key: 'tease', label: '挑衅哥哥（千千猫猫→哥哥狗狗，梨梨兔兔→梨梨哥哥）' },
   { key: 'update', label: '自动更新' },
   { key: 'compat', label: '兼容模式（屏幕卡住时试试，重启桌宠后生效）', off: true },
@@ -51,6 +52,7 @@ const settings = {
   features: Object.fromEntries(FEATURES.map(f => [f.key, !f.off])),
   online: { enabled: false, name: '千千', code: '', server: '' },
   city: '长沙',
+  visitPets: Object.fromEntries(PETS.map(name => [name, true])), // 哪几只可以去串门
   birthdays: {},                  // 宠物名 → 「MM-DD」
   pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
 };
@@ -66,6 +68,7 @@ function loadSettings() {
     }
     if (TRAY_ICONS.includes(saved.trayIcon)) settings.trayIcon = saved.trayIcon;
     if (SIZES.includes(saved.size)) settings.size = saved.size;
+    if (saved.visitPets && typeof saved.visitPets === 'object') for (const name of PETS) if (typeof saved.visitPets[name] === 'boolean') settings.visitPets[name] = saved.visitPets[name];
     if (typeof saved.city === 'string' && saved.city.trim()) settings.city = saved.city.trim().slice(0, 40);
     if (saved.birthdays && typeof saved.birthdays === 'object') {
       for (const name of PETS) { const md = normalizeBirthday(saved.birthdays[name]); if (md) settings.birthdays[name] = md; }
@@ -114,7 +117,7 @@ function loadAssets() {
     combos[key] = combos[key] || {};
     combos[key][kind] = readGif(path.join(comboDir, file));
   }
-  return { today: computeToday(), weather: weather.kind, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
+  return { visitPets: settings.visitPets, today: computeToday(), weather: weather.kind, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -476,6 +479,16 @@ ipcMain.on('pet-touched', () => {
   if (online.send('pet', settings.online.name)) lastPetSent = now;
 });
 
+// ---- 串门：只转发「串门开始 / 串门结束」和宠物名、自己的名字 ----
+let visitState = { away: [], visitors: [] };
+ipcMain.on('visit-send', (_event, { type, pet } = {}) => {
+  if ((type === 'visit-start' || type === 'visit-end') && PETS.includes(pet)) online.send(type, settings.online.name, pet);
+});
+ipcMain.on('visit-state', (_event, next) => {
+  visitState = { away: (next?.away || []).filter(n => PETS.includes(n)), visitors: (next?.visitors || []).filter(n => PETS.includes(n)) };
+  refreshTray();
+});
+
 function pokePeer() {
   online.send('poke', settings.online.name);
 }
@@ -593,7 +606,11 @@ let mouseOnPet = false;
 ipcMain.on('set-ignore', (_event, ignore) => { mouseOnPet = !ignore; win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }); });
 // petName：右键的是哪只宠物（托盘菜单没有）。千千猫猫和梨梨兔兔会多一个「挑衅哥哥」
 function buildMenu(petName = null) {
+  const visitor = petName?.startsWith('visitor:') ? petName.slice(8) : null;
   return Menu.buildFromTemplate([
+    ...(visitor ? [{ label: `🏠 送${visitor}回家`, click: () => send('send-home', visitor) }, { type: 'separator' }] : []),
+    ...visitState.away.map(name => ({ label: `🏠 叫${name}回家（在对方家串门）`, click: () => send('call-home', name) })),
+    ...(visitState.away.length ? [{ type: 'separator' }] : []),
     ...(Teases.PAIRS[petName] ? [{ label: `😈 挑衅哥哥（${Teases.PAIRS[petName].target}）`, click: () => send('tease', petName) }, { type: 'separator' }] : []),
     ...(updateReady ? [{ label: `🎉 立即重启更新（${updateReady}）`, click: restartToUpdate }, { type: 'separator' }] : []),
     {
@@ -626,6 +643,15 @@ function buildMenu(petName = null) {
     },
     { label: weatherLabel(), click: openMoreSettings },
     { label: '宠物生日 / 番茄钟时间…', click: openMoreSettings },
+    {
+      label: '允许去串门的宠物',
+      submenu: PETS.map(name => ({
+        label: name,
+        type: 'checkbox',
+        checked: settings.visitPets[name],
+        click: item => { settings.visitPets[name] = item.checked; saveSettings(); send('visit-pets', settings.visitPets); },
+      })),
+    },
     { type: 'separator' },
     ...pomodoroMenu(),
     { label: '📷 拍照（录 3 秒 GIF）', click: () => send('photo') },
@@ -639,6 +665,7 @@ function buildMenu(petName = null) {
         { label: '送零食', click: () => sendTest('snack') },
         { label: '两个哥哥贴贴（接着打架）', click: () => sendTest('brothers') },
         { label: '两个哥哥和好', click: () => sendTest('makeup') },
+        { label: '串门：马上派一只去对方家', click: () => sendTest('visit') },
         ...Object.keys(Teases.PAIRS).map(name => ({ label: `${name}挑衅${Teases.PAIRS[name].target}`, click: () => send('tease', name) })),
       ],
     },
@@ -673,7 +700,7 @@ function buildMenu(petName = null) {
   ]);
 }
 
-ipcMain.on('menu', (_event, petName) => buildMenu(PETS.includes(petName) ? petName : null).popup({ window: win }));
+ipcMain.on('menu', (_event, petName) => buildMenu(typeof petName === 'string' ? petName : null).popup({ window: win }));
 
 // ---- 托盘 ----
 let tray = null;

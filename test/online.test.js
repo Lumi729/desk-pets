@@ -11,8 +11,10 @@ test('builds the relay address from whatever was typed', () => {
 });
 
 test('only interaction events and presence get through', () => {
-  assert.deepStrictEqual(parseMessage('{"type":"pet","name":"千千"}'), { type: 'pet', name: '千千' });
-  assert.deepStrictEqual(parseMessage('{"type":"poke","name":"梨梨","extra":"x"}'), { type: 'poke', name: '梨梨' });
+  assert.deepStrictEqual(parseMessage('{"type":"pet","name":"千千"}'), { type: 'pet', name: '千千', pet: '' });
+  assert.deepStrictEqual(parseMessage('{"type":"poke","name":"梨梨","extra":"x"}'), { type: 'poke', name: '梨梨', pet: '' });
+  assert.deepStrictEqual(parseMessage('{"type":"visit-start","name":"千千","pet":"绿眼猫猫","screen":"..."}'), { type: 'visit-start', name: '千千', pet: '绿眼猫猫' });
+  assert.deepStrictEqual(parseMessage('{"type":"visit-end","pet":"绿眼猫猫"}'), { type: 'visit-end', name: '', pet: '绿眼猫猫' });
   assert.deepStrictEqual(parseMessage('{"type":"presence","online":2}'), { type: 'presence', online: 2 });
   assert.strictEqual(parseMessage('{"type":"screen","data":"..."}'), null);
   assert.strictEqual(parseMessage('pong'), null);

@@ -23,9 +23,10 @@
 - 运行：`npm start`；本地打包 Windows 安装包：`npm run dist`（NSIS，要在 Windows 上；输出在 `dist/`，不要提交 `dist/`）。
 - 掉落用 `renderer/pets.js` 里的 `dropFrom(pet, 落地动画)`：拖到半空松手、从窗口顶上掉下来，落地都播「摔趴趴」。
 - 前台窗口由 `lib/activity.js` 里的隐藏 PowerShell 读取：「看我在做什么」开着才读程序名和标题（只在内存里分类），「站在窗口顶上」只要窗口位置。
-- 联网：客户端在 `lib/online.js`（主进程），服务端在 `server/`（Cloudflare Workers + Durable Objects，`npm run deploy` 部署）。只允许转发 `pet`、`poke` 两种事件和在线人数，不要加任何屏幕 / 窗口 / 键盘数据。
+- 联网：客户端在 `lib/online.js`（主进程），服务端在 `server/`（Cloudflare Workers + Durable Objects，`npm run deploy` 部署）。只允许转发 `pet`、`poke`、`visit-start`、`visit-end` 这几种事件（带名字、宠物名）和在线人数，不要加任何屏幕 / 窗口 / 键盘数据。
 - 托盘图标用 `lib/pixel-icon.js` 从 `-256.png` 最近邻缩小，保持像素清晰。
 - 联网默认服务器地址写在 `lib/online.js` 的 `DEFAULT_SERVER`。
 - 多显示器：一个透明窗口盖住所有屏幕，`screens` 是每块屏幕在页面里的位置，每只宠物用 `pet.si` 记住自己在哪块屏幕，`floorOf(pet)` 是那块屏幕的地面。
 - 宠物文件夹里的特殊动画（天气待机、专注、叼零食走路、节日、生日等）列在 `renderer/pets.js` 的 `CORE` 里，不会被点击随机抽到。新功能要在菜单「测试一下」里加一个马上触发的入口，方便千千看效果。
 - 挑衅互动的规则在 `renderer/teases.js`（有测试）；「挑衅_」「回应_」开头的动画只在挑衅里用，不进点击随机动作。剧情用 `renderer/pets.js` 里的 `scenes` 一步一步演。
+- 改了 `server/` 以后要提醒千千在 `server` 文件夹里运行 `npm run deploy` 重新部署。

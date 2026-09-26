@@ -1,8 +1,9 @@
 // 千千梨梨桌宠的联网中转：同一个配对码的两个人进同一个「房间」（一个 Durable Object），
-// 房间只转发「摸摸 / 戳一下」这两种互动和在线人数，别的什么都不转、也不保存。
+// 房间只转发「摸摸 / 戳一下 / 串门开始 / 串门结束」这几种互动（带名字和宠物名）和在线人数，别的什么都不转、也不保存。
 import { DurableObject } from 'cloudflare:workers';
 
-const EVENT_TYPES = ['pet', 'poke'];
+const EVENT_TYPES = ['pet', 'poke', 'visit-start', 'visit-end'];
+const clean = value => String(value ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 20);
 const MAX_PEOPLE = 2;
 
 export class PairRoom extends DurableObject {
@@ -26,8 +27,7 @@ export class PairRoom extends DurableObject {
     let data;
     try { data = JSON.parse(message); } catch { return; }
     if (!EVENT_TYPES.includes(data?.type)) return;
-    const name = String(data.name ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 20);
-    const out = JSON.stringify({ type: data.type, name });
+    const out = JSON.stringify({ type: data.type, name: clean(data.name), pet: clean(data.pet) });
     for (const other of this.ctx.getWebSockets()) {
       if (other !== ws) try { other.send(out); } catch {}
     }

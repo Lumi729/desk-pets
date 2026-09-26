@@ -62,6 +62,12 @@
   let lastBirthdayBubble = -Infinity;
   let photoBusy = false;
   let scenes = [];                 // 正在演的小剧情（挑衅）
+  let petData = {};                // 每只宠物的动画（来串门的客人也用这个）
+  let visitPets = {};              // 哪几只允许去串门
+  let nextVisit = performance.now() + 15 * 60_000;
+  const VISIT_EVERY = [10 * 60_000, 25 * 60_000]; // 多久派一只去对方家串门
+  const VISIT_STAY = [3 * 60_000, 5 * 60_000];    // 客人在这里玩多久
+  const AWAY_MAX = 10 * 60_000;                    // 自己的宠物最多在外面待多久（万一对方那边出了问题也会回家）
   let nextTease = performance.now() + 120_000;
   const TEASE_NEAR = 600;          // 离得多近才会挑衅（像素）
   let features = { time: true, sit: true, mouse: true, activity: true, typing: true, system: true, perch: true };
@@ -295,7 +301,7 @@
   }
 
   // 右键哪只宠物，菜单里就可能多出这只的专属选项（比如「挑衅哥哥」）
-  window.addEventListener('contextmenu', event => { event.preventDefault(); api.showMenu(petUnder(event.clientX, event.clientY)?.name || petBoxUnder(event.clientX, event.clientY)?.name || null); });
+  window.addEventListener('contextmenu', event => { event.preventDefault(); const pet = petUnder(event.clientX, event.clientY) || petBoxUnder(event.clientX, event.clientY); api.showMenu(pet ? (pet.visitor ? `visitor:${pet.name}` : pet.name) : null); });
 
   // 鼠标在宠物身上（不透明的地方）时才接住点击，其他地方点击会穿透到桌面。
   function petBoxUnder(x, y) {
@@ -603,6 +609,125 @@
     const name = message.name || '对方';
     if (message.type === 'pet') remind('开心蹦蹦', `${name}在摸你`, 3000);
     if (message.type === 'poke') remind('打招呼', `${name}戳了戳你`, 2000);
+    if (message.type === 'visit-start') welcomeVisitor(message.pet, name);
+    if (message.type === 'visit-end') {
+      const mine = byName(message.pet);
+      if (mine?.away || mine?.state === 'exit') comeHome(mine, performance.now()); // 对方送它回来了
+      else { const guest = pets.find(p => p.visitor && p.name === message.pet); if (guest) visitorLeave(guest, performance.now(), false); } // 对方把它叫回家了
+    }
+  }
+
+  // ---- 串门 ----
+  // 从屏幕边缘走出去 / 走进来
+  function walkOut(pet, now, done) {
+    const s = screenOf(pet);
+    pet.exitDir = pet.x < s.x + s.w / 2 ? -1 : 1;
+    pet.state = 'exit';
+    pet.onExit = done;
+    pet.onLedge = false;
+    pet.looking = false;
+  }
+
+  function walkIn(pet, now, done) {
+    const s = screenOf(pet);
+    const fromLeft = Math.random() < 0.5;
+    pet.y = floorOf(pet);
+    pet.x = fromLeft ? s.x - pet.w / 2 : s.x + s.w + pet.w / 2;
+    pet.enterTo = s.x + s.w * (fromLeft ? rand(0.12, 0.3) : rand(0.7, 0.88));
+    pet.state = 'enter';
+    pet.onEnter = done;
+    pet.el.hidden = false;
+  }
+
+  function reportVisits() {
+    api.reportVisits({ away: pets.filter(p => p.away).map(p => p.name), visitors: pets.filter(p => p.visitor).map(p => p.name) });
+  }
+
+  // 自己的宠物出门去对方家
+  function sendVisiting(pet, now) {
+    walkOut(pet, now, () => {
+      pet.away = true;
+      pet.awaySince = performance.now();
+      pet.visible = false;
+      pet.el.hidden = true;
+      pet.state = 'idle';
+      api.sendVisit('visit-start', pet.name);
+      reportVisits();
+    });
+  }
+
+  function tryVisit(now) {
+    if (!peerOnline || pets.some(p => p.away || p.state === 'exit')) return false;
+    const candidates = pets.filter(p => visitPets[p.name] !== false && isFree(p));
+    if (!candidates.length) return false;
+    sendVisiting(pick(candidates), now);
+    return true;
+  }
+
+  // 自己的宠物回家（对方送回来、自己叫回来、对方下线、在外面太久）
+  function comeHome(pet, now) {
+    if (pet.state === 'exit' && !pet.away) { pet.onExit = null; goIdle(pet, now); return; } // 还没走出去就回来了
+    if (!pet.away) return;
+    pet.away = false;
+    pet.visible = !!shown[pet.id];
+    reportVisits();
+    if (!pet.visible) return;
+    pet.si = primaryIndex();
+    walkIn(pet, now, t => { goIdle(pet, t); say(pet, '我回来啦', 4000); });
+  }
+
+  function callHome(name) {
+    const pet = byName(name);
+    if (!pet) return;
+    api.sendVisit('visit-end', name);
+    comeHome(pet, performance.now());
+  }
+
+  // 对方的宠物来串门：从边缘走进来，打招呼，玩几分钟再走（不会留下来）
+  function welcomeVisitor(name, owner) {
+    if (!features.visit || !petData[name] || pets.some(p => p.visitor && p.name === name)) {
+      api.sendVisit('visit-end', name); // 现在不方便接待，请它回去
+      return;
+    }
+    const now = performance.now();
+    const guest = createPet(`visitor:${name}`, petData[name], 0);
+    guest.visitor = true;
+    guest.owner = owner;
+    guest.visible = true;
+    guest.si = primaryIndex();
+    guest.el.title = `${owner}的${name}（来串门）`;
+    guest.leaveAt = now + rand(...VISIT_STAY);
+    pets.push(guest);
+    setAnim(guest, '待机');
+    walkIn(guest, now, t => { playNamed(guest, '打招呼', t, 2000); say(guest, `${owner}来串门啦`, 6000); });
+    reportVisits();
+  }
+
+  // 客人回家：走出屏幕后告诉对方（notify=false 时是对方已经下线 / 叫它回去了）
+  function visitorLeave(guest, now, notify = true) {
+    if (guest.state === 'exit') return;
+    guest.inScene = false;
+    walkOut(guest, now, () => { removeVisitor(guest); if (notify) api.sendVisit('visit-end', guest.name); });
+  }
+
+  function removeVisitor(guest) {
+    pets = pets.filter(p => p !== guest);
+    if (guest.url) URL.revokeObjectURL(guest.url);
+    guest.el.remove();
+    guest.bubble.remove();
+    guest.heart.remove();
+    reportVisits();
+  }
+
+  function checkVisits(now) {
+    for (const guest of pets.filter(p => p.visitor)) {
+      if (!peerOnline) visitorLeave(guest, now, false);
+      else if (now >= guest.leaveAt && ['idle', 'walk'].includes(guest.state)) visitorLeave(guest, now);
+    }
+    for (const pet of pets.filter(p => p.away)) {
+      if (!peerOnline || now - pet.awaySince > AWAY_MAX) { if (peerOnline) api.sendVisit('visit-end', pet.name); comeHome(pet, now); }
+    }
+    if (now >= nextVisit) { nextVisit = now + rand(...VISIT_EVERY); if (features.visit && !focusing) tryVisit(now); }
   }
 
   // 两个人都在线时，头顶飘一个小爱心（冒气泡时先让开）
@@ -620,7 +745,7 @@
   const comboReady = (key, kind) => !!comboClips[key]?.[kind] && (comboCooldown.get(`${kind}:${key}`) || 0) <= performance.now();
 
   function canHug(pet) {
-    return pet.visible && !pet.combo && !pet.inScene && (pet.restUntil || 0) <= performance.now() && (pet.state === 'idle' || pet.state === 'walk') && (onFloor(pet) || pet.onLedge);
+    return pet.visible && !pet.visitor && !pet.combo && !pet.inScene && (pet.restUntil || 0) <= performance.now() && (pet.state === 'idle' || pet.state === 'walk') && (onFloor(pet) || pet.onLedge);
   }
 
   function makeCombo(kind, members, key, x, y, now, playFor) {
@@ -712,11 +837,12 @@
     const onHead = t => Math.abs(pet.x - t.x) < t.w * 0.4 && feet > H() - t.y - t.h - 40 && feet < H() - t.y - t.h * 0.45;
     const stack = combos.find(c => c.kind === 'stack' && onHead(c));
     if (stack) return { base: stack, below: stack.members };
-    const under = pets.find(q => q !== pet && q.visible && !q.combo && ['idle', 'walk', 'action', 'sleep', 'typing'].includes(q.state) && onHead(q));
+    const under = pets.find(q => q !== pet && q.visible && !q.visitor && !q.combo && ['idle', 'walk', 'action', 'sleep', 'typing'].includes(q.state) && onHead(q));
     return under ? { base: under, below: [under] } : null;
   }
 
   function tryStack(pet, now) {
+    if (pet.visitor) return false;
     const target = stackTarget(pet);
     if (!target) return false;
     const key = Combos.canStack(target.below.map(p => p.name), pet.name, k => comboReady(k, 'stack'));
@@ -778,8 +904,8 @@
   }
 
   // ---- 追着玩：绿眼猫猫突然冲向另一只，那只加速跑开，追一会儿一起开心蹦蹦 ----
-  const byName = name => pets.find(pet => pet.name === name);
-  const isFree = pet => pet.visible && !pet.combo && !pet.drag && !pet.inScene && onFloor(pet) && ['idle', 'walk'].includes(pet.state);
+  const byName = name => pets.find(pet => pet.name === name && !pet.visitor); // 不算来串门的客人
+  const isFree = pet => pet.visible && !pet.visitor && !pet.combo && !pet.drag && !pet.inScene && onFloor(pet) && ['idle', 'walk'].includes(pet.state);
 
   function moveToward(pet, x, step, leftAnim, rightAnim) {
     const dx = x - pet.x;
@@ -1074,6 +1200,11 @@
     } else if (type === 'snack') {
       for (const pet of pets) freeForTest(pet, now);
       if (!trySnack(now)) hint('要同时显示千千猫猫和梨梨兔兔，而且在同一块屏幕的地上哦');
+    } else if (type === 'visit') {
+      if (!peerOnline) return hint('要先联网配对，而且对方也在线，才能去串门哦');
+      if (pets.some(p => p.away)) return hint('已经有一只在对方家串门啦');
+      for (const pet of pets) if (!pet.visitor) freeForTest(pet, now);
+      if (!tryVisit(now)) hint('没有能出门的宠物，看看「允许去串门的宠物」里有没有勾上');
     } else if (type === 'brothers' || type === 'makeup') {
       const dog = byName('哥哥狗狗'), gege = byName('梨梨哥哥');
       if (!dog || !gege || !freeForTest(dog, now) || !freeForTest(gege, now)) return hint('要同时显示哥哥狗狗和梨梨哥哥哦');
@@ -1135,6 +1266,18 @@
       case 'wait':
         if (!pets.some(p => p.state === 'deliver' && p.snack?.to === pet)) goIdle(pet, now);
         else pet.lastAttention = now;
+        break;
+      case 'exit': {
+        const dir = pet.exitDir;
+        pet.x += dir * WALK_SPEED * 1.3 * dt;
+        setAnim(pet, dir < 0 ? '向左走' : '向右走');
+        const s = screenOf(pet);
+        if (pet.x < s.x - pet.w / 2 || pet.x > s.x + s.w + pet.w / 2) { const done = pet.onExit; pet.onExit = null; if (done) done(now); else goIdle(pet, now); }
+        break;
+      }
+      case 'enter':
+        moveToward(pet, pet.enterTo, WALK_SPEED * 1.3 * dt, '向左走', '向右走');
+        if (Math.abs(pet.x - pet.enterTo) < 1) { const done = pet.onEnter; pet.onEnter = null; if (done) done(now); else goIdle(pet, now); }
         break;
       case 'approach': {
         // 走到对方身边（挑衅剧情里用）
@@ -1221,7 +1364,7 @@
     if (now >= nextClockCheck) { nextClockCheck = now + 30_000; checkClock(now); checkBattery(now); }
     for (const pet of pets) {
       if (pet.visible) {
-        if (pet.state !== 'drag' && pet.state !== 'fall' && pet.state !== 'jump') { const [min, max] = xRange(pet); pet.x = Math.min(Math.max(pet.x, min), max); }
+        if (!['drag', 'fall', 'jump', 'exit', 'enter'].includes(pet.state)) { const [min, max] = xRange(pet); pet.x = Math.min(Math.max(pet.x, min), max); }
         think(pet, now, dt);
         place(pet);
       }
@@ -1233,6 +1376,7 @@
       else place(combo);
     }
     runScenes(now);
+    checkVisits(now);
     if (now >= nextTease) { nextTease = now + rand(120_000, 300_000); if (features.tease && !focusing) tryTease(now); }
     // 时不时：绿眼猫猫追着玩、千千猫猫和梨梨兔兔送零食（专注时不打扰）
     if (now >= nextChase) { nextChase = now + rand(60_000, 150_000); if (features.chase && !focusing) tryChase(now); }
@@ -1254,7 +1398,8 @@
     const now = performance.now();
     for (const combo of [...combos]) if (combo.members.some(pet => !shown[pet.id])) endCombo(combo, now, false, true);
     for (const pet of pets) {
-      const visible = !!shown[pet.id];
+      if (pet.visitor) continue; // 客人不受「选择宠物」影响
+      const visible = !!shown[pet.id] && !pet.away;
       if (visible && !pet.visible) { pet.si = primaryIndex(); pet.y = floorOf(pet); pet.onLedge = false; pet.lastAttention = now; pet.anim = ''; goIdle(pet, now); }
       pet.visible = visible;
       pet.el.hidden = !visible;
@@ -1276,6 +1421,8 @@
     if (data.screens?.length) screens = data.screens;
     const home = screens[primaryIndex()];
     const names = Object.keys(data.pets);
+    petData = data.pets;
+    visitPets = data.visitPets || {};
     pets = names.map((name, i) => createPet(name, data.pets[name], home.x + home.w * (0.2 + 0.6 * i / Math.max(1, names.length - 1))));
     for (const pet of pets) { pet.si = primaryIndex(); pet.y = floorOf(pet); }
     for (const [key, gifs] of Object.entries(data.combos || {})) {
@@ -1308,6 +1455,9 @@
     api.onPhoto(takePhoto);
     api.onTest(onTest);
     api.onTease(onTeaseRequest);
+    api.onVisitPets(allowed => { visitPets = allowed || {}; });
+    api.onCallHome(callHome);
+    api.onSendHome(name => { const guest = pets.find(p => p.visitor && p.name === name); if (guest) visitorLeave(guest, performance.now()); });
     api.onSay(text => { for (const pet of pets) if (pet.visible) say(pet.combo || pet, text, 10_000); });
     api.onSize(applySize);
     api.onPresence(online => { peerOnline = online; });
