@@ -130,6 +130,7 @@
 
   function goIdle(pet, now) {
     pet.state = 'idle';
+    pet.looking = false;
     // 地上有能站的窗口时想得快一点，马上过去
     pet.nextThink = now + (wantsLedge(pet) ? rand(300, 900) : rand(2000, 6000));
     setAnim(pet, '待机');
@@ -208,7 +209,8 @@
 
   // ---- 鼠标：拖动 / 点击 / 右键 ----
   function onPointerDown(pet, event) {
-    if (event.button !== 0 || pet.state === 'hug') return;
+    if (event.button !== 0) return;
+    if (pet.state === 'hug') { pet.el.hidden = !pet.visible; goIdle(pet, performance.now()); } // 万一卡在贴贴里，点一下就恢复
     event.preventDefault();
     pet.el.setPointerCapture(event.pointerId);
     const rect = pet.el.getBoundingClientRect();
@@ -255,6 +257,14 @@
   window.addEventListener('contextmenu', event => { event.preventDefault(); api.showMenu(); });
 
   // 鼠标在宠物身上（不透明的地方）时才接住点击，其他地方点击会穿透到桌面。
+  function petBoxUnder(x, y) {
+    return pets.find(pet => {
+      if (!pet.visible || pet.state === 'hug') return false;
+      const r = pet.el.getBoundingClientRect();
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    });
+  }
+
   function petUnder(x, y) {
     for (const pet of pets) {
       if (!pet.visible || pet.state === 'hug') continue;
@@ -274,7 +284,8 @@
   let lastMouseSync = 0;
   function updateMouseCatch(force = false) {
     const dragging = pets.some(pet => pet.drag);
-    const over = cursor && petUnder(cursor.x, cursor.y);
+    // 已经接住鼠标时，只要还在宠物的方框里就一直接着，不会因为动画换帧、透明的缝一下子漏掉点击
+    const over = cursor && (petUnder(cursor.x, cursor.y) || (!ignoringMouse && petBoxUnder(cursor.x, cursor.y)));
     const ignore = !dragging && !over;
     const now = performance.now();
     // 状态变了就告诉主程序；没变也每 3 秒再说一次（拖动时不打扰），万一哪里没对上能自己恢复
@@ -313,20 +324,24 @@
   }
 
   // 鼠标靠近 → 转头看鼠标
-  function lookAtMouse(pet, point, distance, now) {
-    const canLook = features.mouse && (pet.state === 'idle' || pet.state === 'walk' || pet.state === 'look');
-    if (canLook && distance < LOOK_DISTANCE) {
+  // 鼠标靠近 → 发呆的宠物转头看鼠标。只是换个眼神，不打断任何事：
+  // 它照样会去走路、睡觉、做动作、敲代码、跳上窗口，走路时也不会停下来看
+  function lookAtMouse(pet, point, distance) {
+    const near = features.mouse && pet.state === 'idle' && distance < LOOK_DISTANCE;
+    if (near) {
       const dx = point.x - pet.x;
-      if (pet.state !== 'look' || Math.abs(dx) > 15) {
-        pet.state = 'look';
+      if (!pet.looking || Math.abs(dx) > 15) {
         const side = Math.abs(dx) <= 15 ? (pet.lookSide || 'right') : (dx < 0 ? 'left' : 'right');
+        pet.looking = true;
         pet.lookSide = side;
         setAnim(pet, side === 'left' ? '向左看' : '向右看');
       }
-    } else if (pet.state === 'look' && (!features.mouse || distance >= LOOK_DISTANCE + 30)) {
-      goIdle(pet, now);
+    } else if (pet.looking && (pet.state !== 'idle' || !features.mouse || distance >= LOOK_DISTANCE + 30)) {
+      pet.looking = false;
+      if (pet.state === 'idle') setAnim(pet, '待机');
     }
   }
+
 
   function onCursor(point) {
     cursor = point;
@@ -335,7 +350,7 @@
       if (!pet.visible) continue;
       const distance = Math.hypot(point.x - pet.x, point.y - (H() - pet.y - pet.h / 2));
       if (distance < WAKE_DISTANCE) wake(pet, now);
-      lookAtMouse(pet, point, distance, now);
+      lookAtMouse(pet, point, distance);
       if (features.mouse) trackShake(pet, point, now);
     }
     updateMouseCatch();
@@ -514,7 +529,7 @@
 
   // ---- 贴贴 ----
   function canHug(pet) {
-    return pet.visible && (pet.state === 'idle' || pet.state === 'walk' || pet.state === 'look') && onFloor(pet);
+    return pet.visible && (pet.state === 'idle' || pet.state === 'walk') && onFloor(pet);
   }
 
   function startHug(a, b, now) {
@@ -552,8 +567,8 @@
   }
 
   // ---- 每一帧 ----
-  // 在发呆、走路、看鼠标、睡觉时一打字就陪你敲代码（看鼠标不会挡住它）
-  const CAN_START_TYPING = ['idle', 'walk', 'look', 'sleep'];
+  // 在发呆（包括正在看鼠标）、走路、睡觉时一打字就陪你敲代码
+  const CAN_START_TYPING = ['idle', 'walk', 'sleep'];
 
   function think(pet, now, dt) {
     if (CAN_START_TYPING.includes(pet.state) && isTypingLong(now)) {
@@ -671,7 +686,7 @@
   function applyFeatures(next) {
     features = { ...features, ...next };
     const now = performance.now();
-    if (!features.mouse) for (const pet of pets) { pet.shake = null; if (pet.state === 'look') goIdle(pet, now); }
+    if (!features.mouse) for (const pet of pets) { pet.shake = null; if (pet.looking) goIdle(pet, now); }
     if (!features.system) cpuHot = false;
     if (!features.perch) onPerch(null);
   }
