@@ -13,4 +13,5 @@
 - `桌宠素材/` 里是桌宠的 GIF 素材：`千千猫猫/`、`梨梨兔兔/` 两个文件夹，外加一张两只一起的 `贴贴.gif`。
 - 桌宠程序是 Electron 做的：`main.js`（窗口、右键菜单、保存设置）、`preload.js`、`renderer/`（宠物动作逻辑在 `renderer/pets.js`）。
 - 运行：`npm start`；打包 Windows exe：`npm run dist`（输出在 `dist/`，不要提交 `dist/`）。
-- 以后做「站在窗口顶上」之类的功能：宠物脚下没东西时调用 `renderer/pets.js` 里的 `dropFrom(pet)`，它会播「掉落」、落地播「摔趴趴」再回待机，和拖到半空松手是同一套。
+- 掉落用 `renderer/pets.js` 里的 `dropFrom(pet, 落地动画)`：拖到半空松手落地播「摔趴趴」，从窗口顶上掉下来落地播「吓一跳」。
+- 前台窗口由 `lib/activity.js` 里的隐藏 PowerShell 读取：「看我在做什么」开着才读程序名和标题（只在内存里分类），「站在窗口顶上」只要窗口位置。

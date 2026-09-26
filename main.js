@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, powerMonitor, screen } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, powerMonitor, screen } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -22,6 +22,15 @@ const FEATURES = [
   { key: 'activity', label: '看我在做什么（写代码 / 看视频 / 听歌）' },
   { key: 'typing', label: '打字反应（一直打字就陪你敲代码）' },
   { key: 'system', label: '电脑状态（CPU 很忙冒冷汗 / 电量低）' },
+  { key: 'perch', label: '站在窗口顶上' },
+];
+// 托盘图标：菜单里的名字 → 「托盘图标」文件夹里的文件名（按顺序找第一个有的）
+const TRAY_ICONS = [
+  { label: '千千猫猫', files: ['千千猫猫'] },
+  { label: '梨梨兔兔', files: ['梨梨兔兔'] },
+  { label: '哥哥狗狗', files: ['哥哥狗狗'] },
+  { label: '梨梨哥哥', files: ['梨梨哥哥'] },
+  { label: '绿眼猫猫', files: ['绿眼猫猫', '李炜'] },
 ];
 
 const SIT_LIMIT = 60 * 60_000;   // 连续用电脑多久提醒
@@ -29,12 +38,13 @@ const BREAK_IDLE = 5 * 60;        // 离开电脑多少秒算休息过了
 
 let win;
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
-const settings = { show: 'both', features: Object.fromEntries(FEATURES.map(f => [f.key, true])) };
+const settings = { show: 'both', trayIcon: '千千猫猫', features: Object.fromEntries(FEATURES.map(f => [f.key, true])) };
 
 function loadSettings() {
   try {
     const saved = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
     if (SHOW_CHOICES.some(c => c.value === saved.show)) settings.show = saved.show;
+    if (TRAY_ICONS.some(i => i.label === saved.trayIcon)) settings.trayIcon = saved.trayIcon;
     for (const { key } of FEATURES) if (typeof saved.features?.[key] === 'boolean') settings.features[key] = saved.features[key];
   } catch {}
 }
@@ -72,31 +82,49 @@ function setShow(value) {
   settings.show = value;
   saveSettings();
   send('show', value);
+  refreshTray();
 }
 
 function setFeature(key, on) {
   settings.features[key] = on;
   saveSettings();
   send('features', settings.features);
-  if (key === 'activity') updateActivityWatcher();
+  if (key === 'activity' || key === 'perch') updateWatcher();
+  refreshTray();
   if (key === 'sit') sitStart = null;
   if (key === 'system') { hotCount = 0; coolCount = 0; setCpuHot(false); }
   if (key === 'typing' || key === 'activity') checkTyping();
 }
 
-// ---- 看前台窗口（只得出类别，不保存标题） + 是否在打字 ----
+// ---- 看前台窗口 ----
+// 「看我在做什么」：只得出类别，不保存标题。「站在窗口顶上」：只要窗口的位置。两个都关就完全不看。
 let stopWatcher = null;
+let watcherMode = null;
 let activity = { kind: null, typing: false };
+let ledge = null;
 
-function updateActivityWatcher() {
-  if (settings.features.activity && !stopWatcher) {
-    stopWatcher = watchForeground(kind => { activity.kind = kind; send('activity', activity); });
-  } else if (!settings.features.activity && stopWatcher) {
-    stopWatcher();
-    stopWatcher = null;
-    activity = { kind: null, typing: false };
-    send('activity', activity);
-  }
+function sendLedge(next) {
+  if (JSON.stringify(next) === JSON.stringify(ledge)) return;
+  ledge = next;
+  send('perch', ledge);
+}
+
+function onForeground(info) {
+  if (watcherMode === 'full' && info.kind !== activity.kind) { activity.kind = info.kind; send('activity', activity); }
+  if (!settings.features.perch || !info.rect || !win) return sendLedge(null);
+  const dip = process.platform === 'win32' ? screen.screenToDipRect(null, info.rect) : info.rect;
+  const b = win.getBounds();
+  sendLedge({ id: info.handle, x: Math.round(dip.x - b.x), y: Math.round(dip.y - b.y), w: Math.round(dip.width) });
+}
+
+function updateWatcher() {
+  const mode = settings.features.activity ? 'full' : settings.features.perch ? 'rect' : null;
+  if (mode === watcherMode) return;
+  if (stopWatcher) stopWatcher();
+  stopWatcher = mode ? watchForeground(onForeground, { full: mode === 'full' }) : null;
+  watcherMode = mode;
+  if (mode !== 'full' && activity.kind) { activity.kind = null; send('activity', activity); }
+  if (!settings.features.perch) sendLedge(null);
 }
 
 // 打字：刚有输入，但鼠标没动 → 大概是在敲键盘。不读取任何按键。
@@ -202,8 +230,8 @@ function createWindow() {
 
 ipcMain.handle('load', () => loadAssets());
 ipcMain.on('set-ignore', (_event, ignore) => win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }));
-ipcMain.on('menu', () => {
-  const menu = Menu.buildFromTemplate([
+function buildMenu() {
+  return Menu.buildFromTemplate([
     ...SHOW_CHOICES.map(choice => ({
       label: choice.label,
       type: 'radio',
@@ -218,10 +246,56 @@ ipcMain.on('menu', () => {
       click: item => setFeature(feature.key, item.checked),
     })),
     { type: 'separator' },
+    {
+      label: '托盘图标',
+      submenu: TRAY_ICONS.map(icon => ({
+        label: icon.label,
+        type: 'radio',
+        checked: settings.trayIcon === icon.label,
+        click: () => setTrayIcon(icon.label),
+      })),
+    },
+    { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ]);
-  menu.popup({ window: win });
-});
+}
+
+ipcMain.on('menu', () => buildMenu().popup({ window: win }));
+
+// ---- 托盘 ----
+let tray = null;
+
+function trayImage(label) {
+  const icon = TRAY_ICONS.find(i => i.label === label) || TRAY_ICONS[0];
+  const ext = process.platform === 'win32' ? '.ico' : '-32.png';
+  for (const name of icon.files) {
+    const file = path.join(ASSETS, '托盘图标', name + ext);
+    if (fs.existsSync(file)) return nativeImage.createFromPath(file);
+  }
+  return nativeImage.createEmpty();
+}
+
+function createTray() {
+  try {
+    tray = new Tray(trayImage(settings.trayIcon));
+    tray.setToolTip('千千梨梨桌宠');
+    tray.on('click', () => tray.popUpContextMenu());
+    refreshTray();
+  } catch (error) {
+    console.error('托盘图标创建失败', error);
+  }
+}
+
+function refreshTray() {
+  if (tray) tray.setContextMenu(buildMenu());
+}
+
+function setTrayIcon(label) {
+  settings.trayIcon = label;
+  saveSettings();
+  if (tray) tray.setImage(trayImage(label));
+  refreshTray();
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -229,7 +303,8 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     loadSettings();
     createWindow();
-    updateActivityWatcher();
+    updateWatcher();
+    createTray();
     screen.on('display-metrics-changed', fitToScreen);
     screen.on('display-added', fitToScreen);
     screen.on('display-removed', fitToScreen);

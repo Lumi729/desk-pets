@@ -15,3 +15,16 @@ test('everything else is nothing special', () => {
   assert.strictEqual(classify('', ''), null);
   assert.strictEqual(classify(undefined, undefined), null);
 });
+
+const { parseLine } = require('../lib/activity');
+
+test('parses window position and only classifies in full mode', () => {
+  const line = '﻿{"h":1234,"r":"100,200,900,700","p":"Code","t":"a.js - Visual Studio Code"}';
+  assert.deepStrictEqual(parseLine(line, true), { handle: 1234, rect: { x: 100, y: 200, width: 800, height: 500 }, kind: 'code' });
+  assert.deepStrictEqual(parseLine(line, false), { handle: 1234, rect: { x: 100, y: 200, width: 800, height: 500 }, kind: null });
+});
+
+test('minimised or hidden windows have no position', () => {
+  assert.strictEqual(parseLine('{"h":5,"r":""}', false).rect, null);
+  assert.strictEqual(parseLine('{"h":5,"r":"10,10,10,50"}', false).rect, null);
+});

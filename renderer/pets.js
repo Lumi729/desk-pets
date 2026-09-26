@@ -9,6 +9,7 @@
   const HUG_COOLDOWN = 30_000;     // 贴贴完多久内不再贴贴（毫秒）
   const MIN_PLAY = 2_000;          // 很短的动作至少播这么久（会重复几遍）
   const GRAVITY = 2_600;           // 重力：拖得越高，落地时越快
+  const FOOT = 10 * SCALE;          // GIF 底下透明的那一点，站窗口顶时让脚踩在边上
   const SPLAT_HEIGHT = 40;         // 从多高掉下来才会摔趴趴（像素）
   const TYPING_AFTER = 3_000;      // 连续打字多久开始陪你敲代码（毫秒）
   const SWEAT_EVERY = 30_000;      // CPU 一直很忙时多久冒一次冷汗
@@ -19,8 +20,6 @@
   const SHAKE_TURNS = 4;           // 1 秒内来回这么多次算「晃」
   // 这些是特定时候才播的，点宠物时不会随机抽到
   const CORE = ['待机', '向左走', '向右走', '睡觉', '向左看', '向右看', '掉落', '摔趴趴', '冒冷汗'];
-  // 还没有的动画先用这些代替
-  const FALLBACK = { '冒冷汗': '吓一跳' };
   const ACTIVITY_ANIM = { code: '敲代码', video: '看视频', music: '跳舞' };
 
   const api = window.petApi;
@@ -32,7 +31,8 @@
   let pets = [];
   let hug = null;
   let show = 'both';
-  let features = { time: true, sit: true, mouse: true, activity: true, typing: true, system: true };
+  let features = { time: true, sit: true, mouse: true, activity: true, typing: true, system: true, perch: true };
+  let ledge = null;                // 当前窗口顶边 { id, x, y, w }（页面坐标），没有就是 null
   let activity = { kind: null, typing: false };
   let typingSince = 0;
   let cpuHot = false;
@@ -100,8 +100,7 @@
   }
 
   function resolveAnim(pet, name) {
-    if (pet.clips[name]) return name;
-    return pet.clips[FALLBACK[name]] ? FALLBACK[name] : '待机';
+    return pet.clips[name] ? name : '待机';
   }
 
   function setAnim(pet, name, restart = false) {
@@ -121,8 +120,8 @@
   }
 
   function walkTo(pet, x) {
-    const half = pet.w / 2;
-    pet.target = Math.min(Math.max(x, half), W() - half);
+    const [min, max] = walkRange(pet);
+    pet.target = Math.min(Math.max(x, min), max);
     pet.state = 'walk';
     setAnim(pet, pet.target < pet.x ? '向左走' : '向右走');
   }
@@ -207,6 +206,7 @@
     if (!drag.moved) {
       drag.moved = true;
       pet.state = 'drag';
+      pet.onLedge = false;
       pet.shake = null;
       pet.el.classList.add('dragging');
       setAnim(pet, pet.clips['吓一跳'] ? '吓一跳' : '待机');
@@ -329,11 +329,13 @@
     return true;
   }
 
-  // ---- 掉落：从半空（以后也包括窗口顶上）掉到屏幕底部 ----
-  function dropFrom(pet) {
+  // ---- 掉落：从半空或窗口顶上掉到屏幕底部 ----
+  function dropFrom(pet, landAnim = '摔趴趴') {
     pet.state = 'fall';
+    pet.onLedge = false;
     pet.vy = 0;
     pet.fallFrom = pet.y;
+    pet.landAnim = landAnim;
     setAnim(pet, '掉落');
   }
 
@@ -341,8 +343,48 @@
     pet.y = 0;
     pet.vy = 0;
     pet.lastAttention = now;
-    if (pet.fallFrom >= SPLAT_HEIGHT) playNamed(pet, '摔趴趴', now, 0); // 播一遍，播完回待机
+    if (pet.fallFrom >= SPLAT_HEIGHT) playNamed(pet, pet.landAnim, now, 0); // 播一遍，播完回待机
     else goIdle(pet, now);
+  }
+
+  // ---- 站在窗口顶上 ----
+  const ledgeHeight = () => H() - ledge.y - FOOT;
+
+  function ledgeRange(pet) {
+    const min = ledge.x + pet.w * 0.3, max = ledge.x + ledge.w - pet.w * 0.3;
+    return min <= max ? [min, max] : [ledge.x + ledge.w / 2, ledge.x + ledge.w / 2];
+  }
+
+  function walkRange(pet) {
+    const screen = [pet.w / 2, W() - pet.w / 2];
+    if (!pet.onLedge || !ledge) return screen;
+    const [min, max] = ledgeRange(pet);
+    return [Math.max(min, screen[0]), Math.min(max, screen[1])];
+  }
+
+  // 窗口顶边要在屏幕里、上面放得下宠物、离地面也够高
+  function ledgeUsable(pet) {
+    return features.perch && ledge && ledge.y - pet.h >= 0 && ledgeHeight() >= 80 && ledge.x + ledge.w > 0 && ledge.x < W();
+  }
+
+  function jumpUp(pet) {
+    const [min, max] = walkRange({ ...pet, onLedge: true });
+    const tx = Math.min(Math.max(pet.x, min), max) + rand(-40, 40);
+    const rise = ledgeHeight() - pet.y;
+    const vy = Math.sqrt(2 * GRAVITY * (rise + 40));
+    const time = vy / GRAVITY + Math.sqrt(2 * 40 / GRAVITY);
+    pet.state = 'jump';
+    pet.vy = vy;
+    pet.vx = (Math.min(Math.max(tx, min), max) - pet.x) / time;
+    setAnim(pet, '开心蹦蹦');
+  }
+
+  function onPerch(next) {
+    const old = ledge;
+    ledge = next;
+    const moved = !next || !old || next.id !== old.id || Math.abs(next.x - old.x) > 2 || Math.abs(next.y - old.y) > 2 || Math.abs(next.w - old.w) > 2;
+    if (!moved) return;
+    for (const pet of pets) if (pet.onLedge) dropFrom(pet, '吓一跳');
   }
 
   // ---- 打字反应：只知道「在不在打字」，不知道按了什么 ----
@@ -418,8 +460,12 @@
         if (maybeDoActivity(pet, now)) break;
         if (now - pet.lastAttention > SLEEP_AFTER) { pet.state = 'sleep'; setAnim(pet, '睡觉'); break; }
         if (now >= pet.nextThink) {
-          if (Math.random() < 0.6) {
-            let x = rand(pet.w / 2, W() - pet.w / 2);
+          const nearLedge = !pet.onLedge && pet.y === 0 && ledgeUsable(pet) && pet.x > ledge.x - 150 && pet.x < ledge.x + ledge.w + 150;
+          if (nearLedge && Math.random() < 0.5) jumpUp(pet);
+          else if (!pet.onLedge && ledgeUsable(pet) && Math.random() < 0.3) walkTo(pet, rand(...ledgeRange(pet)));
+          else if (Math.random() < 0.6) {
+            const [min, max] = walkRange(pet);
+            let x = rand(min, max);
             if (Math.abs(x - pet.x) < 80) x = pet.x + (x < pet.x ? -120 : 120);
             walkTo(pet, x);
           } else pet.nextThink = now + rand(2000, 6000);
@@ -444,6 +490,25 @@
         pet.y -= pet.vy * dt;
         if (pet.y <= 0) land(pet, now);
         break;
+      case 'jump': {
+        const before = pet.y;
+        pet.vy -= GRAVITY * dt;
+        pet.y += pet.vy * dt;
+        pet.x += pet.vx * dt;
+        if (pet.vy <= 0 && ledgeUsable(pet)) {
+          const top = ledgeHeight();
+          const [min, max] = ledgeRange(pet);
+          if (before >= top && pet.y <= top && pet.x >= min - 20 && pet.x <= max + 20) {
+            pet.y = top;
+            pet.onLedge = true;
+            pet.lastAttention = now;
+            goIdle(pet, now);
+            break;
+          }
+        }
+        if (pet.y <= 0) { pet.y = 0; pet.vy = 0; goIdle(pet, now); }
+        break;
+      }
     }
   }
 
@@ -459,7 +524,7 @@
     if (now >= nextClockCheck) { nextClockCheck = now + 30_000; checkClock(now); checkBattery(now); }
     for (const pet of pets) {
       if (pet.visible) {
-        if (pet.state !== 'drag' && pet.state !== 'fall') pet.x = Math.min(Math.max(pet.x, pet.w / 2), W() - pet.w / 2);
+        if (pet.state !== 'drag' && pet.state !== 'fall' && pet.state !== 'jump') pet.x = Math.min(Math.max(pet.x, pet.w / 2), W() - pet.w / 2);
         think(pet, now, dt);
         place(pet);
       }
@@ -483,7 +548,7 @@
     if (hug.pair) endHug(now);
     for (const pet of pets) {
       const visible = show === 'both' || show === pet.id;
-      if (visible && !pet.visible) { pet.y = 0; pet.lastAttention = now; pet.anim = ''; goIdle(pet, now); }
+      if (visible && !pet.visible) { pet.y = 0; pet.onLedge = false; pet.lastAttention = now; pet.anim = ''; goIdle(pet, now); }
       pet.visible = visible;
       pet.el.hidden = !visible;
       if (!visible) pet.drag = null;
@@ -495,6 +560,7 @@
     const now = performance.now();
     if (!features.mouse) for (const pet of pets) { pet.shake = null; if (pet.state === 'look') goIdle(pet, now); }
     if (!features.system) cpuHot = false;
+    if (!features.perch) onPerch(null);
   }
 
   async function start() {
@@ -513,6 +579,7 @@
     api.onActivity(onActivity);
     api.onSitReminder(() => { if (features.sit) remind('开心蹦蹦', '起来活动一下吧', 4000); });
     api.onCpuHot(onCpuHot);
+    api.onPerch(onPerch);
     api.onCursor(onCursor);
     window.addEventListener('mousemove', event => onCursor({ x: event.clientX, y: event.clientY }));
     requestAnimationFrame(frame);
