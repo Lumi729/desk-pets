@@ -16,13 +16,15 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - name: 看看这个版本发布过没有
         id: version
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version=$(node -p "require('./package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -30,13 +32,17 @@ jobs:
             echo "::error::标签 $GITHUB_REF_NAME 和 package.json 里的版本 $version 对不上"
             exit 1
           fi
-          # 已经完整发布过（有 latest.yml）就跳过；上次没发完的半成品删掉重来（标签保留）
-          assets=$(gh release view "v$version" --repo "$GITHUB_REPOSITORY" --json assets,isDraft --jq '(.isDraft|tostring) + " " + ([.assets[].name] | join(","))' 2>/dev/null || echo "none")
-          if [[ "$assets" == false*latest.yml* ]]; then
+          # 以前打包时留下的草稿都删掉（只删草稿，不动已经公开的）
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate -q '.[] | select(.draft) | .id'); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+          # 已经完整发布过（有安装包和 latest.yml）就跳过；没发完整的删掉重来（标签保留）
+          assets=$(gh release view "v$version" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | join(",")' 2>/dev/null || echo "none")
+          if [[ "$assets" == *latest.yml* && "$assets" == *"setup-$version.exe"* ]]; then
             echo "v$version 已经发布过了，跳过"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           elif [[ "$assets" != "none" ]]; then
-            echo "v$version 上次没发完，删掉重新发"
+            echo "v$version 上次没发完整，删掉重新发"
             gh release delete "v$version" --repo "$GITHUB_REPOSITORY" --yes
           fi
       - uses: actions/setup-node@v4
@@ -48,23 +54,27 @@ jobs:
         if: steps.version.outputs.skip != 'true'
       - run: npm test
         if: steps.version.outputs.skip != 'true'
-      - name: 打上 v<版本号> 标签
-        if: steps.version.outputs.skip != 'true' && github.ref_type != 'tag'
-        shell: bash
+      - name: 打上标签，先建好一个草稿
+        if: steps.version.outputs.skip != 'true'
         run: |
           tag="v${{ steps.version.outputs.version }}"
           if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
             git tag "$tag"
             git push origin "$tag"
           fi
-      - name: 打包并发布到 Releases
+          # 先建好草稿，打包工具就只会往这一个里上传，不会同时建出两个
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "千千梨梨桌宠 $tag" --notes "千千梨梨桌宠 $tag"
+      - name: 打包并上传
         if: steps.version.outputs.skip != 'true'
         run: npx electron-builder --win nsis --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: 全部上传好了，正式公开
+      - name: 检查文件都在，再正式公开
         if: steps.version.outputs.skip != 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "v${{ steps.version.outputs.version }}" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          assets=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | join(",")')
+          echo "上传了：$assets"
+          if [[ "$assets" != *latest.yml* || "$assets" != *"setup-${{ steps.version.outputs.version }}.exe"* ]]; then
+            echo "::error::安装包或 latest.yml 没传上去，先不公开"
+            exit 1
+          fi
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
