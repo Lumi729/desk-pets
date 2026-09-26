@@ -10,6 +10,7 @@
   const MIN_PLAY = 2_000;          // 很短的动作至少播这么久（会重复几遍）
   const GRAVITY = 2_600;           // 重力：拖得越高，落地时越快
   const FOOT = () => 10 * SCALE * size; // GIF 底下透明的那一点，站窗口顶时让脚踩在边上
+  const JUMP_REACH = 350;          // 离窗口多远以内可以直接跳上去（像素）
   const SPLAT_HEIGHT = 40;         // 从多高掉下来才会摔趴趴（像素）
   const TYPING_AFTER = 3_000;      // 连续打字多久开始陪你敲代码（毫秒）
   const SWEAT_EVERY = 30_000;      // CPU 一直很忙时多久冒一次冷汗
@@ -127,11 +128,13 @@
 
   function goIdle(pet, now) {
     pet.state = 'idle';
-    pet.nextThink = now + rand(2000, 6000);
+    // 地上有能站的窗口时想得快一点，马上过去
+    pet.nextThink = now + (wantsLedge(pet) ? rand(300, 900) : rand(2000, 6000));
     setAnim(pet, '待机');
   }
 
-  function walkTo(pet, x) {
+  function walkTo(pet, x, hurry = false) {
+    pet.hurry = hurry;
     const [min, max] = walkRange(pet);
     pet.target = Math.min(Math.max(x, min), max);
     pet.state = 'walk';
@@ -375,6 +378,8 @@
     return [Math.max(min, screen[0]), Math.min(max, screen[1])];
   }
 
+  const wantsLedge = pet => !pet.onLedge && pet.y === 0 && ledge && ledgeUsable(pet);
+
   // 窗口顶边要在屏幕里、上面放得下宠物、离地面也够高
   function ledgeUsable(pet) {
     return features.perch && ledge && ledge.y - pet.h >= 0 && ledgeHeight() >= 80 && ledge.x + ledge.w > 0 && ledge.x < W();
@@ -400,7 +405,8 @@
     const now = performance.now();
     for (const pet of pets) {
       if (pet.onLedge) dropFrom(pet);
-      else if (next && pet.state === 'idle') pet.nextThink = Math.min(pet.nextThink, now + rand(500, 2000)); // 有新窗口了，快点过去看看
+      else if (next && pet.state === 'walk' && !pet.onLedge) goIdle(pet, now); // 有新窗口了，别乱走了，快点过去
+      else if (next && pet.state === 'idle') pet.nextThink = Math.min(pet.nextThink, now + rand(300, 900));
     }
   }
 
@@ -505,9 +511,13 @@
         if (maybeDoActivity(pet, now)) break;
         if (now - pet.lastAttention > SLEEP_AFTER) { pet.state = 'sleep'; setAnim(pet, '睡觉'); break; }
         if (now >= pet.nextThink) {
-          const nearLedge = !pet.onLedge && pet.y === 0 && ledgeUsable(pet) && pet.x > ledge.x - 150 && pet.x < ledge.x + ledge.w + 150;
-          if (nearLedge && Math.random() < 0.8) jumpUp(pet);
-          else if (!pet.onLedge && ledgeUsable(pet) && Math.random() < 0.6) walkTo(pet, rand(...ledgeRange(pet)));
+          if (wantsLedge(pet) && Math.random() < 0.9) {
+            // 离窗口不远就直接跳；远的话走到离自己最近的那头再跳
+            const [min, max] = ledgeRange(pet);
+            const nearest = Math.min(Math.max(pet.x, min), max);
+            if (Math.abs(nearest - pet.x) <= JUMP_REACH) jumpUp(pet);
+            else walkTo(pet, nearest + Math.sign(pet.x - nearest) * (JUMP_REACH - 50), true); // 小跑过去
+          }
           else if (Math.random() < 0.6) {
             const [min, max] = walkRange(pet);
             let x = rand(min, max);
@@ -518,7 +528,7 @@
         break;
       case 'walk': {
         if (isTypingLong(now)) { pet.state = 'typing'; setAnim(pet, '敲代码'); break; }
-        const step = WALK_SPEED * dt;
+        const step = WALK_SPEED * (pet.hurry ? 2 : 1) * dt;
         if (Math.abs(pet.target - pet.x) <= step) { pet.x = pet.target; goIdle(pet, now); }
         else pet.x += Math.sign(pet.target - pet.x) * step;
         break;
