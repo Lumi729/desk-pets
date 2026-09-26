@@ -70,6 +70,13 @@
   const AWAY_MAX = 10 * 60_000;                    // 自己的宠物最多在外面待多久（万一对方那边出了问题也会回家）
   let nextTease = performance.now() + 120_000;
   const TEASE_NEAR = 600;          // 离得多近才会挑衅（像素）
+  const G = '灰鸮g老师';
+  const GLASSES = ['互动_扶眼镜1', '互动_扶眼镜2', '互动_扶眼镜3', '互动_擦眼镜']; // 5 秒内连续点，一下比一下多
+  const CURIOUS_AFTER = 3000;      // 鼠标在g老师旁边停多久，它会歪头看
+  const READ_TIME = [20_000, 40_000]; // g老师平时偶尔看书看多久
+  const READ_HUG_TIME = 6000;      // 别的宠物挤进来一起看书看多久
+  let focusHalfAt = Infinity;      // 专注到一半的时候（g老师打个瞌睡）
+  let cursorStill = { x: -1, y: -1, since: 0 };
   let features = { time: true, sit: true, mouse: true, activity: true, typing: true, system: true, perch: true };
   let size = 1;                   // 右键菜单里的「大小」
   let peerOnline = false;          // 联网的对方在不在线（在线就头顶冒小爱心）
@@ -174,7 +181,7 @@
   function goIdle(pet, now) {
     pet.looking = false;
     // 专注的时候，做完别的事就回到专注，不乱跑
-    if (focusing && pet.visible) { pet.state = 'focus'; setAnim(pet, '专注'); return; }
+    if (focusing && pet.visible) { pet.state = 'focus'; setAnim(pet, pet.name === G && pet.clips['互动_看书'] ? '互动_看书' : '专注'); return; } // g老师专注时看书
     pet.state = 'idle';
     // 地上有能站的窗口时想得快一点，马上过去
     pet.nextThink = now + (wantsLedge(pet) ? rand(300, 900) : rand(2000, 6000));
@@ -189,8 +196,10 @@
     setAnim(pet, pet.target < pet.x ? '向左走' : '向右走');
   }
 
-  function playNamed(pet, name, now, minPlay = MIN_PLAY) {
+  // then：这个动作播完以后接着做什么（不写就回待机）
+  function playNamed(pet, name, now, minPlay = MIN_PLAY, then = null) {
     const clip = setAnim(pet, name, true);
+    pet.then = then;
     pet.state = 'action';
     pet.until = now + clip.duration * Math.max(1, Math.ceil(minPlay / clip.duration));
   }
@@ -271,6 +280,7 @@
     if (!drag.moved) {
       drag.moved = true;
       pet.state = 'drag';
+      pet.then = null;
       pet.onLedge = false;
       pet.shake = null;
       pet.el.classList.add('dragging');
@@ -295,7 +305,7 @@
       if (pet.y < floorOf(pet)) pet.y = floorOf(pet);
       if (pet.y > floorOf(pet)) dropFrom(pet); else goIdle(pet, now);
     } else if (event.type === 'pointerup') {
-      playRandomAction(pet, now);
+      if (pet.name === G && !pet.visitor && pet.clips[GLASSES[0]]) clickGlasses(pet, now); else playRandomAction(pet, now);
       api.touched();
     }
   }
@@ -390,13 +400,16 @@
   function onCursor(point) {
     cursor = point;
     const now = performance.now();
+    const movedFar = Math.hypot(point.x - cursorStill.x, point.y - cursorStill.y) > 6;
     for (const pet of pets) {
       if (!pet.visible) continue;
       const distance = Math.hypot(point.x - pet.x, point.y - (H() - pet.y - pet.h / 2));
       if (distance < WAKE_DISTANCE) wake(pet, now);
+      watchCursor(pet, point, distance, now);
       lookAtMouse(pet, point, distance);
       if (features.mouse) trackShake(pet, point, now);
     }
+    if (movedFar) cursorStill = { x: point.x, y: point.y, since: now };
     updateMouseCatch();
   }
 
@@ -433,8 +446,17 @@
     pet.y = floorOf(pet);
     pet.vy = 0;
     pet.lastAttention = now;
-    if (pet.fallFrom >= SPLAT_HEIGHT) playNamed(pet, pet.landAnim, now, 0); // 播一遍，播完回待机
+    if (pet.fallFrom >= SPLAT_HEIGHT) playNamed(pet, pet.landAnim, now, 0, afterSplat(pet)); // 播一遍，播完回待机
     else goIdle(pet, now);
+  }
+
+  // g老师摔趴趴以后：假装没摔过，然后朝随便哪边走开
+  function afterSplat(pet) {
+    if (pet.name !== G || !pet.clips['互动_假装没摔过']) return null;
+    return t => playNamed(pet, '互动_假装没摔过', t, 0, t2 => {
+      goIdle(pet, t2);
+      if (!focusing) walkTo(pet, pet.x + (Math.random() < 0.5 ? -1 : 1) * rand(200, 350));
+    });
   }
 
   // ---- 站在窗口顶上 ----
@@ -746,7 +768,7 @@
   const comboReady = (key, kind) => !!comboClips[key]?.[kind] && (comboCooldown.get(`${kind}:${key}`) || 0) <= performance.now();
 
   function canHug(pet) {
-    return pet.visible && !pet.visitor && !pet.combo && !pet.inScene && (pet.restUntil || 0) <= performance.now() && (pet.state === 'idle' || pet.state === 'walk') && (onFloor(pet) || pet.onLedge);
+    return pet.visible && !pet.visitor && !pet.combo && !pet.inScene && !Combos.SOLO.includes(pet.name) && (pet.restUntil || 0) <= performance.now() && (pet.state === 'idle' || pet.state === 'walk') && (onFloor(pet) || pet.onLedge);
   }
 
   function makeCombo(kind, members, key, x, y, now, playFor) {
@@ -944,6 +966,69 @@
     if (happy) playNamed(chaser, '开心蹦蹦', now, 2000); else goIdle(chaser, now);
   }
 
+  // ---- 灰鸮g老师 ----
+  // 点一下扶眼镜；5 秒内接着点，第 2、3 下扶得更用力，第 4 下擦眼镜，然后重新数
+  function clickGlasses(pet, now) {
+    pet.glasses = now - (pet.glassesAt || -Infinity) < 5000 ? (pet.glasses || 0) + 1 : 1;
+    pet.glassesAt = now;
+    playNamed(pet, GLASSES[pet.glasses - 1], now, 0);
+    if (pet.glasses >= GLASSES.length) pet.glasses = 0;
+  }
+
+  // 鼠标在g老师旁边停 3 秒 → 歪头看鼠标；鼠标一动 → 往后蹦（朝远离鼠标的方向）
+  function watchCursor(pet, point, distance, now) {
+    if (pet.name !== G || pet.visitor || !features.mouse) return;
+    const moved = Math.hypot(point.x - cursorStill.x, point.y - cursorStill.y) > 6;
+    if (pet.state === 'curious') {
+      if (moved || distance > LOOK_DISTANCE + 30) {
+        const away = point.x < pet.x ? '向右' : '向左';
+        playNamed(pet, `互动_往后蹦_${away}`, now, 0);
+      }
+      return;
+    }
+    if (pet.state === 'idle' && !pet.inScene && distance < LOOK_DISTANCE && !moved && now - cursorStill.since >= CURIOUS_AFTER) {
+      pet.state = 'curious';
+      pet.looking = false;
+      setAnim(pet, `互动_歪头看_${point.x < pet.x ? '向左' : '向右'}`);
+    }
+  }
+
+  // g老师平时偶尔看书；专注时也看书
+  const isReading = pet => pet.name === G && (pet.state === 'reading' || (pet.state === 'focus' && pet.anim === '互动_看书'));
+
+  function startReading(pet, now) {
+    if (!pet.clips['互动_看书']) return false;
+    pet.state = 'reading';
+    pet.until = now + rand(...READ_TIME);
+    setAnim(pet, '互动_看书');
+    return true;
+  }
+
+  // 看书时别的宠物走过来 → g老师抬起翅膀，让它挤进来一起看书（只一只）
+  function checkReadingHug(now) {
+    const g = byName(G);
+    if (!g || !g.visible || g.combo || !isReading(g) || (g.restUntil || 0) > now) return;
+    const friend = pets.find(p => p !== g && !p.visitor && p.visible && !p.combo && !p.inScene && ['idle', 'walk', 'focus'].includes(p.state)
+      && onFloor(p) && onFloor(g) && p.si === g.si && Math.abs(p.x - g.x) < HUG_DISTANCE * size);
+    if (!friend) return;
+    const pair = [friend, g].sort((a, b) => a.x - b.x);
+    const key = Combos.comboKey(pair.map(p => p.name));
+    if (!comboReady(key, 'row')) return;
+    const mid = (friend.x + g.x) / 2;
+    const combo = makeCombo('row', pair, key, mid, g.y, now, READ_HUG_TIME);
+    const s = screenOf(g);
+    combo.x = Math.min(Math.max(mid, s.x + combo.w / 2), s.x + s.w - combo.w / 2);
+    place(combo);
+  }
+
+  // 专注到一半：g老师打个瞌睡，醒了接着看书
+  function checkFocusDoze(now) {
+    if (!focusing || now < focusHalfAt) return;
+    focusHalfAt = Infinity;
+    const g = byName(G);
+    if (g && g.visible && g.state === 'focus' && g.clips['互动_看书打瞌睡']) playNamed(g, '互动_看书打瞌睡', now, 3000);
+  }
+
   // ---- 挑衅：千千猫猫挑衅哥哥狗狗，梨梨兔兔挑衅梨梨哥哥 ----
   // 剧情一步一步演：每一步开始时做点什么，返回「这一步演完了没有」的判断
   function play(pet, anim, now, minPlay = 1500) {
@@ -1100,9 +1185,12 @@
 
   // ---- 番茄钟 ----
   const BUSY = ['drag', 'fall', 'jump', 'hug'];
-  function onFocus(on) {
+  function onFocus(info) {
+    const on = typeof info === 'object' ? !!info?.on : !!info;
     focusing = on;
     const now = performance.now();
+    // 专注到一半的时候（主程序给的是电脑时间，换成页面里的时间）
+    focusHalfAt = on && info?.endsAt ? now + ((info.startedAt + info.endsAt) / 2 - Date.now()) : Infinity;
     if (on) hideActionButton('continue');
     for (const pet of pets) {
       if (!pet.visible || BUSY.includes(pet.state)) continue;
@@ -1201,6 +1289,12 @@
     } else if (type === 'snack') {
       for (const pet of pets) freeForTest(pet, now);
       if (!trySnack(now)) hint('要同时显示千千猫猫和梨梨兔兔，而且在同一块屏幕的地上哦');
+    } else if (type === 'g-read' || type === 'g-doze' || type === 'g-fall') {
+      const g = byName(G);
+      if (!g || !freeForTest(g, now)) return hint(`要先在「选择宠物」里勾上${G}哦`);
+      if (type === 'g-read') { startReading(g, now); g.until = now + 60_000; say(g, '拖一只宠物到我旁边，一起看书吧', 5000); }
+      if (type === 'g-doze') playNamed(g, '互动_看书打瞌睡', now, 3000);
+      if (type === 'g-fall') { g.y = floorOf(g) + 300; dropFrom(g); }
     } else if (type === 'fake-guest') {
       // 假装对方的宠物来串门（不用联网），看看客人进门、打招呼、玩一会儿再走的样子
       const name = pick(Object.keys(petData));
@@ -1295,6 +1389,7 @@
       case 'idle':
         if (pet.inScene) break; // 在演挑衅剧情，等下一步
         if (maybeCelebrate(pet, now)) break;
+        if (pet.name === G && !pet.visitor && now >= pet.nextThink && Math.random() < 0.15 && startReading(pet, now)) break;
         if (maybeSweat(pet, now)) break;
         if (maybeDoActivity(pet, now)) break;
         if (now - pet.lastAttention > SLEEP_AFTER) { pet.state = 'sleep'; setAnim(pet, '睡觉'); break; }
@@ -1321,7 +1416,18 @@
         break;
       }
       case 'action':
-        if (now >= pet.until) goIdle(pet, now);
+        if (now >= pet.until) {
+          const then = pet.then;
+          pet.then = null;
+          if (then) then(now); else goIdle(pet, now);
+        }
+        break;
+      case 'curious':
+        pet.lastAttention = now; // 歪着头一直看，等鼠标动
+        break;
+      case 'reading':
+        if (now >= pet.until) goIdle(pet, now); // 看完书了
+        else pet.lastAttention = now;
         break;
       case 'typing':
         if (!isTypingLong(now)) goIdle(pet, now);
@@ -1382,6 +1488,8 @@
     }
     runScenes(now);
     checkVisits(now);
+    checkReadingHug(now);
+    checkFocusDoze(now);
     if (now >= nextTease) { nextTease = now + rand(120_000, 300_000); if (features.tease && !focusing) tryTease(now); }
     // 时不时：绿眼猫猫追着玩、千千猫猫和梨梨兔兔送零食（专注时不打扰）
     if (now >= nextChase) { nextChase = now + rand(60_000, 150_000); if (features.chase && !focusing) tryChase(now); }
@@ -1437,7 +1545,7 @@
     size = data.size || 1;
     peerOnline = !!data.peerOnline;
     for (const pet of pets) { pet.el.hidden = true; setAnim(pet, '待机'); }
-    if (data.focus) focusing = true;
+    if (data.focusInfo?.on) onFocus(data.focusInfo);
     applyFeatures(data.features || {});
     if (data.activity) activity = data.activity;
     applyShow(data.show);

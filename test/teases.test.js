@@ -43,5 +43,6 @@ test('more than 3 teases in 10 minutes → surrender', () => {
 test('tease animations are not click actions', () => {
   assert.ok(isTeaseAnim('挑衅_做鬼脸'));
   assert.ok(isTeaseAnim('回应_投降'));
+  assert.ok(isTeaseAnim('互动_扶眼镜1'));
   assert.ok(!isTeaseAnim('打招呼'));
 });

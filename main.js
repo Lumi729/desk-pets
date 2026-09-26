@@ -16,7 +16,7 @@ const { checkRelay } = require('./lib/relay-check');
 
 const ASSETS = path.join(__dirname, '桌宠素材');
 // 五只宠物（名字就是「桌宠素材」里的文件夹名）
-const PETS = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '绿眼猫猫'];
+const PETS = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '绿眼猫猫', '灰鸮g老师'];
 const FEATURES = [
   { key: 'time', label: '时间提醒（该睡觉 / 该吃饭）' },
   { key: 'sit', label: '久坐提醒（60 分钟）' },
@@ -118,7 +118,7 @@ function loadAssets() {
     combos[key] = combos[key] || {};
     combos[key][kind] = readGif(path.join(comboDir, file));
   }
-  return { visitPets: settings.visitPets, today: computeToday(), weather: weather.kind, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
+  return { focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.kind, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -215,9 +215,10 @@ function sendToday(force = false) {
 
 // ---- 番茄钟 ----
 let pomodoro = { mode: null, endsAt: 0 }; // mode: focus 专注 / rest 休息
+const focusInfo = () => (pomodoro.mode === 'focus' ? { on: true, startedAt: pomodoro.startedAt, endsAt: pomodoro.endsAt } : { on: false });
 function startFocus() {
-  pomodoro = { mode: 'focus', endsAt: Date.now() + settings.pomodoro.focus * 60_000 };
-  send('focus', true);
+  pomodoro = { mode: 'focus', startedAt: Date.now(), endsAt: Date.now() + settings.pomodoro.focus * 60_000 };
+  send('focus', focusInfo());
   refreshTray();
 }
 function stopFocus() {
@@ -677,6 +678,9 @@ function buildMenu(petName = null) {
         { label: '送零食', click: () => sendTest('snack') },
         { label: '两个哥哥贴贴（接着打架）', click: () => sendTest('brothers') },
         { label: '两个哥哥和好', click: () => sendTest('makeup') },
+        { label: '灰鸮g老师：看书（拖别的宠物过去一起看）', click: () => sendTest('g-read') },
+        { label: '灰鸮g老师：看书打瞌睡', click: () => sendTest('g-doze') },
+        { label: '灰鸮g老师：摔一跤', click: () => sendTest('g-fall') },
         { label: '串门：马上派一只去对方家', click: () => sendTest('visit') },
         { label: '串门：假装有客人来玩（不用朋友）', click: () => sendTest('fake-guest') },
         { label: '检查服务器能不能串门（不用朋友）', click: runRelayCheck },

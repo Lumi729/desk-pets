@@ -1,7 +1,9 @@
 // 贴贴 / 叠叠乐的规则（页面和测试都会用到）
 (function (root) {
   // 文件名里宠物的顺序
-  const ORDER = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '绿眼猫猫'];
+  const ORDER = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '绿眼猫猫', '灰鸮g老师'];
+  // 只和一只宠物一起「看书贴贴」，不参加多人贴贴和叠叠乐
+  const SOLO = ['灰鸮g老师'];
   // 这三对不贴贴也不叠叠乐（不能直接挨着、也不能直接叠在对方头上）
   const FORBIDDEN = [['梨梨哥哥', '千千猫猫'], ['梨梨兔兔', '哥哥狗狗'], ['梨梨哥哥', '绿眼猫猫']];
 
@@ -45,6 +47,7 @@
   // 叠叠乐：新来的这只能不能叠到这一摞（从下到上）的最上面
   function canStack(stackNames, newName, canUse) {
     if (stackNames.includes(newName)) return null;
+    if ([...stackNames, newName].some(name => SOLO.includes(name))) return null;
     if (isForbidden(stackNames[stackNames.length - 1], newName)) return null;
     const key = comboKey([...stackNames, newName]);
     return canUse(key) ? key : null;
@@ -60,7 +63,7 @@
     return { key: base, kind: 'row' };
   }
 
-  const api = { ORDER, FORBIDDEN, isForbidden, comboKey, touchingRows, pickHug, canStack, parseComboFile };
+  const api = { ORDER, SOLO, FORBIDDEN, isForbidden, comboKey, touchingRows, pickHug, canStack, parseComboFile };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PetCombos = api;
 })(this);

@@ -68,8 +68,17 @@ test('every hug file has both versions and uses known pet names', () => {
   for (const name of files) {
     const { key: base, kind } = parseComboFile(name);
     if (kind === 'fight' || kind === 'makeup') continue;
+    if (base.includes('灰鸮g老师')) { assert.strictEqual(kind, 'row', name); continue; } // g老师只有一起看书的贴贴
     assert.ok(files.has(base) && files.has(`${base}_2`), base);
     assert.strictEqual(comboKey(base.split('-')), base);
     for (const pet of base.split('-')) assert.ok(ORDER.includes(pet), pet);
   }
+});
+
+test('g老师 reads with every other pet one-on-one, never stacks', () => {
+  for (const name of ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '绿眼猫猫']) {
+    assert.ok(files.has(comboKey([name, '灰鸮g老师'])), name);
+  }
+  assert.strictEqual(canStack(['千千猫猫'], '灰鸮g老师', () => true), null);
+  assert.strictEqual(canStack(['灰鸮g老师'], '千千猫猫', () => true), null);
 });

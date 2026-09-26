@@ -42,8 +42,8 @@
     return pair.replies[tease];
   }
 
-  // 平时点宠物随机播放的动作里不要这些
-  const isTeaseAnim = name => name.startsWith('挑衅_') || name.startsWith('回应_');
+  // 平时点宠物随机播放的动作里不要这些（挑衅、回应，还有灰鸮g老师的专属互动）
+  const isTeaseAnim = name => name.startsWith('挑衅_') || name.startsWith('回应_') || name.startsWith('互动_');
 
   const api = { PAIRS, WINDOW, LIMIT, replyFor, isTeaseAnim };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
