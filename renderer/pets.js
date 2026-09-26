@@ -285,7 +285,7 @@
   function updateMouseCatch(force = false) {
     const dragging = pets.some(pet => pet.drag);
     // 已经接住鼠标时，只要还在宠物的方框里就一直接着，不会因为动画换帧、透明的缝一下子漏掉点击
-    const over = cursor && (petUnder(cursor.x, cursor.y) || (!ignoringMouse && petBoxUnder(cursor.x, cursor.y)));
+    const over = cursor && (petUnder(cursor.x, cursor.y) || (!ignoringMouse && petBoxUnder(cursor.x, cursor.y)) || overUpdateButton(cursor.x, cursor.y));
     const ignore = !dragging && !over;
     const now = performance.now();
     // 状态变了就告诉主程序；没变也每 3 秒再说一次（拖动时不打扰），万一哪里没对上能自己恢复
@@ -499,6 +499,38 @@
     }
   }
 
+  // ---- 新版本下载好了：宠物头上一直挂着「点我重启更新」，点一下就重启 ----
+  let updateButton = null;
+  function showUpdateButton(version) {
+    if (!updateButton) {
+      updateButton = document.createElement('button');
+      updateButton.type = 'button';
+      updateButton.className = 'bubble show update-button';
+      updateButton.addEventListener('click', () => { updateButton.textContent = '正在重启…'; api.restartUpdate(); });
+      stage.append(updateButton);
+    }
+    updateButton.textContent = `有新版本 ${version} 啦，点我重启 ♡`;
+  }
+
+  function overUpdateButton(x, y) {
+    if (!updateButton || updateButton.hidden) return false;
+    const r = updateButton.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+
+  // 挂在第一只看得见的宠物（或贴贴）头上；那只宠物正冒别的气泡时就挂得更高一点
+  function placeUpdateButton() {
+    if (!updateButton) return;
+    const host = hug.visible ? hug : pets.find(pet => pet.visible && pet.state !== 'hug');
+    updateButton.hidden = !host;
+    if (!host) return;
+    const bw = updateButton.offsetWidth, bh = updateButton.offsetHeight;
+    const talking = host.bubble.classList.contains('show') ? host.bubble.offsetHeight + 8 : 0;
+    const x = Math.min(Math.max(host.x - bw / 2, 4), W() - bw - 4);
+    const y = Math.max(H() - (host.y || 0) - host.h * 0.8 - bh - 8 - talking, 4);
+    updateButton.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  }
+
   // ---- 大小 ----
   function applySize(next) {
     size = next;
@@ -665,6 +697,7 @@
       place(hug);
     }
     placeBubble(hug, now, hug.visible);
+    placeUpdateButton();
     placeHeart(hug, hug.visible);
     if (cursor) updateMouseCatch();
     requestAnimationFrame(frame);
@@ -713,6 +746,8 @@
     api.onCpuHot(onCpuHot);
     api.onPerch(onPerch);
     api.onScreens(onScreens);
+    if (data.updateReady) showUpdateButton(data.updateReady);
+    api.onUpdateReady(showUpdateButton);
     api.onSay(text => { for (const pet of pets) if (pet.visible) say(pet.state === 'hug' ? hug : pet, text, 10_000); });
     api.onSize(applySize);
     api.onPresence(online => { peerOnline = online; });

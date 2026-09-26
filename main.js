@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, screen } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, clipboard, ipcMain, nativeImage, powerMonitor, screen } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -91,7 +91,7 @@ function loadAssets() {
     }
     pets[pet.id] = { name: pet.name, anims };
   }
-  return { screens: screensForPage(), show: settings.show, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, pets, hug: readGif(path.join(ASSETS, '贴贴.gif')) };
+  return { screens: screensForPage(), show: settings.show, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, hug: readGif(path.join(ASSETS, '贴贴.gif')) };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -337,7 +337,8 @@ function setupAutoUpdate() {
   autoUpdater.on('update-downloaded', info => {
     updateReady = info.version;
     refreshTray();
-    send('say', '有新版本啦，重启就能用');
+    send('update-ready', updateReady);   // 宠物头上出现「点我重启更新」的按钮
+    notifyUpdateReady();
   });
   autoUpdater.on('error', () => { if (manualCheck) send('say', '检查更新失败了，等会儿再试试'); manualCheck = false; });
 }
@@ -349,6 +350,20 @@ function runUpdateCheck(manual = false) {
   manualCheck = manual;
   autoUpdater.checkForUpdates().catch(() => {});
 }
+
+// Windows 右下角弹一条通知，点一下就重启更新
+function notifyUpdateReady() {
+  if (!Notification.isSupported()) return;
+  const note = new Notification({
+    title: '千千梨梨桌宠有新版本啦',
+    body: `${updateReady} 已经下载好了，点这里重启就能用 ♡`,
+    icon: trayImage(settings.trayIcon),
+  });
+  note.on('click', restartToUpdate);
+  note.show();
+}
+
+ipcMain.on('restart-update', () => { if (updateReady) restartToUpdate(); });
 
 function restartToUpdate() {
   autoUpdater.quitAndInstall(true, true); // 安静地装好，然后自动重新打开
@@ -518,6 +533,7 @@ function setTrayIcon(label) {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  app.setAppUserModelId('com.lumi729.deskpets'); // Windows 通知要用
   app.whenReady().then(() => {
     loadSettings();
     createWindow();
