@@ -1,12 +1,15 @@
-// 桌宠的动作逻辑：待机、走路、拖动、点击动作、睡觉、贴贴、提醒气泡、鼠标互动、看你在做什么。
+// 桌宠的动作逻辑：待机、走路、拖动、点击动作、睡觉、贴贴、叠叠乐、提醒气泡、鼠标互动、看你在做什么。
 (() => {
   const SCALE = 0.7;               // 「100%」时宠物的大小（GIF 原图 × 这个倍数）
   const WALK_SPEED = 70;           // 走路速度（像素/秒）
   const SLEEP_AFTER = 60_000;      // 多久没人理就睡觉（毫秒）
   const WAKE_DISTANCE = 160;       // 鼠标离多近会醒（像素）
   const LOOK_DISTANCE = 220;       // 鼠标离多近会转头看（像素）
-  const HUG_DISTANCE = 120;        // 两只靠多近会贴贴（像素）
-  const HUG_COOLDOWN = 30_000;     // 贴贴完多久内不再贴贴（毫秒）
+  const HUG_DISTANCE = 120;        // 相邻两只靠多近算挨在一起（像素，跟着「大小」一起变）
+  const COMBO_COOLDOWN = 30_000;   // 同一组贴贴 / 叠叠乐完多久内不再来（毫秒）
+  const HUG_TIME = 3_000;          // 贴贴至少播多久
+  const STACK_TIME = 4_000;        // 叠叠乐播多久后散开
+  const COMBO_REST = 10_000;       // 刚散开的宠物多久内不参加别的贴贴
   const MIN_PLAY = 2_000;          // 很短的动作至少播这么久（会重复几遍）
   const GRAVITY = 2_600;           // 重力：拖得越高，落地时越快
   const FOOT = () => 10 * SCALE * size; // GIF 底下透明的那一点，站窗口顶时让脚踩在边上
@@ -30,8 +33,11 @@
   const hitCtx = hitCanvas.getContext('2d', { willReadFrequently: true });
 
   let pets = [];
-  let hug = null;
-  let show = 'both';
+  const Combos = window.PetCombos;
+  let combos = [];                 // 正在播的贴贴 / 叠叠乐
+  let comboClips = {};             // 组合名 → { row: 贴贴, stack: 叠叠乐 }
+  const comboCooldown = new Map(); // 「row/stack:组合名」→ 冷却到什么时候
+  let shown = {};                  // 每只宠物显示不显示
   let features = { time: true, sit: true, mouse: true, activity: true, typing: true, system: true, perch: true };
   let size = 1;                   // 右键菜单里的「大小」
   let peerOnline = false;          // 联网的对方在不在线（在线就头顶冒小爱心）
@@ -43,7 +49,6 @@
   let lastBatteryNag = -Infinity;
   let cursor = null;
   let ignoringMouse = true;
-  let hugCooldownUntil = 0;
   let lastTime = performance.now();
   let lastMouseMove = 0;
   let nextClockCheck = 0;
@@ -180,10 +185,10 @@
   // 提醒：能动的宠物都做一个动作并冒气泡；正在贴贴就让贴贴冒气泡。
   function remind(animName, text, minPlay) {
     const now = performance.now();
-    let told = false;
+    const told = new Set();
     for (const pet of pets) {
       if (!pet.visible) continue;
-      if (pet.state === 'hug') { if (!told) say(hug, text, 8000); told = true; continue; }
+      if (pet.state === 'hug') { if (pet.combo && !told.has(pet.combo)) say(pet.combo, text, 8000); told.add(pet.combo); continue; }
       if (pet.state === 'drag' || pet.state === 'fall') { say(pet, text, 8000); continue; }
       pet.lastAttention = now;
       playNamed(pet, animName, now, minPlay);
@@ -210,7 +215,7 @@
   // ---- 鼠标：拖动 / 点击 / 右键 ----
   function onPointerDown(pet, event) {
     if (event.button !== 0) return;
-    if (pet.state === 'hug') { pet.el.hidden = !pet.visible; goIdle(pet, performance.now()); } // 万一卡在贴贴里，点一下就恢复
+    if (pet.state === 'hug' && !pet.combo) { pet.el.hidden = !pet.visible; goIdle(pet, performance.now()); } // 万一卡在贴贴里，点一下就恢复
     event.preventDefault();
     pet.el.setPointerCapture(event.pointerId);
     const rect = pet.el.getBoundingClientRect();
@@ -245,6 +250,7 @@
     pet.lastAttention = now;
     if (drag.moved) {
       pet.vy = 0;
+      if (tryStack(pet, now)) return; // 落在别的宠物头上 → 叠叠乐
       pet.si = screenAt(pet.x, H() - pet.y - pet.h / 2); // 松手时在哪块屏幕上，就落到那块屏幕的底部
       if (pet.y < floorOf(pet)) pet.y = floorOf(pet);
       if (pet.y > floorOf(pet)) dropFrom(pet); else goIdle(pet, now);
@@ -436,6 +442,7 @@
     const moved = !next || !old || next.id !== old.id || Math.abs(next.x - old.x) > 2 || Math.abs(next.y - old.y) > 2 || Math.abs(next.w - old.w) > 2;
     if (!moved) return;
     const now = performance.now();
+    for (const combo of [...combos]) if (combo.onLedge) endCombo(combo, now, true);
     for (const pet of pets) {
       if (pet.onLedge) dropFrom(pet);
       else if (next && pet.state === 'walk' && !pet.onLedge) goIdle(pet, now); // 有新窗口了，别乱走了，快点过去
@@ -521,7 +528,7 @@
   // 挂在第一只看得见的宠物（或贴贴）头上；那只宠物正冒别的气泡时就挂得更高一点
   function placeUpdateButton() {
     if (!updateButton) return;
-    const host = hug.visible ? hug : pets.find(pet => pet.visible && pet.state !== 'hug');
+    const host = combos[0] || pets.find(pet => pet.visible && pet.state !== 'hug');
     updateButton.hidden = !host;
     if (!host) return;
     const bw = updateButton.offsetWidth, bh = updateButton.offsetHeight;
@@ -534,7 +541,7 @@
   // ---- 大小 ----
   function applySize(next) {
     size = next;
-    for (const sprite of [...pets, hug]) {
+    for (const sprite of [...pets, ...combos]) {
       if (!sprite.clip) continue;
       fitSize(sprite);
       if (sprite.onLedge && ledge) sprite.y = ledgeHeight();
@@ -559,43 +566,116 @@
     sprite.heart.style.top = `${Math.round(Math.max(y, 0))}px`;
   }
 
-  // ---- 贴贴 ----
+  // ---- 贴贴（左右挨在一起）和叠叠乐（拖到别人头上） ----
+  const comboReady = (key, kind) => !!comboClips[key]?.[kind] && (comboCooldown.get(`${kind}:${key}`) || 0) <= performance.now();
+
   function canHug(pet) {
-    return pet.visible && (pet.state === 'idle' || pet.state === 'walk') && onFloor(pet);
+    return pet.visible && !pet.combo && (pet.restUntil || 0) <= performance.now() && (pet.state === 'idle' || pet.state === 'walk') && (onFloor(pet) || pet.onLedge);
   }
 
-  function startHug(a, b, now) {
-    const [left, right] = a.x <= b.x ? [a, b] : [b, a];
-    const mid = (a.x + b.x) / 2;
-    for (const pet of [a, b]) { pet.state = 'hug'; pet.el.hidden = true; }
-    hug.visible = true;
-    const s = screenOf(left);
-    hug.x = Math.min(Math.max(mid, s.x + hug.w / 2), s.x + s.w - hug.w / 2);
-    hug.y = floorOf(left);
-    hug.el.hidden = false;
-    playClip(hug, hug.clip);
-    hug.pair = [left, right];
-    hug.until = now + hug.clip.duration * Math.max(1, Math.ceil(3000 / hug.clip.duration));
-  }
-
-  function endHug(now) {
-    if (!hug.pair) return;
-    const [left, right] = hug.pair;
-    hug.pair = null;
-    hug.visible = false;
-    hug.el.hidden = true;
-    hugCooldownUntil = now + HUG_COOLDOWN;
-    const gap = hug.w / 4;
-    left.x = hug.x - gap;
-    right.x = hug.x + gap;
-    for (const pet of [left, right]) {
-      pet.anim = '';
-      pet.lastAttention = now;
-      pet.el.hidden = !pet.visible;
-      goIdle(pet, now);
+  function makeCombo(kind, members, key, x, y, now, playFor) {
+    const clip = comboClips[key][kind];
+    const combo = { ...makeSprite(`pet hug ${kind}`), kind, members, key, x, y, si: members[0].si, onLedge: !!members[0].onLedge, visible: true };
+    playClip(combo, clip);
+    combo.until = now + clip.duration * Math.max(1, Math.ceil(playFor / clip.duration));
+    for (const pet of members) {
+      pet.state = 'hug';
+      pet.combo = combo;
+      pet.drag = null;
+      pet.looking = false;
+      pet.el.hidden = true;
     }
+    combos.push(combo);
+    return combo;
+  }
+
+  function removeCombo(combo, cooldown = true) {
+    combos = combos.filter(c => c !== combo);
+    if (combo.url) URL.revokeObjectURL(combo.url);
+    combo.el.remove();
+    combo.bubble.remove();
+    combo.heart.remove();
+    if (cooldown) comboCooldown.set(`${combo.kind}:${combo.key}`, performance.now() + COMBO_COOLDOWN);
+    // 刚贴贴 / 叠叠乐完的宠物歇一会儿，不会一散开就马上又和旁边的贴在一起
+    for (const pet of combo.members) { pet.combo = null; pet.anim = ''; pet.el.hidden = !pet.visible; pet.restUntil = performance.now() + COMBO_REST; }
+  }
+
+  // 几只宠物（从左到右）挨在一起 → 在它们中间播贴贴
+  function startHug(group, now) {
+    const key = Combos.comboKey(group.map(p => p.name));
+    const mid = group.reduce((sum, p) => sum + p.x, 0) / group.length;
+    const combo = makeCombo('row', group, key, mid, group[0].y, now, HUG_TIME);
+    const s = screenOf(group[0]);
+    combo.x = Math.min(Math.max(mid, s.x + combo.w / 2), s.x + s.w - combo.w / 2);
+    place(combo);
+  }
+
+  function endHug(combo, now) {
+    removeCombo(combo);
+    const n = combo.members.length;
+    combo.members.forEach((pet, i) => {
+      pet.x = combo.x + (i - (n - 1) / 2) * pet.w * 0.55;
+      pet.lastAttention = now;
+      goIdle(pet, now);
+    });
+    const [left, right] = [combo.members[0], combo.members[n - 1]];
     if (left.visible) walkTo(left, left.x - rand(150, 300));
     if (right.visible) walkTo(right, right.x + rand(150, 300));
+  }
+
+  // 松手时脚落在谁的头上（一摞叠叠乐，或者一只站着的宠物）
+  function stackTarget(pet) {
+    const feet = H() - pet.y;
+    const onHead = t => Math.abs(pet.x - t.x) < t.w * 0.4 && feet > H() - t.y - t.h - 40 && feet < H() - t.y - t.h * 0.45;
+    const stack = combos.find(c => c.kind === 'stack' && onHead(c));
+    if (stack) return { base: stack, below: stack.members };
+    const under = pets.find(q => q !== pet && q.visible && !q.combo && ['idle', 'walk', 'action', 'sleep', 'typing'].includes(q.state) && onHead(q));
+    return under ? { base: under, below: [under] } : null;
+  }
+
+  function tryStack(pet, now) {
+    const target = stackTarget(pet);
+    if (!target) return false;
+    const key = Combos.canStack(target.below.map(p => p.name), pet.name, k => comboReady(k, 'stack'));
+    if (!key) return false;
+    const { base } = target;
+    // 叠叠乐从最下面那只站的位置往上长，超出屏幕顶部就不叠
+    const s = screenOf(base);
+    if (H() - base.y - comboClips[key].stack.gh * SCALE * size < s.y) return false;
+    const members = [...target.below, pet];
+    const { x, y, si, onLedge } = base;
+    if (base.kind === 'stack') removeCombo(base, false); // 已经叠着的一摞继续往上叠
+    for (const p of members) p.si = si;
+    members[0].onLedge = !!onLedge;
+    const combo = makeCombo('stack', members, key, x, y, now, STACK_TIME);
+    combo.onLedge = !!onLedge;
+    place(combo);
+    return true;
+  }
+
+  // 叠叠乐播完 → 散开，每只从自己的高度掉下来摔趴趴
+  function scatter(combo, now, fallAll = false) {
+    removeCombo(combo);
+    const n = combo.members.length;
+    const step = n > 1 ? (combo.clip.gh - 250) / (n - 1) * SCALE * size : 0;
+    combo.members.forEach((pet, i) => {
+      pet.si = combo.si;
+      pet.x = combo.x + (i ? rand(-40, 40) : 0);
+      pet.y = combo.y + i * step;
+      pet.lastAttention = now;
+      if (i === 0 && !fallAll) {
+        pet.onLedge = combo.onLedge;
+        playNamed(pet, '摔趴趴', now, 0);
+      } else {
+        dropFrom(pet);
+        pet.fallFrom = Math.max(pet.fallFrom, SPLAT_HEIGHT); // 叠叠乐散开时每只都摔趴趴
+      }
+    });
+  }
+
+  function endCombo(combo, now, fallAll = false) {
+    if (combo.kind === 'stack') scatter(combo, now, fallAll);
+    else { endHug(combo, now); if (fallAll) for (const pet of combo.members) if (pet.onLedge) dropFrom(pet); }
   }
 
   // ---- 每一帧 ----
@@ -689,26 +769,28 @@
       placeBubble(pet, now, pet.visible && pet.state !== 'hug');
       placeHeart(pet, pet.visible && pet.state !== 'hug');
     }
-    if (hug.pair) {
-      if (now >= hug.until) endHug(now);
-      else place(hug);
-    } else if (pets.length === 2 && now >= hugCooldownUntil && canHug(pets[0]) && canHug(pets[1]) && pets[0].si === pets[1].si && Math.abs(pets[0].x - pets[1].x) < HUG_DISTANCE) {
-      startHug(pets[0], pets[1], now);
-      place(hug);
+    for (const combo of combos) {
+      if (now >= combo.until) endCombo(combo, now);
+      else place(combo);
     }
-    placeBubble(hug, now, hug.visible);
+    // 自己走着走着挨在一起了 → 贴贴
+    const free = pets.filter(canHug).map(pet => ({ pet, name: pet.name, x: pet.x, surface: pet.onLedge ? 'ledge' : `floor${pet.si}` }));
+    for (const row of Combos.touchingRows(free, HUG_DISTANCE * size)) {
+      const group = Combos.pickHug(row, key => comboReady(key, 'row'));
+      if (group) startHug(group.map(g => g.pet), now);
+    }
+    for (const combo of combos) { placeBubble(combo, now, true); placeHeart(combo, true); }
     placeUpdateButton();
-    placeHeart(hug, hug.visible);
     if (cursor) updateMouseCatch();
     requestAnimationFrame(frame);
   }
 
   function applyShow(value) {
-    show = value;
+    shown = value || {};
     const now = performance.now();
-    if (hug.pair) endHug(now);
+    for (const combo of [...combos]) if (combo.members.some(pet => !shown[pet.id])) endCombo(combo, now);
     for (const pet of pets) {
-      const visible = show === 'both' || show === pet.id;
+      const visible = !!shown[pet.id];
       if (visible && !pet.visible) { pet.si = primaryIndex(); pet.y = floorOf(pet); pet.onLedge = false; pet.lastAttention = now; pet.anim = ''; goIdle(pet, now); }
       pet.visible = visible;
       pet.el.hidden = !visible;
@@ -728,13 +810,15 @@
     const data = await api.load();
     if (data.screens?.length) screens = data.screens;
     const home = screens[primaryIndex()];
-    pets = [createPet('cat', data.pets.cat, home.x + home.w * 0.4), createPet('bunny', data.pets.bunny, home.x + home.w * 0.6)];
+    const names = Object.keys(data.pets);
+    pets = names.map((name, i) => createPet(name, data.pets[name], home.x + home.w * (0.2 + 0.6 * i / Math.max(1, names.length - 1))));
     for (const pet of pets) { pet.si = primaryIndex(); pet.y = floorOf(pet); }
-    hug = { ...makeSprite('pet hug'), clip: makeClip(data.hug), x: 0, y: 0, pair: null, until: 0, visible: false };
+    for (const [key, gifs] of Object.entries(data.combos || {})) {
+      comboClips[key] = {};
+      for (const kind of ['row', 'stack']) if (gifs[kind]) comboClips[key][kind] = makeClip(gifs[kind]);
+    }
     size = data.size || 1;
-    fitSize(hug);
     peerOnline = !!data.peerOnline;
-    hug.el.hidden = true;
     for (const pet of pets) { pet.el.hidden = true; setAnim(pet, '待机'); }
     applyFeatures(data.features || {});
     if (data.activity) activity = data.activity;
@@ -748,7 +832,7 @@
     api.onScreens(onScreens);
     if (data.updateReady) showUpdateButton(data.updateReady);
     api.onUpdateReady(showUpdateButton);
-    api.onSay(text => { for (const pet of pets) if (pet.visible) say(pet.state === 'hug' ? hug : pet, text, 10_000); });
+    api.onSay(text => { for (const pet of pets) if (pet.visible) say(pet.combo || pet, text, 10_000); });
     api.onSize(applySize);
     api.onPresence(online => { peerOnline = online; });
     api.onRemote(onRemote);

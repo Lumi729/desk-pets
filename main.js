@@ -10,15 +10,8 @@ const { autoUpdater } = require('electron-updater');
 const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
 
 const ASSETS = path.join(__dirname, '桌宠素材');
-const PETS = [
-  { id: 'cat', name: '千千猫猫' },
-  { id: 'bunny', name: '梨梨兔兔' },
-];
-const SHOW_CHOICES = [
-  { value: 'cat', label: '只显示千千猫猫' },
-  { value: 'bunny', label: '只显示梨梨兔兔' },
-  { value: 'both', label: '两只都显示' },
-];
+// 五只宠物（名字就是「桌宠素材」里的文件夹名）
+const PETS = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '绿眼猫猫'];
 const FEATURES = [
   { key: 'time', label: '时间提醒（该睡觉 / 该吃饭）' },
   { key: 'sit', label: '久坐提醒（60 分钟）' },
@@ -29,14 +22,8 @@ const FEATURES = [
   { key: 'perch', label: '站在窗口顶上' },
   { key: 'update', label: '自动更新' },
 ];
-// 托盘图标：菜单里的名字 → 「托盘图标」文件夹里的文件名（按顺序找第一个有的）
-const TRAY_ICONS = [
-  { label: '千千猫猫', files: ['千千猫猫'] },
-  { label: '梨梨兔兔', files: ['梨梨兔兔'] },
-  { label: '哥哥狗狗', files: ['哥哥狗狗'] },
-  { label: '梨梨哥哥', files: ['梨梨哥哥'] },
-  { label: '绿眼猫猫', files: ['绿眼猫猫', '李炜'] },
-];
+// 托盘图标：「托盘图标」文件夹里和宠物同名的图标
+const TRAY_ICONS = PETS;
 
 const SIZES = [0.5, 0.75, 1, 1.5, 2];
 
@@ -46,7 +33,7 @@ const BREAK_IDLE = 5 * 60;        // 离开电脑多少秒算休息过了
 let win;
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 const settings = {
-  show: 'both',
+  pets: Object.fromEntries(PETS.map(name => [name, true])), // 每只宠物显示不显示
   size: 1,
   trayIcon: '千千猫猫',
   features: Object.fromEntries(FEATURES.map(f => [f.key, true])),
@@ -56,8 +43,13 @@ const settings = {
 function loadSettings() {
   try {
     const saved = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
-    if (SHOW_CHOICES.some(c => c.value === saved.show)) settings.show = saved.show;
-    if (TRAY_ICONS.some(i => i.label === saved.trayIcon)) settings.trayIcon = saved.trayIcon;
+    if (saved.pets && typeof saved.pets === 'object') {
+      for (const name of PETS) if (typeof saved.pets[name] === 'boolean') settings.pets[name] = saved.pets[name];
+    } else if (saved.show === 'cat' || saved.show === 'bunny') {
+      // 以前只能选一只的设置：只保留当时选的那只
+      for (const name of PETS) settings.pets[name] = name === (saved.show === 'cat' ? '千千猫猫' : '梨梨兔兔');
+    }
+    if (TRAY_ICONS.includes(saved.trayIcon)) settings.trayIcon = saved.trayIcon;
     if (SIZES.includes(saved.size)) settings.size = saved.size;
     if (saved.online && typeof saved.online === 'object') {
       settings.online.enabled = saved.online.enabled === true;
@@ -83,23 +75,33 @@ function readGif(file) {
 
 function loadAssets() {
   const pets = {};
-  for (const pet of PETS) {
-    const dir = path.join(ASSETS, pet.name);
+  for (const name of PETS) {
+    const dir = path.join(ASSETS, name);
     const anims = {};
     for (const file of fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.gif')).sort()) {
       anims[path.basename(file, path.extname(file))] = readGif(path.join(dir, file));
     }
-    pets[pet.id] = { name: pet.name, anims };
+    pets[name] = { name, anims };
   }
-  return { screens: screensForPage(), show: settings.show, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, hug: readGif(path.join(ASSETS, '贴贴.gif')) };
+  // 贴贴/：「组合名.gif」是排一排的贴贴，「组合名_2.gif」是叠叠乐
+  const combos = {};
+  const comboDir = path.join(ASSETS, '贴贴');
+  for (const file of fs.existsSync(comboDir) ? fs.readdirSync(comboDir).filter(f => f.toLowerCase().endsWith('.gif')) : []) {
+    const base = path.basename(file, path.extname(file));
+    const stack = base.endsWith('_2');
+    const key = stack ? base.slice(0, -2) : base;
+    combos[key] = combos[key] || {};
+    combos[key][stack ? 'stack' : 'row'] = readGif(path.join(comboDir, file));
+  }
+  return { screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
 
-function setShow(value) {
-  settings.show = value;
+function setPetShown(name, on) {
+  settings.pets[name] = on;
   saveSettings();
-  send('show', value);
+  send('show', settings.pets);
   refreshTray();
 }
 
@@ -438,12 +440,15 @@ ipcMain.on('set-ignore', (_event, ignore) => { mouseOnPet = !ignore; win?.setIgn
 function buildMenu() {
   return Menu.buildFromTemplate([
     ...(updateReady ? [{ label: `🎉 立即重启更新（${updateReady}）`, click: restartToUpdate }, { type: 'separator' }] : []),
-    ...SHOW_CHOICES.map(choice => ({
-      label: choice.label,
-      type: 'radio',
-      checked: settings.show === choice.value,
-      click: () => setShow(choice.value),
-    })),
+    {
+      label: '选择宠物',
+      submenu: PETS.map(name => ({
+        label: name,
+        type: 'checkbox',
+        checked: settings.pets[name],
+        click: item => setPetShown(name, item.checked),
+      })),
+    },
     {
       label: '大小',
       submenu: SIZES.map(size => ({
@@ -476,11 +481,11 @@ function buildMenu() {
     { type: 'separator' },
     {
       label: '托盘图标',
-      submenu: TRAY_ICONS.map(icon => ({
-        label: icon.label,
+      submenu: TRAY_ICONS.map(name => ({
+        label: name,
         type: 'radio',
-        checked: settings.trayIcon === icon.label,
-        click: () => setTrayIcon(icon.label),
+        checked: settings.trayIcon === name,
+        click: () => setTrayIcon(name),
       })),
     },
     { label: '桌宠卡住了？刷新一下', click: () => { win?.webContents.reload(); } },
@@ -497,14 +502,12 @@ ipcMain.on('menu', () => buildMenu().popup({ window: win }));
 let tray = null;
 
 function trayImage(label) {
-  const icon = TRAY_ICONS.find(i => i.label === label) || TRAY_ICONS[0];
-  for (const name of icon.files) {
-    // 用 256 像素的原图按「最近邻」缩小，托盘里的小图标才不会糊
-    const png = path.join(ASSETS, '托盘图标', `${name}-256.png`);
-    if (fs.existsSync(png)) return pixelTrayImage(nativeImage, png);
-    const ico = path.join(ASSETS, '托盘图标', `${name}.ico`);
-    if (fs.existsSync(ico)) return nativeImage.createFromPath(ico);
-  }
+  const name = TRAY_ICONS.includes(label) ? label : TRAY_ICONS[0];
+  // 用 256 像素的原图按「最近邻」缩小，托盘里的小图标才不会糊
+  const png = path.join(ASSETS, '托盘图标', `${name}-256.png`);
+  if (fs.existsSync(png)) return pixelTrayImage(nativeImage, png);
+  const ico = path.join(ASSETS, '托盘图标', `${name}.ico`);
+  if (fs.existsSync(ico)) return nativeImage.createFromPath(ico);
   return nativeImage.createEmpty();
 }
 
