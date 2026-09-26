@@ -1,0 +1,11 @@
+name = "desk-pets-relay"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "PAIR_ROOM"
+class_name = "PairRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PairRoom"]

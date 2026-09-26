@@ -1,6 +1,6 @@
 // 桌宠的动作逻辑：待机、走路、拖动、点击动作、睡觉、贴贴、提醒气泡、鼠标互动、看你在做什么。
 (() => {
-  const SCALE = 0.7;               // 宠物显示大小（GIF 原图 × 这个倍数）
+  const SCALE = 0.7;               // 「100%」时宠物的大小（GIF 原图 × 这个倍数）
   const WALK_SPEED = 70;           // 走路速度（像素/秒）
   const SLEEP_AFTER = 60_000;      // 多久没人理就睡觉（毫秒）
   const WAKE_DISTANCE = 160;       // 鼠标离多近会醒（像素）
@@ -9,7 +9,7 @@
   const HUG_COOLDOWN = 30_000;     // 贴贴完多久内不再贴贴（毫秒）
   const MIN_PLAY = 2_000;          // 很短的动作至少播这么久（会重复几遍）
   const GRAVITY = 2_600;           // 重力：拖得越高，落地时越快
-  const FOOT = 10 * SCALE;          // GIF 底下透明的那一点，站窗口顶时让脚踩在边上
+  const FOOT = () => 10 * SCALE * size; // GIF 底下透明的那一点，站窗口顶时让脚踩在边上
   const SPLAT_HEIGHT = 40;         // 从多高掉下来才会摔趴趴（像素）
   const TYPING_AFTER = 3_000;      // 连续打字多久开始陪你敲代码（毫秒）
   const SWEAT_EVERY = 30_000;      // CPU 一直很忙时多久冒一次冷汗
@@ -32,6 +32,8 @@
   let hug = null;
   let show = 'both';
   let features = { time: true, sit: true, mouse: true, activity: true, typing: true, system: true, perch: true };
+  let size = 1;                   // 右键菜单里的「大小」
+  let peerOnline = false;          // 联网的对方在不在线（在线就头顶冒小爱心）
   let ledge = null;                // 当前窗口顶边 { id, x, y, w }（页面坐标），没有就是 null
   let activity = { kind: null, typing: false };
   let typingSince = 0;
@@ -51,7 +53,7 @@
   const H = () => window.innerHeight;
 
   function makeClip(gif) {
-    return { blob: new Blob([gif.bytes], { type: 'image/gif' }), width: gif.width * SCALE, height: gif.height * SCALE, duration: gif.duration };
+    return { blob: new Blob([gif.bytes], { type: 'image/gif' }), gw: gif.width, gh: gif.height, duration: gif.duration };
   }
 
   // 每次换动画都用新的地址，这样 GIF 一定从第一帧开始播。
@@ -59,10 +61,15 @@
     if (sprite.url) URL.revokeObjectURL(sprite.url);
     sprite.url = URL.createObjectURL(clip.blob);
     sprite.img.src = sprite.url;
-    sprite.w = clip.width;
-    sprite.h = clip.height;
-    sprite.el.style.width = `${clip.width}px`;
-    sprite.el.style.height = `${clip.height}px`;
+    sprite.clip = clip;
+    fitSize(sprite);
+  }
+
+  function fitSize(sprite) {
+    sprite.w = sprite.clip.gw * SCALE * size;
+    sprite.h = sprite.clip.gh * SCALE * size;
+    sprite.el.style.width = `${sprite.w}px`;
+    sprite.el.style.height = `${sprite.h}px`;
   }
 
   function makeSprite(className) {
@@ -76,7 +83,12 @@
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     stage.append(bubble);
-    return { el, img, url: '', w: 0, h: 0, bubble, bubbleUntil: 0 };
+    const heart = document.createElement('div');
+    heart.className = 'heart';
+    heart.textContent = '♥';
+    heart.hidden = true;
+    stage.append(heart);
+    return { el, img, url: '', w: 0, h: 0, clip: null, bubble, bubbleUntil: 0, heart };
   }
 
   function createPet(id, data, startX) {
@@ -228,6 +240,7 @@
       if (pet.y > 0) dropFrom(pet); else goIdle(pet, now);
     } else if (event.type === 'pointerup') {
       playRandomAction(pet, now);
+      api.touched();
     }
   }
 
@@ -348,7 +361,7 @@
   }
 
   // ---- 站在窗口顶上 ----
-  const ledgeHeight = () => H() - ledge.y - FOOT;
+  const ledgeHeight = () => H() - ledge.y - FOOT();
 
   function ledgeRange(pet) {
     const min = ledge.x + pet.w * 0.3, max = ledge.x + ledge.w - pet.w * 0.3;
@@ -384,7 +397,7 @@
     ledge = next;
     const moved = !next || !old || next.id !== old.id || Math.abs(next.x - old.x) > 2 || Math.abs(next.y - old.y) > 2 || Math.abs(next.w - old.w) > 2;
     if (!moved) return;
-    for (const pet of pets) if (pet.onLedge) dropFrom(pet, '吓一跳');
+    for (const pet of pets) if (pet.onLedge) dropFrom(pet);
   }
 
   // ---- 打字反应：只知道「在不在打字」，不知道按了什么 ----
@@ -412,6 +425,34 @@
       if (!low) { lastBatteryNag = -Infinity; return; }
       if (now - lastBatteryNag >= LOW_BATTERY_EVERY) { lastBatteryNag = now; remind('睡觉', '我也没电了……', 6000); }
     } catch {}
+  }
+
+  // ---- 大小 ----
+  function applySize(next) {
+    size = next;
+    for (const sprite of [...pets, hug]) {
+      if (!sprite.clip) continue;
+      fitSize(sprite);
+      if (sprite.onLedge && ledge) sprite.y = ledgeHeight();
+    }
+  }
+
+  // ---- 联网：对方摸了 / 戳了 ----
+  function onRemote(message) {
+    const name = message.name || '对方';
+    if (message.type === 'pet') remind('开心蹦蹦', `${name}在摸你`, 3000);
+    if (message.type === 'poke') remind('打招呼', `${name}戳了戳你`, 2000);
+  }
+
+  // 两个人都在线时，头顶飘一个小爱心（冒气泡时先让开）
+  function placeHeart(sprite, visible) {
+    const show = peerOnline && visible && !sprite.bubble.classList.contains('show');
+    sprite.heart.hidden = !show;
+    if (!show) return;
+    const x = sprite.x - sprite.heart.offsetWidth / 2;
+    const y = H() - (sprite.y || 0) - sprite.h * 0.85 - sprite.heart.offsetHeight;
+    sprite.heart.style.left = `${Math.round(x)}px`;
+    sprite.heart.style.top = `${Math.round(Math.max(y, 0))}px`;
   }
 
   // ---- 贴贴 ----
@@ -529,6 +570,7 @@
         place(pet);
       }
       placeBubble(pet, now, pet.visible && pet.state !== 'hug');
+      placeHeart(pet, pet.visible && pet.state !== 'hug');
     }
     if (hug.pair) {
       if (now >= hug.until) endHug(now);
@@ -538,6 +580,7 @@
       place(hug);
     }
     placeBubble(hug, now, hug.visible);
+    placeHeart(hug, hug.visible);
     if (cursor) updateMouseCatch();
     requestAnimationFrame(frame);
   }
@@ -567,8 +610,9 @@
     const data = await api.load();
     pets = [createPet('cat', data.pets.cat, W() * 0.4), createPet('bunny', data.pets.bunny, W() * 0.6)];
     hug = { ...makeSprite('pet hug'), clip: makeClip(data.hug), x: 0, y: 0, pair: null, until: 0, visible: false };
-    hug.w = hug.clip.width;
-    hug.h = hug.clip.height;
+    size = data.size || 1;
+    fitSize(hug);
+    peerOnline = !!data.peerOnline;
     hug.el.hidden = true;
     for (const pet of pets) { pet.el.hidden = true; setAnim(pet, '待机'); }
     applyFeatures(data.features || {});
@@ -580,6 +624,9 @@
     api.onSitReminder(() => { if (features.sit) remind('开心蹦蹦', '起来活动一下吧', 4000); });
     api.onCpuHot(onCpuHot);
     api.onPerch(onPerch);
+    api.onSize(applySize);
+    api.onPresence(online => { peerOnline = online; });
+    api.onRemote(onRemote);
     api.onCursor(onCursor);
     window.addEventListener('mousemove', event => onCursor({ x: event.clientX, y: event.clientY }));
     requestAnimationFrame(frame);

@@ -4,6 +4,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { gifInfo } = require('./lib/gif');
 const { watchForeground } = require('./lib/activity');
+const { pixelTrayImage } = require('./lib/pixel-icon');
+const { OnlineLink, cleanName } = require('./lib/online');
 
 const ASSETS = path.join(__dirname, '桌宠素材');
 const PETS = [
@@ -33,18 +35,31 @@ const TRAY_ICONS = [
   { label: '绿眼猫猫', files: ['绿眼猫猫', '李炜'] },
 ];
 
+const SIZES = [0.5, 0.75, 1, 1.5, 2];
+
 const SIT_LIMIT = 60 * 60_000;   // 连续用电脑多久提醒
 const BREAK_IDLE = 5 * 60;        // 离开电脑多少秒算休息过了
 
 let win;
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
-const settings = { show: 'both', trayIcon: '千千猫猫', features: Object.fromEntries(FEATURES.map(f => [f.key, true])) };
+const settings = {
+  show: 'both',
+  size: 1,
+  trayIcon: '千千猫猫',
+  features: Object.fromEntries(FEATURES.map(f => [f.key, true])),
+  online: { enabled: false, name: '千千', code: '', server: '' },
+};
 
 function loadSettings() {
   try {
     const saved = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
     if (SHOW_CHOICES.some(c => c.value === saved.show)) settings.show = saved.show;
     if (TRAY_ICONS.some(i => i.label === saved.trayIcon)) settings.trayIcon = saved.trayIcon;
+    if (SIZES.includes(saved.size)) settings.size = saved.size;
+    if (saved.online && typeof saved.online === 'object') {
+      settings.online.enabled = saved.online.enabled === true;
+      for (const key of ['name', 'code', 'server']) if (typeof saved.online[key] === 'string') settings.online[key] = saved.online[key];
+    }
     for (const { key } of FEATURES) if (typeof saved.features?.[key] === 'boolean') settings.features[key] = saved.features[key];
   } catch {}
 }
@@ -73,7 +88,7 @@ function loadAssets() {
     }
     pets[pet.id] = { name: pet.name, anims };
   }
-  return { show: settings.show, features: settings.features, activity, pets, hug: readGif(path.join(ASSETS, '贴贴.gif')) };
+  return { show: settings.show, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, pets, hug: readGif(path.join(ASSETS, '贴贴.gif')) };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -82,6 +97,32 @@ function setShow(value) {
   settings.show = value;
   saveSettings();
   send('show', value);
+  refreshTray();
+}
+
+function setSize(size) {
+  settings.size = size;
+  saveSettings();
+  send('size', size);
+  refreshTray();
+}
+
+function togglePets() {
+  if (!win) return;
+  if (win.isVisible()) win.hide();
+  else { win.showInactive(); win.setAlwaysOnTop(true, 'screen-saver'); }
+}
+
+// ---- 开机自动启动 ----
+function autoStartOptions() {
+  // 便携版 exe 运行时会先解压到临时文件夹，要登记的是原来那个 exe
+  if (process.env.PORTABLE_EXECUTABLE_FILE) return { path: process.env.PORTABLE_EXECUTABLE_FILE, args: [] };
+  if (!app.isPackaged) return { path: process.execPath, args: [app.getAppPath()] };
+  return { path: process.execPath, args: [] };
+}
+const autoStartOn = () => app.getLoginItemSettings(autoStartOptions()).openAtLogin;
+function setAutoStart(on) {
+  app.setLoginItemSettings({ openAtLogin: on, ...autoStartOptions() });
   refreshTray();
 }
 
@@ -182,6 +223,79 @@ function checkSitting() {
   }
 }
 
+// ---- 联网 ----
+const online = new OnlineLink();
+let onlineWindow = null;
+let lastPetSent = 0;
+
+online.on('change', () => { send('presence', online.peerOnline); refreshTray(); });
+online.on('remote', message => send('remote', message));
+
+function startOnline() {
+  const { code, server } = settings.online;
+  if (!settings.online.enabled || code.trim().length < 4 || !server.trim()) return online.stop();
+  try { online.start(server, code); } catch (error) { console.error('联网失败', error.message); online.stop(); }
+}
+
+function setOnlineEnabled(on) {
+  settings.online.enabled = on;
+  saveSettings();
+  startOnline();
+  refreshTray();
+}
+
+function onlineStatusLabel() {
+  if (online.status === 'off') return settings.online.code ? '联网：没有连接' : '联网：还没设置配对码';
+  if (online.status === 'connecting') return '联网：正在连接…';
+  return online.peerOnline ? '联网：对方也在线 ♡' : '联网：已连接，等对方上线';
+}
+
+function openOnlineSettings() {
+  if (onlineWindow) { onlineWindow.show(); onlineWindow.focus(); return; }
+  onlineWindow = new BrowserWindow({
+    width: 380,
+    height: 440,
+    useContentSize: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    autoHideMenuBar: true,
+    title: '联网设置',
+    icon: trayImage(settings.trayIcon),
+    webPreferences: { preload: path.join(__dirname, 'renderer', 'online-preload.js'), contextIsolation: true, sandbox: true },
+  });
+  onlineWindow.removeMenu();
+  onlineWindow.loadFile(path.join(__dirname, 'renderer', 'online.html'));
+  onlineWindow.on('closed', () => { onlineWindow = null; });
+}
+
+ipcMain.handle('online-get', () => ({ ...settings.online }));
+ipcMain.handle('online-save', (_event, next) => {
+  settings.online = {
+    enabled: true,
+    name: cleanName(next?.name) || '千千',
+    code: String(next?.code ?? '').trim().slice(0, 64),
+    server: String(next?.server ?? '').trim().slice(0, 300),
+  };
+  saveSettings();
+  startOnline();
+  refreshTray();
+  onlineWindow?.close();
+});
+ipcMain.on('online-cancel', () => onlineWindow?.close());
+
+// 摸了自己的宠物 → 告诉对方（最多 2 秒一次）
+ipcMain.on('pet-touched', () => {
+  const now = Date.now();
+  if (now - lastPetSent < 2000) return;
+  if (online.send('pet', settings.online.name)) lastPetSent = now;
+});
+
+function pokePeer() {
+  online.send('poke', settings.online.name);
+}
+
 function fitToScreen() {
   if (!win) return;
   win.setBounds(screen.getPrimaryDisplay().workArea);
@@ -238,6 +352,15 @@ function buildMenu() {
       checked: settings.show === choice.value,
       click: () => setShow(choice.value),
     })),
+    {
+      label: '大小',
+      submenu: SIZES.map(size => ({
+        label: `${size * 100}%`,
+        type: 'radio',
+        checked: settings.size === size,
+        click: () => setSize(size),
+      })),
+    },
     { type: 'separator' },
     ...FEATURES.map(feature => ({
       label: feature.label,
@@ -245,6 +368,19 @@ function buildMenu() {
       checked: settings.features[feature.key],
       click: item => setFeature(feature.key, item.checked),
     })),
+    { type: 'separator' },
+    { label: '戳一下对方', enabled: online.peerOnline, click: pokePeer },
+    {
+      label: '联网',
+      submenu: [
+        { label: onlineStatusLabel(), enabled: false },
+        { type: 'separator' },
+        { label: '联网设置（名字 / 配对码）…', click: openOnlineSettings },
+        settings.online.enabled
+          ? { label: '断开联网', click: () => setOnlineEnabled(false) }
+          : { label: '连接', enabled: settings.online.code.trim().length >= 4 && !!settings.online.server.trim(), click: () => setOnlineEnabled(true) },
+      ],
+    },
     { type: 'separator' },
     {
       label: '托盘图标',
@@ -255,6 +391,7 @@ function buildMenu() {
         click: () => setTrayIcon(icon.label),
       })),
     },
+    { label: '开机自动启动', type: 'checkbox', checked: autoStartOn(), click: item => setAutoStart(item.checked) },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ]);
@@ -267,10 +404,12 @@ let tray = null;
 
 function trayImage(label) {
   const icon = TRAY_ICONS.find(i => i.label === label) || TRAY_ICONS[0];
-  const ext = process.platform === 'win32' ? '.ico' : '-32.png';
   for (const name of icon.files) {
-    const file = path.join(ASSETS, '托盘图标', name + ext);
-    if (fs.existsSync(file)) return nativeImage.createFromPath(file);
+    // 用 256 像素的原图按「最近邻」缩小，托盘里的小图标才不会糊
+    const png = path.join(ASSETS, '托盘图标', `${name}-256.png`);
+    if (fs.existsSync(png)) return pixelTrayImage(nativeImage, png);
+    const ico = path.join(ASSETS, '托盘图标', `${name}.ico`);
+    if (fs.existsSync(ico)) return nativeImage.createFromPath(ico);
   }
   return nativeImage.createEmpty();
 }
@@ -279,7 +418,7 @@ function createTray() {
   try {
     tray = new Tray(trayImage(settings.trayIcon));
     tray.setToolTip('千千梨梨桌宠');
-    tray.on('click', () => tray.popUpContextMenu());
+    tray.on('click', togglePets);   // 左键：显示 / 隐藏桌宠；右键：设置菜单
     refreshTray();
   } catch (error) {
     console.error('托盘图标创建失败', error);
@@ -305,6 +444,7 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     updateWatcher();
     createTray();
+    startOnline();
     screen.on('display-metrics-changed', fitToScreen);
     screen.on('display-added', fitToScreen);
     screen.on('display-removed', fitToScreen);
@@ -312,5 +452,5 @@ if (!app.requestSingleInstanceLock()) {
     powerMonitor.on('suspend', () => { sitStart = null; });
   });
   app.on('window-all-closed', () => app.quit());
-  app.on('will-quit', () => { if (stopWatcher) stopWatcher(); });
+  app.on('will-quit', () => { if (stopWatcher) stopWatcher(); online.stop(); });
 }

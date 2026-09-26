@@ -8,3 +8,6 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
 .bubble { position: absolute; left: 0; top: 0; padding: 6px 12px; border-radius: 14px; background: #fff; color: #6b4454; border: 2px solid #f0b6ca; font: 600 14px/1.4 "Microsoft YaHei", "PingFang SC", sans-serif; white-space: nowrap; pointer-events: none; box-shadow: 0 3px 10px #0002; opacity: 0; transition: opacity .25s; }
 .bubble.show { opacity: 1; }
 .bubble::after { content: ""; position: absolute; left: 50%; bottom: -8px; margin-left: -6px; border: 6px solid transparent; border-top-color: #f0b6ca; border-bottom: 0; }
+.heart { position: absolute; left: 0; top: 0; color: #f07aa3; font: 700 20px/1 sans-serif; text-shadow: 0 0 3px #fff, 0 2px 4px #0003; pointer-events: none; animation: heart-bob 1.6s ease-in-out infinite; }
+.heart[hidden] { display: none; }
+@keyframes heart-bob { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-5px) scale(1.12); } }
