@@ -10,10 +10,10 @@
 - 如果改坏了，千千说一声就立刻改回去（用 `git revert`，不要改写历史）。
 
 ## 发布新版本（重要）
-- **只有千千说「发布新版本」时**，才：把 `package.json` 的 `version` 改大（默认改最后一位，比如 1.0.0 → 1.0.1；千千说了具体版本号就用千千说的），提交推送到 `main`，然后 `git tag v<版本号>` 并 `git push origin v<版本号>`。
-- 平时改代码**不要**打标签、不要改版本号。
-- 推送 `v*` 标签会触发 `.github/workflows/release.yml`：在 Windows 上 `npm test`、打包 NSIS 安装包并用 electron-builder 发布到 GitHub Releases（带 `latest.yml`）。标签和 `package.json` 版本号不一致会失败。
-- 发布后可以去 Actions 看结果，失败了要修好再发一次（新的版本号）。
+- **只有千千说「发布新版本」时**，才把 `package.json` 的 `version` 改大（默认改最后一位，比如 1.0.0 → 1.0.1；千千说了具体版本号就用千千说的），提交推送到 `main`。
+- 平时改代码**不要**改版本号。
+- `.github/workflows/release.yml`：`package.json` 推到 `main` 时，如果 `v<版本号>` 还没发布过，就在 Windows 上 `npm test`、打包 NSIS 安装包并用 electron-builder 发布到 GitHub Releases（自动建 `v<版本号>` 标签，带 `latest.yml`）；版本号没变就跳过。推送 `v*` 标签也会触发（这个会话推不了标签，所以用改版本号的方式）。
+- 发布后去 Actions 看结果，失败了要修好再发（修的是打包问题且还没发出去，可以不改版本号，推送修复后会自动重试）。
 - 装好的桌宠用 `electron-updater` 自动更新（`main.js` 里的「自动更新」一节）：启动检查一次、之后每 3 小时，下载好后冒气泡并在菜单里显示「立即重启更新」。
 
 ## 这个仓库

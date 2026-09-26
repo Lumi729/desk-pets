@@ -1,9 +1,13 @@
-# 自动发布：推送 v 开头的标签（比如 v1.1.0）时，在云端的 Windows 上打包安装包，发布到 GitHub Releases。
+# 自动发布：package.json 里的版本号变了（推到 main 上），或者推送 v 开头的标签（比如 v1.1.0）时，
+# 在云端的 Windows 上打包安装包，发布到 GitHub Releases（会自动建好 v<版本号> 标签）。
+# 版本号没变的普通推送会直接跳过，不会重复发布。
 # 装好的桌宠会从 Releases 自动下载新版本（electron-updater 读的是一起上传的 latest.yml）。
 name: 打包发布
 
 on:
   push:
+    branches: [main]
+    paths: [package.json, .github/workflows/release.yml]
     tags: ['v*']
 
 permissions:
@@ -14,21 +18,33 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: 检查标签和版本号一致
+      - name: 看看这个版本发布过没有
+        id: version
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version=$(node -p "require('./package.json').version")
-          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
             echo "::error::标签 $GITHUB_REF_NAME 和 package.json 里的版本 $version 对不上"
             exit 1
           fi
+          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "v$version 已经发布过了，跳过"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.version.outputs.skip != 'true'
+        with:
+          node-version: 22
+          cache: npm
       - run: npm ci
+        if: steps.version.outputs.skip != 'true'
       - run: npm test
+        if: steps.version.outputs.skip != 'true'
       - name: 打包并发布到 Releases
+        if: steps.version.outputs.skip != 'true'
         run: npx electron-builder --win nsis --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
