@@ -14,15 +14,6 @@
   const SHAKE_STEP = 12;           // 鼠标来回晃：每次至少移动这么多像素
   const SHAKE_TURNS = 4;           // 1 秒内来回这么多次算「晃」
   const CORE = ['待机', '向左走', '向右走', '睡觉', '向左看', '向右看'];
-  // 还没有的动画先用这些代替（按顺序找第一个有的）
-  const FALLBACK = {
-    '向左看': ['向左走'],
-    '向右看': ['向右走'],
-    '敲代码': ['摸摸头'],
-    '看视频': ['吃小鱼', '吃胡萝卜'],
-    '跳舞': ['开心蹦蹦'],
-    '吃饭': ['吃小鱼', '吃胡萝卜'],
-  };
   const ACTIVITY_ANIM = { code: '敲代码', video: '看视频', music: '跳舞' };
 
   const api = window.petApi;
@@ -99,8 +90,7 @@
   }
 
   function resolveAnim(pet, name) {
-    for (const candidate of [name, ...(FALLBACK[name] || [])]) if (pet.clips[candidate]) return candidate;
-    return '待机';
+    return pet.clips[name] ? name : '待机';
   }
 
   function setAnim(pet, name, restart = false) {
