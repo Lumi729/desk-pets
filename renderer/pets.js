@@ -1,14 +1,29 @@
-// 桌宠的动作逻辑：待机、走路、拖动、点击动作、睡觉、贴贴。
+// 桌宠的动作逻辑：待机、走路、拖动、点击动作、睡觉、贴贴、提醒气泡、鼠标互动、看你在做什么。
 (() => {
   const SCALE = 0.7;               // 宠物显示大小（GIF 原图 × 这个倍数）
   const WALK_SPEED = 70;           // 走路速度（像素/秒）
   const SLEEP_AFTER = 60_000;      // 多久没人理就睡觉（毫秒）
   const WAKE_DISTANCE = 160;       // 鼠标离多近会醒（像素）
+  const LOOK_DISTANCE = 220;       // 鼠标离多近会转头看（像素）
   const HUG_DISTANCE = 120;        // 两只靠多近会贴贴（像素）
   const HUG_COOLDOWN = 30_000;     // 贴贴完多久内不再贴贴（毫秒）
   const MIN_PLAY = 2_000;          // 很短的动作至少播这么久（会重复几遍）
   const GRAVITY = 2_600;           // 拖到半空松手后掉下来的速度
-  const CORE = ['待机', '向左走', '向右走', '睡觉'];
+  const NIGHT_EVERY = 20 * 60_000; // 半夜多久催一次睡觉
+  const MEALS = [[11 * 60 + 50, 12 * 60 + 30], [17 * 60 + 50, 18 * 60 + 30]]; // 12 点、18 点左右
+  const SHAKE_STEP = 12;           // 鼠标来回晃：每次至少移动这么多像素
+  const SHAKE_TURNS = 4;           // 1 秒内来回这么多次算「晃」
+  const CORE = ['待机', '向左走', '向右走', '睡觉', '向左看', '向右看'];
+  // 还没有的动画先用这些代替（按顺序找第一个有的）
+  const FALLBACK = {
+    '向左看': ['向左走'],
+    '向右看': ['向右走'],
+    '敲代码': ['摸摸头'],
+    '看视频': ['吃小鱼', '吃胡萝卜'],
+    '跳舞': ['开心蹦蹦'],
+    '吃饭': ['吃小鱼', '吃胡萝卜'],
+  };
+  const ACTIVITY_ANIM = { code: '敲代码', video: '看视频', music: '跳舞' };
 
   const api = window.petApi;
   const stage = document.getElementById('stage');
@@ -19,10 +34,15 @@
   let pets = [];
   let hug = null;
   let show = 'both';
+  let features = { time: true, sit: true, mouse: true, activity: true };
+  let activity = { kind: null, typing: false };
   let cursor = null;
   let ignoringMouse = true;
   let hugCooldownUntil = 0;
   let lastTime = performance.now();
+  let nextClockCheck = 0;
+  let lastNightNag = -Infinity;
+  const mealsDone = new Set();
 
   const rand = (a, b) => a + Math.random() * (b - a);
   const pick = list => list[Math.floor(Math.random() * list.length)];
@@ -52,19 +72,23 @@
     img.draggable = false;
     el.append(img);
     stage.append(el);
-    return { el, img, url: '', w: 0, h: 0 };
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    stage.append(bubble);
+    return { el, img, url: '', w: 0, h: 0, bubble, bubbleUntil: 0 };
   }
 
   function createPet(id, data, startX) {
     const clips = {};
     for (const [name, gif] of Object.entries(data.anims)) clips[name] = makeClip(gif);
+    const now = performance.now();
     const pet = {
       id, name: data.name, clips,
       actions: Object.keys(clips).filter(name => !CORE.includes(name)),
       ...makeSprite('pet'),
       x: startX, y: 0, vy: 0,
-      state: 'idle', anim: '', until: 0, nextThink: performance.now() + rand(1500, 4000),
-      target: startX, lastAttention: performance.now(), visible: false, drag: null,
+      state: 'idle', anim: '', until: 0, nextThink: now + rand(1500, 4000), nextActivity: now + rand(3000, 8000),
+      target: startX, lastAttention: now, visible: false, drag: null, shake: null, shyUntil: 0,
     };
     pet.el.title = data.name;
     pet.el.addEventListener('pointerdown', event => onPointerDown(pet, event));
@@ -74,10 +98,15 @@
     return pet;
   }
 
-  function setAnim(pet, name) {
-    const clip = pet.clips[name] || pet.clips['待机'];
-    const key = pet.clips[name] ? name : '待机';
-    if (pet.anim === key) return clip;
+  function resolveAnim(pet, name) {
+    for (const candidate of [name, ...(FALLBACK[name] || [])]) if (pet.clips[candidate]) return candidate;
+    return '待机';
+  }
+
+  function setAnim(pet, name, restart = false) {
+    const key = resolveAnim(pet, name);
+    const clip = pet.clips[key];
+    if (pet.anim === key && !restart) return clip;
     pet.anim = key;
     pet.el.dataset.anim = key;
     playClip(pet, clip);
@@ -97,18 +126,67 @@
     setAnim(pet, pet.target < pet.x ? '向左走' : '向右走');
   }
 
-  function playAction(pet, now) {
-    if (!pet.actions.length) return goIdle(pet, now);
-    const name = pet.actions.length > 1 ? pick(pet.actions.filter(a => a !== pet.anim)) : pet.actions[0];
-    pet.anim = '';
-    const clip = setAnim(pet, name);
+  function playNamed(pet, name, now, minPlay = MIN_PLAY) {
+    const clip = setAnim(pet, name, true);
     pet.state = 'action';
-    pet.until = now + clip.duration * Math.max(1, Math.ceil(MIN_PLAY / clip.duration));
+    pet.until = now + clip.duration * Math.max(1, Math.ceil(minPlay / clip.duration));
+  }
+
+  function playRandomAction(pet, now) {
+    if (!pet.actions.length) return goIdle(pet, now);
+    const choices = pet.actions.length > 1 ? pet.actions.filter(a => a !== pet.anim) : pet.actions;
+    playNamed(pet, pick(choices), now);
   }
 
   function wake(pet, now) {
     pet.lastAttention = now;
     if (pet.state === 'sleep') goIdle(pet, now);
+  }
+
+  // ---- 气泡 ----
+  function say(sprite, text, ms = 6000) {
+    sprite.bubble.textContent = text;
+    sprite.bubble.classList.add('show');
+    sprite.bubbleUntil = performance.now() + ms;
+  }
+
+  function placeBubble(sprite, now, visible) {
+    if (!sprite.bubble.classList.contains('show')) return;
+    if (!visible || now >= sprite.bubbleUntil) { sprite.bubble.classList.remove('show'); return; }
+    const bw = sprite.bubble.offsetWidth, bh = sprite.bubble.offsetHeight;
+    const x = Math.min(Math.max(sprite.x - bw / 2, 4), W() - bw - 4);
+    const y = Math.max(H() - (sprite.y || 0) - sprite.h * 0.8 - bh - 8, 4);
+    sprite.bubble.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  }
+
+  // 提醒：能动的宠物都做一个动作并冒气泡；正在贴贴就让贴贴冒气泡。
+  function remind(animName, text, minPlay) {
+    const now = performance.now();
+    let told = false;
+    for (const pet of pets) {
+      if (!pet.visible) continue;
+      if (pet.state === 'hug') { if (!told) say(hug, text, 8000); told = true; continue; }
+      if (pet.state === 'drag' || pet.state === 'fall') { say(pet, text, 8000); continue; }
+      pet.lastAttention = now;
+      playNamed(pet, animName, now, minPlay);
+      say(pet, text, 8000);
+    }
+  }
+
+  function checkClock(now) {
+    if (!features.time) return;
+    const date = new Date();
+    const hour = date.getHours();
+    const minutes = hour * 60 + date.getMinutes();
+    if (hour < 5) {
+      if (now - lastNightNag >= NIGHT_EVERY) { lastNightNag = now; remind('睡觉', '该睡觉啦', 6000); }
+    } else {
+      lastNightNag = -Infinity;
+    }
+    MEALS.forEach(([from, to], i) => {
+      const key = `${date.toDateString()}-${i}`;
+      if (minutes >= from && minutes <= to && !mealsDone.has(key)) { mealsDone.add(key); remind('吃饭', '该吃饭啦', 4000); }
+    });
   }
 
   // ---- 鼠标：拖动 / 点击 / 右键 ----
@@ -128,6 +206,7 @@
     if (!drag.moved) {
       drag.moved = true;
       pet.state = 'drag';
+      pet.shake = null;
       pet.el.classList.add('dragging');
       setAnim(pet, pet.clips['吓一跳'] ? '吓一跳' : '待机');
     }
@@ -147,7 +226,7 @@
       pet.vy = 0;
       if (pet.y > 0) { pet.state = 'fall'; } else goIdle(pet, now);
     } else if (event.type === 'pointerup') {
-      playAction(pet, now);
+      playRandomAction(pet, now);
     }
   }
 
@@ -180,20 +259,77 @@
     }
   }
 
+  // 鼠标在宠物身上快速左右来回晃 → 害羞
+  function trackShake(pet, point, now) {
+    const rect = pet.el.getBoundingClientRect();
+    const inside = point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+    if (!inside || pet.drag || pet.state === 'hug') { pet.shake = null; return; }
+    const shake = pet.shake || (pet.shake = { anchor: point.x, dir: 0, turns: [] });
+    const dx = point.x - shake.anchor;
+    if (Math.abs(dx) < SHAKE_STEP) return;
+    const dir = Math.sign(dx);
+    if (shake.dir && dir !== shake.dir) shake.turns.push(now);
+    shake.dir = dir;
+    shake.anchor = point.x;
+    shake.turns = shake.turns.filter(t => now - t < 1000);
+    if (shake.turns.length >= SHAKE_TURNS && now >= pet.shyUntil) {
+      shake.turns = [];
+      pet.shyUntil = now + 4000;
+      pet.lastAttention = now;
+      playNamed(pet, '害羞', now);
+    }
+  }
+
+  // 鼠标靠近 → 转头看鼠标
+  function lookAtMouse(pet, point, distance, now) {
+    const canLook = features.mouse && (pet.state === 'idle' || pet.state === 'walk' || pet.state === 'look');
+    if (canLook && distance < LOOK_DISTANCE) {
+      const dx = point.x - pet.x;
+      if (pet.state !== 'look' || Math.abs(dx) > 15) {
+        pet.state = 'look';
+        const side = Math.abs(dx) <= 15 ? (pet.lookSide || 'right') : (dx < 0 ? 'left' : 'right');
+        pet.lookSide = side;
+        setAnim(pet, side === 'left' ? '向左看' : '向右看');
+      }
+    } else if (pet.state === 'look' && (!features.mouse || distance >= LOOK_DISTANCE + 30)) {
+      goIdle(pet, now);
+    }
+  }
+
   function onCursor(point) {
     cursor = point;
     const now = performance.now();
     for (const pet of pets) {
       if (!pet.visible) continue;
-      const cx = pet.x, cy = H() - pet.y - pet.h / 2;
-      if (Math.hypot(point.x - cx, point.y - cy) < WAKE_DISTANCE) wake(pet, now);
+      const distance = Math.hypot(point.x - pet.x, point.y - (H() - pet.y - pet.h / 2));
+      if (distance < WAKE_DISTANCE) wake(pet, now);
+      lookAtMouse(pet, point, distance, now);
+      if (features.mouse) trackShake(pet, point, now);
     }
     updateMouseCatch();
   }
 
+  // ---- 看你在做什么（只收到「写代码 / 看视频 / 听歌」这种类别） ----
+  function onActivity(next) {
+    const changed = next.kind !== activity.kind || (next.typing && !activity.typing);
+    activity = next;
+    if (!changed || !next.kind) return;
+    const now = performance.now();
+    for (const pet of pets) pet.nextActivity = Math.min(pet.nextActivity, now + rand(1000, 4000));
+  }
+
+  function maybeDoActivity(pet, now) {
+    if (!features.activity || !activity.kind || now < pet.nextActivity) return false;
+    if (activity.kind === 'code' && !activity.typing) return false;
+    pet.nextActivity = now + rand(20_000, 45_000);
+    pet.lastAttention = now;
+    playNamed(pet, ACTIVITY_ANIM[activity.kind], now, 4000);
+    return true;
+  }
+
   // ---- 贴贴 ----
   function canHug(pet) {
-    return pet.visible && (pet.state === 'idle' || pet.state === 'walk') && pet.y === 0;
+    return pet.visible && (pet.state === 'idle' || pet.state === 'walk' || pet.state === 'look') && pet.y === 0;
   }
 
   function startHug(a, b, now) {
@@ -232,6 +368,7 @@
   function think(pet, now, dt) {
     switch (pet.state) {
       case 'idle':
+        if (maybeDoActivity(pet, now)) break;
         if (now - pet.lastAttention > SLEEP_AFTER) { pet.state = 'sleep'; setAnim(pet, '睡觉'); break; }
         if (now >= pet.nextThink) {
           if (Math.random() < 0.6) {
@@ -267,11 +404,14 @@
   function frame(now) {
     const dt = Math.min((now - lastTime) / 1000, 0.1);
     lastTime = now;
+    if (now >= nextClockCheck) { nextClockCheck = now + 30_000; checkClock(now); }
     for (const pet of pets) {
-      if (!pet.visible) continue;
-      if (pet.state !== 'drag' && pet.state !== 'fall') pet.x = Math.min(Math.max(pet.x, pet.w / 2), W() - pet.w / 2);
-      think(pet, now, dt);
-      place(pet);
+      if (pet.visible) {
+        if (pet.state !== 'drag' && pet.state !== 'fall') pet.x = Math.min(Math.max(pet.x, pet.w / 2), W() - pet.w / 2);
+        think(pet, now, dt);
+        place(pet);
+      }
+      placeBubble(pet, now, pet.visible && pet.state !== 'hug');
     }
     if (hug.pair) {
       if (now >= hug.until) endHug(now);
@@ -280,6 +420,7 @@
       startHug(pets[0], pets[1], now);
       place(hug);
     }
+    placeBubble(hug, now, hug.visible);
     if (cursor) updateMouseCatch();
     requestAnimationFrame(frame);
   }
@@ -297,6 +438,12 @@
     }
   }
 
+  function applyFeatures(next) {
+    features = { ...features, ...next };
+    const now = performance.now();
+    if (!features.mouse) for (const pet of pets) { pet.shake = null; if (pet.state === 'look') goIdle(pet, now); }
+  }
+
   async function start() {
     const data = await api.load();
     pets = [createPet('cat', data.pets.cat, W() * 0.4), createPet('bunny', data.pets.bunny, W() * 0.6)];
@@ -305,8 +452,13 @@
     hug.h = hug.clip.height;
     hug.el.hidden = true;
     for (const pet of pets) { pet.el.hidden = true; setAnim(pet, '待机'); }
+    applyFeatures(data.features || {});
+    if (data.activity) activity = data.activity;
     applyShow(data.show);
     api.onShow(applyShow);
+    api.onFeatures(applyFeatures);
+    api.onActivity(onActivity);
+    api.onSitReminder(() => { if (features.sit) remind('开心蹦蹦', '起来活动一下吧', 4000); });
     api.onCursor(onCursor);
     window.addEventListener('mousemove', event => onCursor({ x: event.clientX, y: event.clientY }));
     requestAnimationFrame(frame);
