@@ -112,7 +112,7 @@ function setSize(size) {
 function togglePets() {
   if (!win) return;
   if (win.isVisible()) win.hide();
-  else { win.showInactive(); win.setAlwaysOnTop(true, 'screen-saver'); }
+  else { win.showInactive(); win.setAlwaysOnTop(true, 'screen-saver'); send('resync'); }
 }
 
 // ---- 开机自动启动 ----
@@ -198,7 +198,8 @@ function checkTyping() {
   if (!lastCursor || p.x !== lastCursor.x || p.y !== lastCursor.y) lastMouseMove = now;
   lastCursor = p;
   const watching = settings.features.activity || settings.features.typing;
-  const typing = watching && powerMonitor.getSystemIdleTime() <= 1 && now - lastMouseMove > 600;
+  // 鼠标正放在宠物身上时（点它、准备拖它）不算打字
+  const typing = watching && !mouseOnPet && powerMonitor.getSystemIdleTime() <= 1 && now - lastMouseMove > 600;
   if (typing !== activity.typing) { activity.typing = typing; send('activity', activity); }
 }
 
@@ -416,7 +417,8 @@ function createWindow() {
 }
 
 ipcMain.handle('load', () => loadAssets());
-ipcMain.on('set-ignore', (_event, ignore) => win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }));
+let mouseOnPet = false;
+ipcMain.on('set-ignore', (_event, ignore) => { mouseOnPet = !ignore; win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }); });
 function buildMenu() {
   return Menu.buildFromTemplate([
     ...(updateReady ? [{ label: `🎉 立即重启更新（${updateReady}）`, click: restartToUpdate }, { type: 'separator' }] : []),
@@ -465,6 +467,7 @@ function buildMenu() {
         click: () => setTrayIcon(icon.label),
       })),
     },
+    { label: '桌宠卡住了？刷新一下', click: () => { win?.webContents.reload(); } },
     { label: '开机自动启动', type: 'checkbox', checked: autoStartOn(), click: item => setAutoStart(item.checked) },
     { label: `检查更新（现在是 ${app.getVersion()}）`, click: () => runUpdateCheck(true) },
     { type: 'separator' },

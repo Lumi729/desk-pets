@@ -45,6 +45,7 @@
   let ignoringMouse = true;
   let hugCooldownUntil = 0;
   let lastTime = performance.now();
+  let lastMouseMove = 0;
   let nextClockCheck = 0;
   let lastNightNag = -Infinity;
   const mealsDone = new Set();
@@ -218,6 +219,7 @@
   function onPointerMove(pet, event) {
     const drag = pet.drag;
     if (!drag) return;
+    if (!(event.buttons & 1)) return releaseStuckDrag(event);
     if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) return;
     if (!drag.moved) {
       drag.moved = true;
@@ -269,14 +271,24 @@
     return null;
   }
 
-  function updateMouseCatch() {
+  let lastMouseSync = 0;
+  function updateMouseCatch(force = false) {
     const dragging = pets.some(pet => pet.drag);
     const over = cursor && petUnder(cursor.x, cursor.y);
     const ignore = !dragging && !over;
-    if (ignore !== ignoringMouse) {
+    const now = performance.now();
+    // 状态变了就告诉主程序；没变也每 3 秒再说一次（拖动时不打扰），万一哪里没对上能自己恢复
+    if (force || ignore !== ignoringMouse || (!dragging && now - lastMouseSync > 3000)) {
       ignoringMouse = ignore;
+      lastMouseSync = now;
       api.setIgnoreMouse(ignore);
     }
+  }
+
+  // 松开了鼠标却没收到「松开」（比如鼠标在别的地方松开）→ 当作已经松手，不会卡住
+  function releaseStuckDrag(event) {
+    if (event.buttons & 1) return;
+    for (const pet of pets) if (pet.drag) onPointerUp(pet, { type: 'pointercancel', pointerId: event.pointerId ?? 1 });
   }
 
   // 鼠标在宠物身上快速左右来回晃 → 害羞
@@ -690,8 +702,10 @@
     api.onSize(applySize);
     api.onPresence(online => { peerOnline = online; });
     api.onRemote(onRemote);
-    api.onCursor(onCursor);
-    window.addEventListener('mousemove', event => onCursor({ x: event.clientX, y: event.clientY }));
+    api.onCursor(point => { if (performance.now() - lastMouseMove > 250) onCursor(point); });
+    // 鼠标在窗口上移动时的位置最准；主程序每 0.1 秒报的位置只在最近没收到移动时用（宠物自己走到鼠标下面）
+    window.addEventListener('mousemove', event => { lastMouseMove = performance.now(); releaseStuckDrag(event); onCursor({ x: event.clientX, y: event.clientY }); });
+    api.onResync(() => { for (const pet of pets) pet.drag = null; updateMouseCatch(true); });
     requestAnimationFrame(frame);
   }
 
