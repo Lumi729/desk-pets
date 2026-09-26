@@ -43,6 +43,15 @@ jobs:
         if: steps.version.outputs.skip != 'true'
       - run: npm test
         if: steps.version.outputs.skip != 'true'
+      - name: 打上 v<版本号> 标签
+        if: steps.version.outputs.skip != 'true' && github.ref_type != 'tag'
+        shell: bash
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            git tag "$tag"
+            git push origin "$tag"
+          fi
       - name: 打包并发布到 Releases
         if: steps.version.outputs.skip != 'true'
         run: npx electron-builder --win nsis --publish always
