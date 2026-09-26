@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { gifInfo } = require('./lib/gif');
 const { watchForeground } = require('./lib/activity');
+const { createTypingDetector } = require('./lib/typing');
 const { pixelTrayImage } = require('./lib/pixel-icon');
 const { autoUpdater } = require('electron-updater');
 const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
@@ -189,17 +190,17 @@ function updateWatcher() {
   if (!settings.features.perch) sendLedge(null);
 }
 
-// 打字：刚有输入，但鼠标没动 → 大概是在敲键盘。不读取任何按键。
+// 打字：一直有输入、鼠标又没动 → 大概是在敲键盘（单独点一下鼠标不算）。不读取任何按键。
+const detectTyping = createTypingDetector();
 let lastCursor = null;
-let lastMouseMove = 0;
 function checkTyping() {
   const p = screen.getCursorScreenPoint();
   const now = Date.now();
-  if (!lastCursor || p.x !== lastCursor.x || p.y !== lastCursor.y) lastMouseMove = now;
+  const mouseMoved = !lastCursor || p.x !== lastCursor.x || p.y !== lastCursor.y;
   lastCursor = p;
   const watching = settings.features.activity || settings.features.typing;
   // 鼠标正放在宠物身上时（点它、准备拖它）不算打字
-  const typing = watching && !mouseOnPet && powerMonitor.getSystemIdleTime() <= 1 && now - lastMouseMove > 600;
+  const typing = detectTyping({ now, idleSeconds: powerMonitor.getSystemIdleTime(), mouseMoved: mouseMoved || mouseOnPet }) && watching;
   if (typing !== activity.typing) { activity.typing = typing; send('activity', activity); }
 }
 
