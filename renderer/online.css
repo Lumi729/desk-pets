@@ -9,3 +9,10 @@ small { display: block; margin-top: 4px; color: #977184; }
 .row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 button { padding: 8px 16px; border: 2px solid #e9aec6; border-radius: 10px; background: #fff; color: inherit; font: inherit; cursor: pointer; }
 button[type=submit] { background: #e9aec6; border-color: #d795b0; color: #4a2939; font-weight: 600; }
+.row.left { justify-content: flex-start; align-items: center; }
+#copied { color: #977184; font-size: 13px; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: #977184; }
+.row.left button { white-space: nowrap; padding: 6px 12px; }
+.row.left { flex-wrap: wrap; }
+#copied { flex-basis: 100%; }

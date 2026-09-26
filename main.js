@@ -1,11 +1,12 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, powerMonitor, screen } = require('electron');
+const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, screen, shell } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { gifInfo } = require('./lib/gif');
 const { watchForeground } = require('./lib/activity');
 const { pixelTrayImage } = require('./lib/pixel-icon');
-const { OnlineLink, cleanName } = require('./lib/online');
+const { checkForUpdate } = require('./lib/update');
+const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
 
 const ASSETS = path.join(__dirname, '桌宠素材');
 const PETS = [
@@ -25,6 +26,7 @@ const FEATURES = [
   { key: 'typing', label: '打字反应（一直打字就陪你敲代码）' },
   { key: 'system', label: '电脑状态（CPU 很忙冒冷汗 / 电量低）' },
   { key: 'perch', label: '站在窗口顶上' },
+  { key: 'update', label: '自动检查更新' },
 ];
 // 托盘图标：菜单里的名字 → 「托盘图标」文件夹里的文件名（按顺序找第一个有的）
 const TRAY_ICONS = [
@@ -88,7 +90,7 @@ function loadAssets() {
     }
     pets[pet.id] = { name: pet.name, anims };
   }
-  return { show: settings.show, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, pets, hug: readGif(path.join(ASSETS, '贴贴.gif')) };
+  return { screens: screensForPage(), show: settings.show, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, pets, hug: readGif(path.join(ASSETS, '贴贴.gif')) };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -133,6 +135,7 @@ function setFeature(key, on) {
   if (key === 'activity' || key === 'perch') updateWatcher();
   refreshTray();
   if (key === 'sit') sitStart = null;
+  if (key === 'update' && on) runUpdateCheck();
   if (key === 'system') { hotCount = 0; coolCount = 0; setCpuHot(false); }
   if (key === 'typing' || key === 'activity') checkTyping();
 }
@@ -249,9 +252,12 @@ let lastPetSent = 0;
 online.on('change', () => { send('presence', online.peerOnline); refreshTray(); });
 online.on('remote', message => send('remote', message));
 
+const serverAddress = () => settings.online.server.trim() || DEFAULT_SERVER;
+
 function startOnline() {
-  const { code, server } = settings.online;
-  if (!settings.online.enabled || code.trim().length < 4 || !server.trim()) return online.stop();
+  const { code } = settings.online;
+  const server = serverAddress();
+  if (!settings.online.enabled || code.trim().length < 4 || !server) return online.stop();
   try { online.start(server, code); } catch (error) { console.error('联网失败', error.message); online.stop(); }
 }
 
@@ -272,7 +278,7 @@ function openOnlineSettings() {
   if (onlineWindow) { onlineWindow.show(); onlineWindow.focus(); return; }
   onlineWindow = new BrowserWindow({
     width: 380,
-    height: 440,
+    height: 500,
     useContentSize: true,
     resizable: false,
     minimizable: false,
@@ -288,7 +294,9 @@ function openOnlineSettings() {
   onlineWindow.on('closed', () => { onlineWindow = null; });
 }
 
-ipcMain.handle('online-get', () => ({ ...settings.online }));
+ipcMain.handle('online-get', () => ({ ...settings.online, defaultServer: DEFAULT_SERVER }));
+ipcMain.handle('online-random-code', () => randomPairCode());
+ipcMain.on('copy-text', (_event, text) => clipboard.writeText(String(text).slice(0, 200)));
 ipcMain.handle('online-save', (_event, next) => {
   settings.online = {
     enabled: true,
@@ -314,14 +322,50 @@ function pokePeer() {
   online.send('poke', settings.online.name);
 }
 
+// ---- 检查更新（GitHub Releases） ----
+let update = null;           // { version, url }
+let updateTold = '';
+async function runUpdateCheck(manual = false) {
+  if (!manual && !settings.features.update) return;
+  try {
+    update = await checkForUpdate(app.getVersion());
+    refreshTray();
+    if (update && (manual || updateTold !== update.version)) {
+      updateTold = update.version;
+      send('say', `有新版本 ${update.version} 啦，右键托盘图标去下载～`);
+    } else if (!update && manual) {
+      send('say', '已经是最新版啦 ♡');
+    }
+  } catch {
+    if (manual) send('say', '检查更新失败了，等会儿再试试');
+  }
+}
+
+// ---- 多个显示器：一个透明窗口盖住所有屏幕，每块屏幕的底部都是地面 ----
+function allScreensBounds() {
+  const areas = screen.getAllDisplays().map(d => d.workArea);
+  const x = Math.min(...areas.map(a => a.x)), y = Math.min(...areas.map(a => a.y));
+  const right = Math.max(...areas.map(a => a.x + a.width)), bottom = Math.max(...areas.map(a => a.y + a.height));
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+function screensForPage() {
+  const b = win ? win.getBounds() : allScreensBounds();
+  const primary = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map(d => ({
+    x: d.workArea.x - b.x, y: d.workArea.y - b.y, w: d.workArea.width, h: d.workArea.height, primary: d.id === primary,
+  }));
+}
+
 function fitToScreen() {
   if (!win) return;
-  win.setBounds(screen.getPrimaryDisplay().workArea);
+  win.setBounds(allScreensBounds());
+  send('screens', screensForPage());
 }
 
 function createWindow() {
   win = new BrowserWindow({
-    ...screen.getPrimaryDisplay().workArea,
+    ...allScreensBounds(),
     transparent: true,
     backgroundColor: '#00000000',
     frame: false,
@@ -364,6 +408,7 @@ ipcMain.handle('load', () => loadAssets());
 ipcMain.on('set-ignore', (_event, ignore) => win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }));
 function buildMenu() {
   return Menu.buildFromTemplate([
+    ...(update ? [{ label: `🎉 有新版本 ${update.version}，点这里下载`, click: () => shell.openExternal(update.url) }, { type: 'separator' }] : []),
     ...SHOW_CHOICES.map(choice => ({
       label: choice.label,
       type: 'radio',
@@ -396,7 +441,7 @@ function buildMenu() {
         { label: '联网设置（名字 / 配对码）…', click: openOnlineSettings },
         settings.online.enabled
           ? { label: '断开联网', click: () => setOnlineEnabled(false) }
-          : { label: '连接', enabled: settings.online.code.trim().length >= 4 && !!settings.online.server.trim(), click: () => setOnlineEnabled(true) },
+          : { label: '连接', enabled: settings.online.code.trim().length >= 4 && !!serverAddress(), click: () => setOnlineEnabled(true) },
       ],
     },
     { type: 'separator' },
@@ -410,6 +455,7 @@ function buildMenu() {
       })),
     },
     { label: '开机自动启动', type: 'checkbox', checked: autoStartOn(), click: item => setAutoStart(item.checked) },
+    { label: `检查更新（现在是 ${app.getVersion()}）`, click: () => runUpdateCheck(true) },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ]);
@@ -463,6 +509,8 @@ if (!app.requestSingleInstanceLock()) {
     updateWatcher();
     createTray();
     startOnline();
+    setTimeout(runUpdateCheck, 15_000);
+    setInterval(runUpdateCheck, 6 * 60 * 60_000);
     screen.on('display-metrics-changed', fitToScreen);
     screen.on('display-added', fitToScreen);
     screen.on('display-removed', fitToScreen);

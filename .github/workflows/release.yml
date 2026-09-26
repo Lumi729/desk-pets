@@ -1,0 +1,40 @@
+# 发布新版本：推送 v 开头的标签（比如 v1.1.0），或者在 GitHub 的 Actions 页面手动点「Run workflow」。
+# 会在 Windows 上打包 exe，并建一个 GitHub Release 把 exe 放上去；桌宠的「检查更新」就是看这里。
+name: 打包发布
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 读版本号
+        id: version
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::标签 $GITHUB_REF_NAME 和 package.json 里的版本 $version 对不上"
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm test
+      - run: npx electron-builder --win portable --publish never
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: 千千梨梨桌宠 ${{ steps.version.outputs.tag }}
+          files: dist/*.exe
+          generate_release_notes: true

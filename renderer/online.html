@@ -12,7 +12,16 @@
     <label>我的名字<input id="name" maxlength="20" required placeholder="千千"></label>
     <small>对方摸你的宠物时，会显示「名字在摸你」。</small>
     <label>配对码<input id="code" minlength="4" maxlength="64" required placeholder="两个人填一样的，至少 4 个字"></label>
-    <label>服务器地址<input id="server" required placeholder="desk-pets-relay.你的名字.workers.dev"></label>
+    <div class="row left">
+      <button type="button" id="random">随机生成配对码</button>
+      <button type="button" id="copy">复制</button>
+      <span id="copied" role="status"></span>
+    </div>
+    <details id="advanced">
+      <summary>服务器地址</summary>
+      <label>服务器地址<input id="server" placeholder="desk-pets-relay.你的名字.workers.dev"></label>
+      <small id="server-hint"></small>
+    </details>
     <small>只会传「摸摸」「戳一下」和是否在线，不传屏幕、窗口或键盘信息。</small>
     <p id="error" role="alert"></p>
     <div class="row">

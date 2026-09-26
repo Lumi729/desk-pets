@@ -17,3 +17,6 @@
 - 前台窗口由 `lib/activity.js` 里的隐藏 PowerShell 读取：「看我在做什么」开着才读程序名和标题（只在内存里分类），「站在窗口顶上」只要窗口位置。
 - 联网：客户端在 `lib/online.js`（主进程），服务端在 `server/`（Cloudflare Workers + Durable Objects，`npm run deploy` 部署）。只允许转发 `pet`、`poke` 两种事件和在线人数，不要加任何屏幕 / 窗口 / 键盘数据。
 - 托盘图标用 `lib/pixel-icon.js` 从 `-256.png` 最近邻缩小，保持像素清晰。
+- 联网默认服务器地址写在 `lib/online.js` 的 `DEFAULT_SERVER`。
+- 发布新版本：改 `package.json` 的 version，提交推送后再推送同名标签（如 `git tag v1.1.0 && git push origin v1.1.0`），`.github/workflows/release.yml` 会在 Windows 上打包 exe 并建 GitHub Release；桌宠的「检查更新」读的就是它（`lib/update.js`）。
+- 多显示器：一个透明窗口盖住所有屏幕，`screens` 是每块屏幕在页面里的位置，每只宠物用 `pet.si` 记住自己在哪块屏幕，`floorOf(pet)` 是那块屏幕的地面。

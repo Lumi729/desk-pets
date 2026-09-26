@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('petApi', {
   onSize: fn => ipcRenderer.on('size', (_event, size) => fn(size)),
   onPresence: fn => ipcRenderer.on('presence', (_event, online) => fn(online)),
   onRemote: fn => ipcRenderer.on('remote', (_event, message) => fn(message)),
+  onScreens: fn => ipcRenderer.on('screens', (_event, screens) => fn(screens)),
+  onSay: fn => ipcRenderer.on('say', (_event, text) => fn(text)),
   onPerch: fn => ipcRenderer.on('perch', (_event, ledge) => fn(ledge)),
   onCpuHot: fn => ipcRenderer.on('cpu-hot', (_event, hot) => fn(hot)),
   onSitReminder: fn => ipcRenderer.on('sit-reminder', () => fn()),

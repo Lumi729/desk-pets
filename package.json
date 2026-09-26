@@ -23,11 +23,16 @@
     ],
     "win": {
       "target": "portable",
-      "artifactName": "千千梨梨桌宠-${version}.exe"
+      "icon": "桌宠素材/托盘图标/千千猫猫.ico",
+      "artifactName": "desk-pets-${version}.exe"
     }
   },
   "devDependencies": {
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lumi729/desk-pets.git"
   }
 }

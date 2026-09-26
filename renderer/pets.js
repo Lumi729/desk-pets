@@ -35,6 +35,7 @@
   let features = { time: true, sit: true, mouse: true, activity: true, typing: true, system: true, perch: true };
   let size = 1;                   // 右键菜单里的「大小」
   let peerOnline = false;          // 联网的对方在不在线（在线就头顶冒小爱心）
+  let screens = [{ x: 0, y: 0, w: window.innerWidth, h: window.innerHeight, primary: true }]; // 每块屏幕（页面坐标）
   let ledge = null;                // 当前窗口顶边 { id, x, y, w }（页面坐标），没有就是 null
   let activity = { kind: null, typing: false };
   let typingSince = 0;
@@ -240,7 +241,9 @@
     pet.lastAttention = now;
     if (drag.moved) {
       pet.vy = 0;
-      if (pet.y > 0) dropFrom(pet); else goIdle(pet, now);
+      pet.si = screenAt(pet.x, H() - pet.y - pet.h / 2); // 松手时在哪块屏幕上，就落到那块屏幕的底部
+      if (pet.y < floorOf(pet)) pet.y = floorOf(pet);
+      if (pet.y > floorOf(pet)) dropFrom(pet); else goIdle(pet, now);
     } else if (event.type === 'pointerup') {
       playRandomAction(pet, now);
       api.touched();
@@ -350,13 +353,13 @@
     pet.state = 'fall';
     pet.onLedge = false;
     pet.vy = 0;
-    pet.fallFrom = pet.y;
+    pet.fallFrom = pet.y - floorOf(pet);
     pet.landAnim = landAnim;
     setAnim(pet, '掉落');
   }
 
   function land(pet, now) {
-    pet.y = 0;
+    pet.y = floorOf(pet);
     pet.vy = 0;
     pet.lastAttention = now;
     if (pet.fallFrom >= SPLAT_HEIGHT) playNamed(pet, pet.landAnim, now, 0); // 播一遍，播完回待机
@@ -372,17 +375,20 @@
   }
 
   function walkRange(pet) {
-    const screen = [pet.w / 2, W() - pet.w / 2];
+    const screen = xRange(pet);
     if (!pet.onLedge || !ledge) return screen;
     const [min, max] = ledgeRange(pet);
     return [Math.max(min, screen[0]), Math.min(max, screen[1])];
   }
 
-  const wantsLedge = pet => !pet.onLedge && pet.y === 0 && ledge && ledgeUsable(pet);
+  const wantsLedge = pet => !pet.onLedge && onFloor(pet) && ledge && ledgeUsable(pet);
 
   // 窗口顶边要在屏幕里、上面放得下宠物、离地面也够高
   function ledgeUsable(pet) {
-    return features.perch && ledge && ledge.y - pet.h >= 0 && ledgeHeight() >= 80 && ledge.x + ledge.w > 0 && ledge.x < W();
+    if (!features.perch || !ledge) return false;
+    const s = screenOf(pet);
+    const centre = ledge.x + ledge.w / 2;
+    return centre > s.x && centre < s.x + s.w && ledge.y - pet.h >= s.y && ledgeHeight() - floorOf(pet) >= 80;
   }
 
   function jumpUp(pet) {
@@ -437,6 +443,35 @@
     } catch {}
   }
 
+  // ---- 多个显示器 ----
+  const primaryIndex = () => Math.max(0, screens.findIndex(s => s.primary));
+  const screenOf = pet => screens[pet.si] || screens[primaryIndex()];
+  const floorOf = pet => { const s = screenOf(pet); return H() - (s.y + s.h); }; // 这块屏幕的地面离窗口底部多高
+  const onFloor = pet => Math.abs(pet.y - floorOf(pet)) < 0.5;
+  const xRange = pet => { const s = screenOf(pet); return [s.x + pet.w / 2, s.x + s.w - pet.w / 2]; };
+
+  function screenAt(x, y) {
+    const inside = screens.findIndex(s => x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h);
+    if (inside >= 0) return inside;
+    let best = 0, bestDistance = Infinity;
+    screens.forEach((s, i) => {
+      const dx = Math.max(s.x - x, 0, x - (s.x + s.w)), dy = Math.max(s.y - y, 0, y - (s.y + s.h));
+      if (dx * dx + dy * dy < bestDistance) { bestDistance = dx * dx + dy * dy; best = i; }
+    });
+    return best;
+  }
+
+  function onScreens(next) {
+    if (!next?.length) return;
+    screens = next;
+    const now = performance.now();
+    for (const pet of pets) {
+      if (pet.state === 'drag') continue;
+      pet.si = screenAt(pet.x, H() - pet.y - pet.h / 2);
+      if (!pet.onLedge && pet.state !== 'fall' && pet.state !== 'jump') { pet.y = floorOf(pet); if (pet.state === 'hug') continue; goIdle(pet, now); }
+    }
+  }
+
   // ---- 大小 ----
   function applySize(next) {
     size = next;
@@ -467,7 +502,7 @@
 
   // ---- 贴贴 ----
   function canHug(pet) {
-    return pet.visible && (pet.state === 'idle' || pet.state === 'walk' || pet.state === 'look') && pet.y === 0;
+    return pet.visible && (pet.state === 'idle' || pet.state === 'walk' || pet.state === 'look') && onFloor(pet);
   }
 
   function startHug(a, b, now) {
@@ -475,7 +510,9 @@
     const mid = (a.x + b.x) / 2;
     for (const pet of [a, b]) { pet.state = 'hug'; pet.el.hidden = true; }
     hug.visible = true;
-    hug.x = Math.min(Math.max(mid, hug.w / 2), W() - hug.w / 2);
+    const s = screenOf(left);
+    hug.x = Math.min(Math.max(mid, s.x + hug.w / 2), s.x + s.w - hug.w / 2);
+    hug.y = floorOf(left);
     hug.el.hidden = false;
     playClip(hug, hug.clip);
     hug.pair = [left, right];
@@ -543,7 +580,7 @@
       case 'fall':
         pet.vy += GRAVITY * dt;
         pet.y -= pet.vy * dt;
-        if (pet.y <= 0) land(pet, now);
+        if (pet.y <= floorOf(pet)) land(pet, now);
         break;
       case 'jump': {
         const before = pet.y;
@@ -561,7 +598,7 @@
             break;
           }
         }
-        if (pet.y <= 0) { pet.y = 0; pet.vy = 0; goIdle(pet, now); }
+        if (pet.y <= floorOf(pet)) { pet.y = floorOf(pet); pet.vy = 0; goIdle(pet, now); }
         break;
       }
     }
@@ -579,7 +616,7 @@
     if (now >= nextClockCheck) { nextClockCheck = now + 30_000; checkClock(now); checkBattery(now); }
     for (const pet of pets) {
       if (pet.visible) {
-        if (pet.state !== 'drag' && pet.state !== 'fall' && pet.state !== 'jump') pet.x = Math.min(Math.max(pet.x, pet.w / 2), W() - pet.w / 2);
+        if (pet.state !== 'drag' && pet.state !== 'fall' && pet.state !== 'jump') { const [min, max] = xRange(pet); pet.x = Math.min(Math.max(pet.x, min), max); }
         think(pet, now, dt);
         place(pet);
       }
@@ -589,7 +626,7 @@
     if (hug.pair) {
       if (now >= hug.until) endHug(now);
       else place(hug);
-    } else if (pets.length === 2 && now >= hugCooldownUntil && canHug(pets[0]) && canHug(pets[1]) && Math.abs(pets[0].x - pets[1].x) < HUG_DISTANCE) {
+    } else if (pets.length === 2 && now >= hugCooldownUntil && canHug(pets[0]) && canHug(pets[1]) && pets[0].si === pets[1].si && Math.abs(pets[0].x - pets[1].x) < HUG_DISTANCE) {
       startHug(pets[0], pets[1], now);
       place(hug);
     }
@@ -605,7 +642,7 @@
     if (hug.pair) endHug(now);
     for (const pet of pets) {
       const visible = show === 'both' || show === pet.id;
-      if (visible && !pet.visible) { pet.y = 0; pet.onLedge = false; pet.lastAttention = now; pet.anim = ''; goIdle(pet, now); }
+      if (visible && !pet.visible) { pet.si = primaryIndex(); pet.y = floorOf(pet); pet.onLedge = false; pet.lastAttention = now; pet.anim = ''; goIdle(pet, now); }
       pet.visible = visible;
       pet.el.hidden = !visible;
       if (!visible) pet.drag = null;
@@ -622,7 +659,10 @@
 
   async function start() {
     const data = await api.load();
-    pets = [createPet('cat', data.pets.cat, W() * 0.4), createPet('bunny', data.pets.bunny, W() * 0.6)];
+    if (data.screens?.length) screens = data.screens;
+    const home = screens[primaryIndex()];
+    pets = [createPet('cat', data.pets.cat, home.x + home.w * 0.4), createPet('bunny', data.pets.bunny, home.x + home.w * 0.6)];
+    for (const pet of pets) { pet.si = primaryIndex(); pet.y = floorOf(pet); }
     hug = { ...makeSprite('pet hug'), clip: makeClip(data.hug), x: 0, y: 0, pair: null, until: 0, visible: false };
     size = data.size || 1;
     fitSize(hug);
@@ -638,6 +678,8 @@
     api.onSitReminder(() => { if (features.sit) remind('开心蹦蹦', '起来活动一下吧', 4000); });
     api.onCpuHot(onCpuHot);
     api.onPerch(onPerch);
+    api.onScreens(onScreens);
+    api.onSay(text => { for (const pet of pets) if (pet.visible) say(pet.state === 'hug' ? hug : pet, text, 10_000); });
     api.onSize(applySize);
     api.onPresence(online => { peerOnline = online; });
     api.onRemote(onRemote);

@@ -22,3 +22,11 @@ test('names are trimmed and kept short', () => {
   assert.strictEqual(cleanName('  千千\n'), '千千');
   assert.strictEqual(cleanName('a'.repeat(50)).length, 20);
 });
+
+const { randomPairCode } = require('../lib/online');
+
+test('random pairing codes are long and use easy-to-read letters', () => {
+  const codes = new Set(Array.from({ length: 200 }, () => randomPairCode()));
+  assert.strictEqual(codes.size, 200);
+  for (const code of codes) assert.match(code, /^[a-hjkmnp-z2-9]{10}$/);
+});
