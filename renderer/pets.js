@@ -583,7 +583,13 @@
       stage.append(button);
       actionButtons.set(id, button);
     }
-    button.onclick = onClick;
+    // 按下去就算点到（不等松手），这样鼠标稍微一动、或者窗口刚切到「接住点击」时也不会漏掉
+    button.onpointerdown = event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClick();
+    };
     button.textContent = text;
   }
   function hideActionButton(id) {

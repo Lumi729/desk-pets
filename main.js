@@ -237,9 +237,7 @@ function checkPomodoro() {
     pomodoro = { mode: null, endsAt: 0 };
     send('ask-continue');
     if (Notification.isSupported()) {
-      const note = new Notification({ title: '休息好啦', body: '要继续专注吗？点这里再来一个番茄钟', icon: trayImage(settings.trayIcon) });
-      note.on('click', startFocus);
-      note.show();
+      showNote({ title: '休息好啦', body: '要继续专注吗？点这里再来一个番茄钟', icon: trayImage(settings.trayIcon) }, startFocus);
     }
   }
   refreshTray();
@@ -534,21 +532,45 @@ function runUpdateCheck(manual = false) {
 }
 
 // Windows 右下角弹一条通知，点一下就重启更新
-function notifyUpdateReady() {
+// 通知要一直留着引用，不然 Windows 上点通知时它可能已经被回收，点了没反应
+const liveNotes = new Set();
+function showNote(options, onClick) {
   if (!Notification.isSupported()) return;
-  const note = new Notification({
-    title: '千千梨梨桌宠有新版本啦',
-    body: `${updateReady} 已经下载好了，点这里重启就能用 ♡`,
-    icon: trayImage(settings.trayIcon),
-  });
-  note.on('click', restartToUpdate);
+  const note = new Notification(options);
+  liveNotes.add(note);
+  note.on('click', () => { liveNotes.delete(note); onClick(); });
+  note.on('close', () => liveNotes.delete(note));
   note.show();
 }
 
-ipcMain.on('restart-update', () => { if (updateReady) restartToUpdate(); });
+function notifyUpdateReady() {
+  showNote({
+    title: '千千梨梨桌宠有新版本啦',
+    body: `${updateReady} 已经下载好了，点这里重启就能用 ♡`,
+    icon: trayImage(settings.trayIcon),
+  }, restartToUpdate);
+}
 
+ipcMain.on('restart-update', () => restartToUpdate());
+
+// 不管从哪里点（托盘菜单、宠物头上的按钮、右下角通知），都走这一个：
+// 先等点击这件事做完，再关掉所有窗口、去掉「窗口都关了就退出」，然后安静地装好并自动重新打开
+let restarting = false;
 function restartToUpdate() {
-  autoUpdater.quitAndInstall(true, true); // 安静地装好，然后自动重新打开
+  if (!updateReady || restarting) return;
+  restarting = true;
+  send('say', '正在重启更新…');
+  setTimeout(() => {
+    try {
+      app.removeAllListeners('window-all-closed');
+      for (const w of BrowserWindow.getAllWindows()) w.destroy();
+      tray?.destroy();
+      autoUpdater.quitAndInstall(true, true);
+    } catch (error) {
+      restarting = false;
+      console.error('重启更新失败', error);
+    }
+  }, 300);
 }
 
 // ---- 多个显示器：一个透明窗口盖住所有屏幕，每块屏幕的底部都是地面 ----
