@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+  <title>小设置</title>
+  <link rel="stylesheet" href="online.css">
+</head>
+<body>
+  <form id="form">
+    <h1>小设置 ♡</h1>
+    <label>天气城市<input id="city" maxlength="40" required placeholder="长沙"></label>
+    <small>每 30 分钟查一次这个城市的天气。</small>
+    <h2>宠物生日</h2>
+    <small>写成「3-14」或「3月14日」，不写就不过生日。</small>
+    <div id="birthdays"></div>
+    <h2>番茄钟</h2>
+    <div class="row left">
+      <label class="inline">专注<input id="focus" type="number" min="1" max="180" required> 分钟</label>
+      <label class="inline">休息<input id="rest" type="number" min="1" max="180" required> 分钟</label>
+    </div>
+    <p id="error" role="alert"></p>
+    <div class="row">
+      <button type="button" id="cancel">取消</button>
+      <button type="submit">保存</button>
+    </div>
+  </form>
+  <script src="more.js"></script>
+</body>
+</html>

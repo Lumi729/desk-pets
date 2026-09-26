@@ -50,8 +50,9 @@
     return canUse(key) ? key : null;
   }
 
-  // 贴贴文件夹里的文件名 → 组合名和种类：「组合名.gif」贴贴，「组合名_2.gif」叠叠乐，「组合名_打架.gif」贴贴完的打架剧情
-  const SUFFIX_KINDS = { _2: 'stack', _打架: 'fight' };
+  // 贴贴文件夹里的文件名 → 组合名和种类：「组合名.gif」贴贴，「组合名_2.gif」叠叠乐，
+  // 「组合名_打架.gif」贴贴完的打架剧情，「组合名_和好.gif」打完架过一阵再见面时先和好
+  const SUFFIX_KINDS = { _2: 'stack', _打架: 'fight', _和好: 'makeup' };
   function parseComboFile(base) {
     for (const [suffix, kind] of Object.entries(SUFFIX_KINDS)) {
       if (base.endsWith(suffix)) return { key: base.slice(0, -suffix.length), kind };

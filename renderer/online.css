@@ -16,3 +16,9 @@ summary { cursor: pointer; color: #977184; }
 .row.left button { white-space: nowrap; padding: 6px 12px; }
 .row.left { flex-wrap: wrap; }
 #copied { flex-basis: 100%; }
+h2 { margin: 18px 0 0; font-size: 15px; }
+label.inline { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+label.inline input { width: 70px; margin: 0; }
+.birthday { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-weight: 600; }
+.birthday span { width: 72px; }
+.birthday input { margin: 0; }

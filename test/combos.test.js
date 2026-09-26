@@ -52,20 +52,22 @@ test('file names map to combo and kind', () => {
   assert.deepStrictEqual(parseComboFile('千千猫猫-梨梨兔兔'), { key: '千千猫猫-梨梨兔兔', kind: 'row' });
   assert.deepStrictEqual(parseComboFile('千千猫猫-梨梨兔兔_2'), { key: '千千猫猫-梨梨兔兔', kind: 'stack' });
   assert.deepStrictEqual(parseComboFile('哥哥狗狗-梨梨哥哥_打架'), { key: '哥哥狗狗-梨梨哥哥', kind: 'fight' });
+  assert.deepStrictEqual(parseComboFile('哥哥狗狗-梨梨哥哥_和好'), { key: '哥哥狗狗-梨梨哥哥', kind: 'makeup' });
 });
 
-test('the fight is a follow-up to an existing hug, not another hug version', () => {
+test('fight and make-up are follow-ups to an existing hug, not other hug versions', () => {
   assert.ok(files.has('哥哥狗狗-梨梨哥哥_打架'));
+  assert.ok(files.has('哥哥狗狗-梨梨哥哥_和好'));
   for (const name of files) {
     const { key, kind } = parseComboFile(name);
-    if (kind === 'fight') assert.ok(files.has(key), `${name} 没有对应的贴贴`);
+    if (kind === 'fight' || kind === 'makeup') assert.ok(files.has(key), `${name} 没有对应的贴贴`);
   }
 });
 
 test('every hug file has both versions and uses known pet names', () => {
   for (const name of files) {
     const { key: base, kind } = parseComboFile(name);
-    if (kind === 'fight') continue;
+    if (kind === 'fight' || kind === 'makeup') continue;
     assert.ok(files.has(base) && files.has(`${base}_2`), base);
     assert.strictEqual(comboKey(base.split('-')), base);
     for (const pet of base.split('-')) assert.ok(ORDER.includes(pet), pet);

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Notification, Tray, clipboard, ipcMain, nativeImage, powerMonitor, screen } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, clipboard, ipcMain, nativeImage, powerMonitor, screen, shell } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -6,6 +6,8 @@ const { gifInfo } = require('./lib/gif');
 const { watchForeground } = require('./lib/activity');
 const { createTypingDetector } = require('./lib/typing');
 const { parseComboFile } = require('./renderer/combos');
+const { festivalOn, birthdaysOn, normalizeBirthday } = require('./lib/calendar');
+const { fetchWeather } = require('./lib/weather');
 const { pixelTrayImage } = require('./lib/pixel-icon');
 const { autoUpdater } = require('electron-updater');
 const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
@@ -21,6 +23,12 @@ const FEATURES = [
   { key: 'typing', label: '打字反应（一直打字就陪你敲代码）' },
   { key: 'system', label: '电脑状态（CPU 很忙冒冷汗 / 电量低）' },
   { key: 'perch', label: '站在窗口顶上' },
+  { key: 'makeup', label: '两个哥哥打完架过一阵会和好' },
+  { key: 'chase', label: '追着玩（绿眼猫猫突然冲过去）' },
+  { key: 'snack', label: '送零食（千千猫猫和梨梨兔兔互相送）' },
+  { key: 'weather', label: '天气（下雨 / 大晴天 / 降温换待机）' },
+  { key: 'festival', label: '过节（国庆 / 万圣节 / 圣诞 / 春节）' },
+  { key: 'birthday', label: '生日' },
   { key: 'update', label: '自动更新' },
   { key: 'compat', label: '兼容模式（屏幕卡住时试试，重启桌宠后生效）', off: true },
 ];
@@ -40,6 +48,9 @@ const settings = {
   trayIcon: '千千猫猫',
   features: Object.fromEntries(FEATURES.map(f => [f.key, !f.off])),
   online: { enabled: false, name: '千千', code: '', server: '' },
+  city: '长沙',
+  birthdays: {},                  // 宠物名 → 「MM-DD」
+  pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
 };
 
 function loadSettings() {
@@ -53,6 +64,14 @@ function loadSettings() {
     }
     if (TRAY_ICONS.includes(saved.trayIcon)) settings.trayIcon = saved.trayIcon;
     if (SIZES.includes(saved.size)) settings.size = saved.size;
+    if (typeof saved.city === 'string' && saved.city.trim()) settings.city = saved.city.trim().slice(0, 40);
+    if (saved.birthdays && typeof saved.birthdays === 'object') {
+      for (const name of PETS) { const md = normalizeBirthday(saved.birthdays[name]); if (md) settings.birthdays[name] = md; }
+    }
+    for (const key of ['focus', 'rest']) {
+      const n = Number(saved.pomodoro?.[key]);
+      if (n >= 1 && n <= 180) settings.pomodoro[key] = Math.round(n);
+    }
     if (saved.online && typeof saved.online === 'object') {
       settings.online.enabled = saved.online.enabled === true;
       for (const key of ['name', 'code', 'server']) if (typeof saved.online[key] === 'string') settings.online[key] = saved.online[key];
@@ -93,7 +112,7 @@ function loadAssets() {
     combos[key] = combos[key] || {};
     combos[key][kind] = readGif(path.join(comboDir, file));
   }
-  return { screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
+  return { today: computeToday(), weather: weather.kind, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -142,7 +161,139 @@ function setFeature(key, on) {
   if (key === 'update' && on) runUpdateCheck();
   if (key === 'system') { hotCount = 0; coolCount = 0; setCpuHot(false); }
   if (key === 'typing' || key === 'activity') checkTyping();
+  if (key === 'weather') { if (on) runWeather(); else setWeather(null); }
+  if (key === 'festival' || key === 'birthday') sendToday(true);
 }
+
+// ---- 天气（Open-Meteo，每 30 分钟查一次） ----
+let weather = { kind: null, place: '', temperature: null, error: '' };
+function setWeather(kind) {
+  weather.kind = kind;
+  send('weather', kind);
+  refreshTray();
+}
+async function runWeather() {
+  if (!settings.features.weather) return;
+  try {
+    const result = await fetchWeather(settings.city);
+    weather = { ...result, error: '' };
+    setWeather(result.kind);
+  } catch (error) {
+    weather.error = '查不到天气';
+    setWeather(null); // 查不到就用普通待机
+  }
+}
+function weatherLabel() {
+  if (!settings.features.weather) return `天气城市：${settings.city}…`;
+  if (weather.error) return `天气城市：${settings.city}（${weather.error}）…`;
+  const text = { rain: '下雨', sunny: '大晴天', cold: '有点冷' }[weather.kind] || '普通天气';
+  return `天气城市：${settings.city}（${text}${weather.temperature != null ? ` ${Math.round(weather.temperature)}°` : ''}）…`;
+}
+
+// ---- 过节 / 生日（每分钟看一下日期变了没有） ----
+let todayKey = '';
+function computeToday() {
+  const now = new Date();
+  return {
+    festival: settings.features.festival ? festivalOn(now) : null,
+    birthdays: settings.features.birthday ? birthdaysOn(now, settings.birthdays) : [],
+  };
+}
+function sendToday(force = false) {
+  const today = computeToday();
+  const key = JSON.stringify(today);
+  if (!force && key === todayKey) return;
+  todayKey = key;
+  send('today', today);
+}
+
+// ---- 番茄钟 ----
+let pomodoro = { mode: null, endsAt: 0 }; // mode: focus 专注 / rest 休息
+function startFocus() {
+  pomodoro = { mode: 'focus', endsAt: Date.now() + settings.pomodoro.focus * 60_000 };
+  send('focus', true);
+  refreshTray();
+}
+function stopFocus() {
+  pomodoro = { mode: null, endsAt: 0 };
+  send('focus', false);
+  refreshTray();
+}
+function checkPomodoro() {
+  if (!pomodoro.mode) return;
+  if (Date.now() < pomodoro.endsAt) return refreshTray(); // 更新菜单里的剩余时间
+  if (pomodoro.mode === 'focus') {
+    pomodoro = { mode: 'rest', endsAt: Date.now() + settings.pomodoro.rest * 60_000 };
+    send('focus', false);
+    send('focus-done');
+  } else {
+    pomodoro = { mode: null, endsAt: 0 };
+    send('ask-continue');
+    if (Notification.isSupported()) {
+      const note = new Notification({ title: '休息好啦', body: '要继续专注吗？点这里再来一个番茄钟', icon: trayImage(settings.trayIcon) });
+      note.on('click', startFocus);
+      note.show();
+    }
+  }
+  refreshTray();
+}
+const minutesLeft = () => Math.max(1, Math.ceil((pomodoro.endsAt - Date.now()) / 60_000));
+function pomodoroMenu() {
+  if (pomodoro.mode === 'focus') return [{ label: `🍅 专注中，还剩 ${minutesLeft()} 分钟`, enabled: false }, { label: '结束专注', click: stopFocus }];
+  if (pomodoro.mode === 'rest') return [{ label: `☕ 休息中，还剩 ${minutesLeft()} 分钟`, enabled: false }, { label: '现在就开始专注', click: startFocus }];
+  return [{ label: `🍅 开始专注（${settings.pomodoro.focus} 分钟）`, click: startFocus }];
+}
+ipcMain.on('start-focus', () => startFocus());
+
+// ---- 拍照：宠物们录成 3 秒的透明 GIF，存到「图片/桌宠照片」 ----
+ipcMain.on('save-photo', async (_event, bytes) => {
+  if (!bytes || !bytes.length) { send('say', '桌面上没有宠物可以拍哦'); return; }
+  try {
+    const dir = path.join(app.getPath('pictures'), '桌宠照片');
+    fs.mkdirSync(dir, { recursive: true });
+    const d = new Date(), pad = n => String(n).padStart(2, '0');
+    const name = `桌宠-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.gif`;
+    fs.writeFileSync(path.join(dir, name), Buffer.from(bytes));
+    send('say', '拍好啦 📷');
+    shell.openPath(dir);
+  } catch (error) {
+    send('say', '照片没存成功…');
+  }
+});
+
+// ---- 小设置窗口：天气城市、生日、番茄钟时间 ----
+let moreWindow = null;
+function openMoreSettings() {
+  if (moreWindow) { moreWindow.show(); moreWindow.focus(); return; }
+  moreWindow = new BrowserWindow({
+    width: 380, height: 660, useContentSize: true, resizable: false, minimizable: false, maximizable: false,
+    alwaysOnTop: true, autoHideMenuBar: true, title: '小设置', icon: trayImage(settings.trayIcon),
+    webPreferences: { preload: path.join(__dirname, 'renderer', 'more-preload.js'), contextIsolation: true, sandbox: true },
+  });
+  moreWindow.removeMenu();
+  moreWindow.loadFile(path.join(__dirname, 'renderer', 'more.html'));
+  moreWindow.on('closed', () => { moreWindow = null; });
+}
+ipcMain.handle('more-get', () => ({ pets: PETS, city: settings.city, birthdays: settings.birthdays, pomodoro: settings.pomodoro }));
+ipcMain.handle('more-save', (_event, next) => {
+  const cityChanged = String(next?.city || '').trim() && String(next.city).trim() !== settings.city;
+  if (String(next?.city || '').trim()) settings.city = String(next.city).trim().slice(0, 40);
+  settings.birthdays = {};
+  for (const name of PETS) { const md = normalizeBirthday(next?.birthdays?.[name]); if (md) settings.birthdays[name] = md; }
+  for (const key of ['focus', 'rest']) {
+    const n = Number(next?.pomodoro?.[key]);
+    if (n >= 1 && n <= 180) settings.pomodoro[key] = Math.round(n);
+  }
+  saveSettings();
+  if (cityChanged) runWeather();
+  sendToday(true);
+  refreshTray();
+  moreWindow?.close();
+});
+ipcMain.on('more-cancel', () => moreWindow?.close());
+
+// ---- 「测试一下」：马上看到各种效果 ----
+const sendTest = (type, value) => send('test', { type, value });
 
 // ---- 看前台窗口 ----
 // 「看我在做什么」：只得出类别，不保存标题。「站在窗口顶上」：只要窗口的位置。两个都关就完全不看。
@@ -460,12 +611,32 @@ function buildMenu() {
       })),
     },
     { type: 'separator' },
-    ...FEATURES.flatMap(feature => [{
-      label: feature.label,
-      type: 'checkbox',
-      checked: settings.features[feature.key],
-      click: item => setFeature(feature.key, item.checked),
-    }, ...(feature.key === 'perch' && settings.features.perch ? [{ label: `　　${PERCH_STATUS[perchStatus]}`, enabled: false }] : [])]),
+    {
+      label: '功能开关',
+      submenu: FEATURES.flatMap(feature => [{
+        label: feature.label,
+        type: 'checkbox',
+        checked: settings.features[feature.key],
+        click: item => setFeature(feature.key, item.checked),
+      }, ...(feature.key === 'perch' && settings.features.perch ? [{ label: `　　${PERCH_STATUS[perchStatus]}`, enabled: false }] : [])]),
+    },
+    { label: weatherLabel(), click: openMoreSettings },
+    { label: '宠物生日 / 番茄钟时间…', click: openMoreSettings },
+    { type: 'separator' },
+    ...pomodoroMenu(),
+    { label: '📷 拍照（录 3 秒 GIF）', click: () => send('photo') },
+    {
+      label: '测试一下',
+      submenu: [
+        { label: '过节', submenu: ['国庆', '万圣节', '圣诞', '春节'].map(name => ({ label: name, click: () => sendTest('festival', name) })) },
+        { label: '生日', submenu: PETS.map(name => ({ label: name, click: () => sendTest('birthday', name) })) },
+        { label: '天气', submenu: [['rain', '下雨'], ['sunny', '大晴天'], ['cold', '降温'], [null, '普通']].map(([kind, label]) => ({ label, click: () => send('weather', kind) })) },
+        { label: '追着玩', click: () => sendTest('chase') },
+        { label: '送零食', click: () => sendTest('snack') },
+        { label: '两个哥哥贴贴（接着打架）', click: () => sendTest('brothers') },
+        { label: '两个哥哥和好', click: () => sendTest('makeup') },
+      ],
+    },
     { type: 'separator' },
     { label: '戳一下对方', enabled: online.peerOnline, click: pokePeer },
     {
@@ -546,6 +717,9 @@ if (!app.requestSingleInstanceLock()) {
     updateWatcher();
     createTray();
     startOnline();
+    runWeather();
+    setInterval(runWeather, 30 * 60_000);
+    setInterval(() => { sendToday(); checkPomodoro(); }, 30_000);
     setupAutoUpdate();
     setTimeout(runUpdateCheck, 10_000);
     setInterval(runUpdateCheck, 3 * 60 * 60_000);
