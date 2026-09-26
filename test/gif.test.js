@@ -14,7 +14,7 @@ test('reads size, frames and loop duration', () => {
 test('every asset GIF parses', () => {
   for (const dir of ['千千猫猫', '梨梨兔兔']) {
     const names = fs.readdirSync(path.join(assets, dir));
-    for (const need of ['待机', '向左走', '向右走', '睡觉', '向左看', '向右看', '敲代码', '看视频', '跳舞', '吃饭', '开心蹦蹦', '害羞']) assert.ok(names.includes(`${need}.gif`), `${dir} 缺少 ${need}.gif`);
+    for (const need of ['待机', '向左走', '向右走', '睡觉', '向左看', '向右看', '敲代码', '看视频', '跳舞', '吃饭', '开心蹦蹦', '害羞', '掉落', '摔趴趴']) assert.ok(names.includes(`${need}.gif`), `${dir} 缺少 ${need}.gif`);
     for (const f of names) assert.ok(gifInfo(fs.readFileSync(path.join(assets, dir, f))).duration > 0, f);
   }
 });

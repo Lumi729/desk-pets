@@ -8,12 +8,19 @@
   const HUG_DISTANCE = 120;        // 两只靠多近会贴贴（像素）
   const HUG_COOLDOWN = 30_000;     // 贴贴完多久内不再贴贴（毫秒）
   const MIN_PLAY = 2_000;          // 很短的动作至少播这么久（会重复几遍）
-  const GRAVITY = 2_600;           // 拖到半空松手后掉下来的速度
+  const GRAVITY = 2_600;           // 重力：拖得越高，落地时越快
+  const SPLAT_HEIGHT = 40;         // 从多高掉下来才会摔趴趴（像素）
+  const TYPING_AFTER = 3_000;      // 连续打字多久开始陪你敲代码（毫秒）
+  const SWEAT_EVERY = 30_000;      // CPU 一直很忙时多久冒一次冷汗
+  const LOW_BATTERY_EVERY = 10 * 60_000; // 电量低时多久提醒一次
   const NIGHT_EVERY = 20 * 60_000; // 半夜多久催一次睡觉
   const MEALS = [[11 * 60 + 50, 12 * 60 + 30], [17 * 60 + 50, 18 * 60 + 30]]; // 12 点、18 点左右
   const SHAKE_STEP = 12;           // 鼠标来回晃：每次至少移动这么多像素
   const SHAKE_TURNS = 4;           // 1 秒内来回这么多次算「晃」
-  const CORE = ['待机', '向左走', '向右走', '睡觉', '向左看', '向右看'];
+  // 这些是特定时候才播的，点宠物时不会随机抽到
+  const CORE = ['待机', '向左走', '向右走', '睡觉', '向左看', '向右看', '掉落', '摔趴趴', '冒冷汗'];
+  // 还没有的动画先用这些代替
+  const FALLBACK = { '冒冷汗': '吓一跳' };
   const ACTIVITY_ANIM = { code: '敲代码', video: '看视频', music: '跳舞' };
 
   const api = window.petApi;
@@ -25,8 +32,11 @@
   let pets = [];
   let hug = null;
   let show = 'both';
-  let features = { time: true, sit: true, mouse: true, activity: true };
+  let features = { time: true, sit: true, mouse: true, activity: true, typing: true, system: true };
   let activity = { kind: null, typing: false };
+  let typingSince = 0;
+  let cpuHot = false;
+  let lastBatteryNag = -Infinity;
   let cursor = null;
   let ignoringMouse = true;
   let hugCooldownUntil = 0;
@@ -78,7 +88,7 @@
       actions: Object.keys(clips).filter(name => !CORE.includes(name)),
       ...makeSprite('pet'),
       x: startX, y: 0, vy: 0,
-      state: 'idle', anim: '', until: 0, nextThink: now + rand(1500, 4000), nextActivity: now + rand(3000, 8000),
+      state: 'idle', anim: '', until: 0, nextThink: now + rand(1500, 4000), nextActivity: now + rand(3000, 8000), nextSweat: 0,
       target: startX, lastAttention: now, visible: false, drag: null, shake: null, shyUntil: 0,
     };
     pet.el.title = data.name;
@@ -90,7 +100,8 @@
   }
 
   function resolveAnim(pet, name) {
-    return pet.clips[name] ? name : '待机';
+    if (pet.clips[name]) return name;
+    return pet.clips[FALLBACK[name]] ? FALLBACK[name] : '待机';
   }
 
   function setAnim(pet, name, restart = false) {
@@ -214,7 +225,7 @@
     pet.lastAttention = now;
     if (drag.moved) {
       pet.vy = 0;
-      if (pet.y > 0) { pet.state = 'fall'; } else goIdle(pet, now);
+      if (pet.y > 0) dropFrom(pet); else goIdle(pet, now);
     } else if (event.type === 'pointerup') {
       playRandomAction(pet, now);
     }
@@ -301,6 +312,7 @@
 
   // ---- 看你在做什么（只收到「写代码 / 看视频 / 听歌」这种类别） ----
   function onActivity(next) {
+    if (next.typing && !activity.typing) typingSince = performance.now();
     const changed = next.kind !== activity.kind || (next.typing && !activity.typing);
     activity = next;
     if (!changed || !next.kind) return;
@@ -315,6 +327,49 @@
     pet.lastAttention = now;
     playNamed(pet, ACTIVITY_ANIM[activity.kind], now, 4000);
     return true;
+  }
+
+  // ---- 掉落：从半空（以后也包括窗口顶上）掉到屏幕底部 ----
+  function dropFrom(pet) {
+    pet.state = 'fall';
+    pet.vy = 0;
+    pet.fallFrom = pet.y;
+    setAnim(pet, '掉落');
+  }
+
+  function land(pet, now) {
+    pet.y = 0;
+    pet.vy = 0;
+    pet.lastAttention = now;
+    if (pet.fallFrom >= SPLAT_HEIGHT) playNamed(pet, '摔趴趴', now, 0); // 播一遍，播完回待机
+    else goIdle(pet, now);
+  }
+
+  // ---- 打字反应：只知道「在不在打字」，不知道按了什么 ----
+  const isTypingLong = now => features.typing && activity.typing && now - typingSince >= TYPING_AFTER;
+
+  // ---- 电脑状态：CPU 很忙冒冷汗；电量低提醒 ----
+  function onCpuHot(hot) {
+    if (hot && !cpuHot) for (const pet of pets) pet.nextSweat = performance.now() + rand(500, 2000);
+    cpuHot = hot;
+  }
+
+  function maybeSweat(pet, now) {
+    if (!features.system || !cpuHot || now < pet.nextSweat) return false;
+    pet.nextSweat = now + SWEAT_EVERY;
+    pet.lastAttention = now;
+    playNamed(pet, '冒冷汗', now, 3000);
+    return true;
+  }
+
+  async function checkBattery(now) {
+    if (!features.system || !navigator.getBattery) return;
+    try {
+      const battery = await navigator.getBattery();
+      const low = !battery.charging && battery.level < 0.2;
+      if (!low) { lastBatteryNag = -Infinity; return; }
+      if (now - lastBatteryNag >= LOW_BATTERY_EVERY) { lastBatteryNag = now; remind('睡觉', '我也没电了……', 6000); }
+    } catch {}
   }
 
   // ---- 贴贴 ----
@@ -358,6 +413,8 @@
   function think(pet, now, dt) {
     switch (pet.state) {
       case 'idle':
+        if (isTypingLong(now)) { pet.state = 'typing'; setAnim(pet, '敲代码'); break; }
+        if (maybeSweat(pet, now)) break;
         if (maybeDoActivity(pet, now)) break;
         if (now - pet.lastAttention > SLEEP_AFTER) { pet.state = 'sleep'; setAnim(pet, '睡觉'); break; }
         if (now >= pet.nextThink) {
@@ -369,6 +426,7 @@
         }
         break;
       case 'walk': {
+        if (isTypingLong(now)) { pet.state = 'typing'; setAnim(pet, '敲代码'); break; }
         const step = WALK_SPEED * dt;
         if (Math.abs(pet.target - pet.x) <= step) { pet.x = pet.target; goIdle(pet, now); }
         else pet.x += Math.sign(pet.target - pet.x) * step;
@@ -377,10 +435,14 @@
       case 'action':
         if (now >= pet.until) goIdle(pet, now);
         break;
+      case 'typing':
+        if (!isTypingLong(now)) goIdle(pet, now);
+        else pet.lastAttention = now;
+        break;
       case 'fall':
         pet.vy += GRAVITY * dt;
         pet.y -= pet.vy * dt;
-        if (pet.y <= 0) { pet.y = 0; pet.vy = 0; goIdle(pet, now); }
+        if (pet.y <= 0) land(pet, now);
         break;
     }
   }
@@ -394,7 +456,7 @@
   function frame(now) {
     const dt = Math.min((now - lastTime) / 1000, 0.1);
     lastTime = now;
-    if (now >= nextClockCheck) { nextClockCheck = now + 30_000; checkClock(now); }
+    if (now >= nextClockCheck) { nextClockCheck = now + 30_000; checkClock(now); checkBattery(now); }
     for (const pet of pets) {
       if (pet.visible) {
         if (pet.state !== 'drag' && pet.state !== 'fall') pet.x = Math.min(Math.max(pet.x, pet.w / 2), W() - pet.w / 2);
@@ -432,6 +494,7 @@
     features = { ...features, ...next };
     const now = performance.now();
     if (!features.mouse) for (const pet of pets) { pet.shake = null; if (pet.state === 'look') goIdle(pet, now); }
+    if (!features.system) cpuHot = false;
   }
 
   async function start() {
@@ -449,6 +512,7 @@
     api.onFeatures(applyFeatures);
     api.onActivity(onActivity);
     api.onSitReminder(() => { if (features.sit) remind('开心蹦蹦', '起来活动一下吧', 4000); });
+    api.onCpuHot(onCpuHot);
     api.onCursor(onCursor);
     window.addEventListener('mousemove', event => onCursor({ x: event.clientX, y: event.clientY }));
     requestAnimationFrame(frame);

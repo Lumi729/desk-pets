@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld('petApi', {
   onCursor: fn => ipcRenderer.on('cursor', (_event, point) => fn(point)),
   onFeatures: fn => ipcRenderer.on('features', (_event, features) => fn(features)),
   onActivity: fn => ipcRenderer.on('activity', (_event, activity) => fn(activity)),
+  onCpuHot: fn => ipcRenderer.on('cpu-hot', (_event, hot) => fn(hot)),
   onSitReminder: fn => ipcRenderer.on('sit-reminder', () => fn()),
 });

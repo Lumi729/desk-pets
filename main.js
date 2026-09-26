@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, ipcMain, powerMonitor, screen } = require('electron');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { gifInfo } = require('./lib/gif');
 const { watchForeground } = require('./lib/activity');
@@ -19,6 +20,8 @@ const FEATURES = [
   { key: 'sit', label: '久坐提醒（60 分钟）' },
   { key: 'mouse', label: '鼠标互动（看鼠标 / 害羞）' },
   { key: 'activity', label: '看我在做什么（写代码 / 看视频 / 听歌）' },
+  { key: 'typing', label: '打字反应（一直打字就陪你敲代码）' },
+  { key: 'system', label: '电脑状态（CPU 很忙冒冷汗 / 电量低）' },
 ];
 
 const SIT_LIMIT = 60 * 60_000;   // 连续用电脑多久提醒
@@ -77,6 +80,8 @@ function setFeature(key, on) {
   send('features', settings.features);
   if (key === 'activity') updateActivityWatcher();
   if (key === 'sit') sitStart = null;
+  if (key === 'system') { hotCount = 0; coolCount = 0; setCpuHot(false); }
+  if (key === 'typing' || key === 'activity') checkTyping();
 }
 
 // ---- 看前台窗口（只得出类别，不保存标题） + 是否在打字 ----
@@ -102,9 +107,39 @@ function checkTyping() {
   const now = Date.now();
   if (!lastCursor || p.x !== lastCursor.x || p.y !== lastCursor.y) lastMouseMove = now;
   lastCursor = p;
-  if (!settings.features.activity) return;
-  const typing = powerMonitor.getSystemIdleTime() <= 1 && now - lastMouseMove > 2000;
+  const watching = settings.features.activity || settings.features.typing;
+  const typing = watching && powerMonitor.getSystemIdleTime() <= 1 && now - lastMouseMove > 2000;
   if (typing !== activity.typing) { activity.typing = typing; send('activity', activity); }
+}
+
+// ---- CPU 占用：连续 15 秒超过 85% 算很忙，连续 10 秒低于 70% 算缓过来了 ----
+let prevCpu = cpuTimes();
+let cpuHot = false;
+let hotCount = 0;
+let coolCount = 0;
+function cpuTimes() {
+  let idle = 0, total = 0;
+  for (const cpu of os.cpus()) {
+    for (const t of Object.values(cpu.times)) total += t;
+    idle += cpu.times.idle;
+  }
+  return { idle, total };
+}
+function setCpuHot(hot) {
+  if (hot === cpuHot) return;
+  cpuHot = hot;
+  send('cpu-hot', hot);
+}
+function checkCpu() {
+  const now = cpuTimes();
+  const total = now.total - prevCpu.total;
+  const usage = total > 0 ? 1 - (now.idle - prevCpu.idle) / total : 0;
+  prevCpu = now;
+  if (!settings.features.system) return;
+  hotCount = usage > 0.85 ? hotCount + 1 : 0;
+  coolCount = usage < 0.7 ? coolCount + 1 : 0;
+  if (hotCount >= 3) setCpuHot(true);
+  if (coolCount >= 2) setCpuHot(false);
 }
 
 // ---- 久坐 ----
@@ -161,7 +196,8 @@ function createWindow() {
   }, 100);
   const typingTimer = setInterval(checkTyping, 1000);
   const sitTimer = setInterval(checkSitting, 10_000);
-  win.on('closed', () => { clearInterval(cursorTimer); clearInterval(typingTimer); clearInterval(sitTimer); win = null; });
+  const cpuTimer = setInterval(checkCpu, 5_000);
+  win.on('closed', () => { clearInterval(cursorTimer); clearInterval(typingTimer); clearInterval(sitTimer); clearInterval(cpuTimer); win = null; });
 }
 
 ipcMain.handle('load', () => loadAssets());
