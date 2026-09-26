@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('petApi', {
   load: () => ipcRenderer.invoke('load'),
   setIgnoreMouse: ignore => ipcRenderer.send('set-ignore', ignore),
-  showMenu: () => ipcRenderer.send('menu'),
+  showMenu: petName => ipcRenderer.send('menu', petName),
   onShow: fn => ipcRenderer.on('show', (_event, value) => fn(value)),
   onCursor: fn => ipcRenderer.on('cursor', (_event, point) => fn(point)),
   onFeatures: fn => ipcRenderer.on('features', (_event, features) => fn(features)),
@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('petApi', {
   startFocus: () => ipcRenderer.send('start-focus'),
   onPhoto: fn => ipcRenderer.on('photo', () => fn()),
   savePhoto: bytes => ipcRenderer.send('save-photo', bytes),
+  onTease: fn => ipcRenderer.on('tease', (_event, name) => fn(name)),
   onTest: fn => ipcRenderer.on('test', (_event, test) => fn(test)),
   onSay: fn => ipcRenderer.on('say', (_event, text) => fn(text)),
   onPerch: fn => ipcRenderer.on('perch', (_event, ledge) => fn(ledge)),

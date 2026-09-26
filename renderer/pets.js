@@ -48,6 +48,7 @@
 
   let pets = [];
   const Combos = window.PetCombos;
+  const Teases = window.PetTeases;
   let combos = [];                 // 正在播的贴贴 / 叠叠乐
   let comboClips = {};             // 组合名 → { row: 贴贴, stack: 叠叠乐 }
   const comboCooldown = new Map(); // 「row/stack:组合名」→ 冷却到什么时候
@@ -60,6 +61,9 @@
   const needsMakeup = new Set();   // 打完架还没和好的组合
   let lastBirthdayBubble = -Infinity;
   let photoBusy = false;
+  let scenes = [];                 // 正在演的小剧情（挑衅）
+  let nextTease = performance.now() + 120_000;
+  const TEASE_NEAR = 600;          // 离得多近才会挑衅（像素）
   let features = { time: true, sit: true, mouse: true, activity: true, typing: true, system: true, perch: true };
   let size = 1;                   // 右键菜单里的「大小」
   let peerOnline = false;          // 联网的对方在不在线（在线就头顶冒小爱心）
@@ -127,7 +131,7 @@
     const now = performance.now();
     const pet = {
       id, name: data.name, clips,
-      actions: Object.keys(clips).filter(name => !CORE.includes(name)),
+      actions: Object.keys(clips).filter(name => !CORE.includes(name) && !Teases.isTeaseAnim(name)), // 挑衅_ / 回应_ 只在挑衅互动里用
       ...makeSprite('pet'),
       x: startX, y: 0, vy: 0,
       state: 'idle', anim: '', until: 0, nextThink: now + rand(1500, 4000), nextActivity: now + rand(3000, 8000), nextSweat: 0,
@@ -290,7 +294,8 @@
     }
   }
 
-  window.addEventListener('contextmenu', event => { event.preventDefault(); api.showMenu(); });
+  // 右键哪只宠物，菜单里就可能多出这只的专属选项（比如「挑衅哥哥」）
+  window.addEventListener('contextmenu', event => { event.preventDefault(); api.showMenu(petUnder(event.clientX, event.clientY)?.name || petBoxUnder(event.clientX, event.clientY)?.name || null); });
 
   // 鼠标在宠物身上（不透明的地方）时才接住点击，其他地方点击会穿透到桌面。
   function petBoxUnder(x, y) {
@@ -360,7 +365,7 @@
   // 鼠标靠近 → 发呆的宠物转头看鼠标。只是换个眼神，不打断任何事：
   // 它照样会去走路、睡觉、做动作、敲代码、跳上窗口，走路时也不会停下来看
   function lookAtMouse(pet, point, distance) {
-    const near = features.mouse && pet.state === 'idle' && distance < LOOK_DISTANCE;
+    const near = features.mouse && pet.state === 'idle' && !pet.inScene && distance < LOOK_DISTANCE;
     if (near) {
       const dx = point.x - pet.x;
       if (!pet.looking || Math.abs(dx) > 15) {
@@ -615,7 +620,7 @@
   const comboReady = (key, kind) => !!comboClips[key]?.[kind] && (comboCooldown.get(`${kind}:${key}`) || 0) <= performance.now();
 
   function canHug(pet) {
-    return pet.visible && !pet.combo && (pet.restUntil || 0) <= performance.now() && (pet.state === 'idle' || pet.state === 'walk') && (onFloor(pet) || pet.onLedge);
+    return pet.visible && !pet.combo && !pet.inScene && (pet.restUntil || 0) <= performance.now() && (pet.state === 'idle' || pet.state === 'walk') && (onFloor(pet) || pet.onLedge);
   }
 
   function makeCombo(kind, members, key, x, y, now, playFor) {
@@ -774,7 +779,7 @@
 
   // ---- 追着玩：绿眼猫猫突然冲向另一只，那只加速跑开，追一会儿一起开心蹦蹦 ----
   const byName = name => pets.find(pet => pet.name === name);
-  const isFree = pet => pet.visible && !pet.combo && !pet.drag && onFloor(pet) && ['idle', 'walk'].includes(pet.state);
+  const isFree = pet => pet.visible && !pet.combo && !pet.drag && !pet.inScene && onFloor(pet) && ['idle', 'walk'].includes(pet.state);
 
   function moveToward(pet, x, step, leftAnim, rightAnim) {
     const dx = x - pet.x;
@@ -787,21 +792,135 @@
     if (!cat || !isFree(cat)) return false;
     const others = pets.filter(p => p !== cat && isFree(p) && p.si === cat.si);
     if (!others.length) return false;
-    const target = pick(others);
-    cat.state = 'chase';
-    cat.chase = { target, until: now + rand(3500, 5500) };
-    target.state = 'flee';
-    target.chaser = cat;
-    target.fleeDir = Math.sign(target.x - cat.x) || 1;
-    cat.lastAttention = target.lastAttention = now;
+    startChase(cat, pick(others), now, true);
     return true;
   }
 
-  function endChase(cat, now) {
-    const target = cat.chase?.target;
-    cat.chase = null;
-    if (target && target.state === 'flee') { target.chaser = null; target.fleeDir = 0; playNamed(target, '开心蹦蹦', now, 2000); }
-    playNamed(cat, '开心蹦蹦', now, 2000);
+  // happy：追完两只一起开心蹦蹦；不然就是追一小会儿停下
+  function startChase(chaser, target, now, happy) {
+    chaser.state = 'chase';
+    chaser.chase = { target, until: now + rand(3500, 5500), happy };
+    target.state = 'flee';
+    target.chaser = chaser;
+    target.fleeDir = Math.sign(target.x - chaser.x) || 1;
+    chaser.lastAttention = target.lastAttention = now;
+  }
+
+  function endChase(chaser, now) {
+    const { target, happy } = chaser.chase || {};
+    chaser.chase = null;
+    if (target && target.state === 'flee') {
+      target.chaser = null;
+      target.fleeDir = 0;
+      if (happy) playNamed(target, '开心蹦蹦', now, 2000); else goIdle(target, now);
+    }
+    if (happy) playNamed(chaser, '开心蹦蹦', now, 2000); else goIdle(chaser, now);
+  }
+
+  // ---- 挑衅：千千猫猫挑衅哥哥狗狗，梨梨兔兔挑衅梨梨哥哥 ----
+  // 剧情一步一步演：每一步开始时做点什么，返回「这一步演完了没有」的判断
+  function play(pet, anim, now, minPlay = 1500) {
+    if (!pet.clips[anim]) return () => true;
+    playNamed(pet, anim, now, minPlay);
+    return t => pet.state !== 'action' || t >= pet.until;
+  }
+
+  function face(pet, other) {
+    if (!pet.clips['向左看']) return () => true;
+    setAnim(pet, other.x < pet.x ? '向左看' : '向右看', true);
+    const end = performance.now() + 700;
+    return t => t >= end;
+  }
+
+  function approach(pet, other) {
+    pet.state = 'approach';
+    pet.approach = other;
+    return () => pet.state !== 'approach';
+  }
+
+  function startTease(teaser, now, forced = null) {
+    const pair = Teases.PAIRS[teaser.name];
+    const target = pair && byName(pair.target);
+    if (!target) return false;
+    const teases = Object.keys(pair.replies).filter(name => teaser.clips[`挑衅_${name}`]);
+    if (!teases.length) return false;
+    const tease = teases.includes(forced) ? forced : pick(teases);
+    target.teasedAt = (target.teasedAt || []).filter(t => now - t < Teases.WINDOW);
+    const reply = Teases.replyFor(teaser.name, tease, target.teasedAt, now);
+    target.teasedAt.push(now);
+    const cast = [teaser, target];
+    for (const pet of cast) { pet.inScene = true; pet.state = 'idle'; pet.looking = false; pet.lastAttention = now; }
+    const steps = [
+      t => face(teaser, target),
+      t => play(teaser, `挑衅_${tease}`, t, 2000),
+      t => face(target, teaser),
+    ];
+    for (const step of reply) {
+      if (typeof step === 'string') steps.push(t => play(target, `回应_${step}`, t, 2000));
+      else if (step.chase) steps.push(t => { startChase(target, teaser, t, false); return () => target.state !== 'chase'; });
+      else if (step.hug) steps.push(t => approach(target, teaser), t => {
+        const pairUp = [teaser, target].sort((a, b) => a.x - b.x);
+        const key = Combos.comboKey(pairUp.map(p => p.name));
+        if (!comboClips[key]?.row) return () => true;
+        for (const pet of cast) pet.inScene = false;
+        startHug(pairUp, t);
+        return () => !teaser.combo;
+      });
+      else if (step.comfort) steps.push(
+        t => approach(target, teaser),
+        t => play(target, '回应_摸摸头', t, 2000),
+        t => play(teaser, '开心蹦蹦', t, 2000), // 露馅了
+        t => play(target, '回应_无语', t, 2000),
+      );
+    }
+    scenes.push({ cast, steps, i: -1, done: () => true });
+    return true;
+  }
+
+  function endScene(scene, now) {
+    scenes = scenes.filter(s => s !== scene);
+    for (const pet of scene.cast) {
+      pet.inScene = false;
+      if (['idle', 'action', 'approach'].includes(pet.state) && !pet.combo) goIdle(pet, now);
+    }
+  }
+
+  function runScenes(now) {
+    for (const scene of [...scenes]) {
+      // 被拖走、藏起来、掉下去了……剧情就不演了
+      if (focusing || scene.cast.some(pet => !pet.visible || ['drag', 'fall', 'jump'].includes(pet.state))) { endScene(scene, now); continue; }
+      if (!scene.done(now)) continue;
+      scene.i++;
+      if (scene.i >= scene.steps.length) { endScene(scene, now); continue; }
+      scene.done = scene.steps[scene.i](now) || (() => true);
+    }
+  }
+
+  function tryTease(now, teaserName, manual = false, forced = null) {
+    const names = teaserName ? [teaserName] : Object.keys(Teases.PAIRS).sort(() => Math.random() - 0.5);
+    for (const name of names) {
+      const teaser = byName(name), target = byName(Teases.PAIRS[name].target);
+      if (!teaser || !target) continue;
+      if (manual) {
+        if (!teaser.visible || !target.visible) continue;
+        if (teaser.inScene || target.inScene) continue;
+        if (!freeForTest(teaser, now) || !freeForTest(target, now)) continue;
+      } else if (!isFree(teaser) || !isFree(target) || teaser.si !== target.si || Math.abs(teaser.x - target.x) > TEASE_NEAR) continue;
+      if (startTease(teaser, now, forced)) return true;
+    }
+    return false;
+  }
+
+  // name 是挑衅的那只；也可以是 { name, tease } 指定挑衅哪一个（测试用）
+  function onTeaseRequest(request) {
+    const { name, tease = null } = typeof request === 'string' ? { name: request } : request;
+    const now = performance.now();
+    const target = Teases.PAIRS[name]?.target;
+    if (focusing) return say(byName(name), '现在在专注，先不闹啦', 4000);
+    if (!tryTease(now, name, true, tease)) {
+      const pet = byName(name);
+      if (pet?.visible) say(pet.combo || pet, `要先显示${target}哦`, 4000);
+    }
   }
 
   // ---- 送零食：千千猫猫叼胡萝卜给梨梨兔兔，梨梨兔兔叼小鱼给千千猫猫 ----
@@ -973,7 +1092,7 @@
   const CAN_START_TYPING = ['idle', 'walk', 'sleep'];
 
   function think(pet, now, dt) {
-    if (CAN_START_TYPING.includes(pet.state) && isTypingLong(now)) {
+    if (CAN_START_TYPING.includes(pet.state) && !pet.inScene && isTypingLong(now)) {
       pet.state = 'typing';
       pet.lastAttention = now;
       setAnim(pet, '敲代码');
@@ -1017,7 +1136,16 @@
         if (!pets.some(p => p.state === 'deliver' && p.snack?.to === pet)) goIdle(pet, now);
         else pet.lastAttention = now;
         break;
+      case 'approach': {
+        // 走到对方身边（挑衅剧情里用）
+        const other = pet.approach;
+        if (!other || !other.visible) { pet.approach = null; goIdle(pet, now); break; }
+        if (Math.abs(other.x - pet.x) < (pet.w + other.w) * 0.3) { pet.approach = null; goIdle(pet, now); break; }
+        moveToward(pet, other.x, WALK_SPEED * dt, '向左走', '向右走');
+        break;
+      }
       case 'idle':
+        if (pet.inScene) break; // 在演挑衅剧情，等下一步
         if (maybeCelebrate(pet, now)) break;
         if (maybeSweat(pet, now)) break;
         if (maybeDoActivity(pet, now)) break;
@@ -1104,6 +1232,8 @@
       if (now >= combo.until) endCombo(combo, now);
       else place(combo);
     }
+    runScenes(now);
+    if (now >= nextTease) { nextTease = now + rand(120_000, 300_000); if (features.tease && !focusing) tryTease(now); }
     // 时不时：绿眼猫猫追着玩、千千猫猫和梨梨兔兔送零食（专注时不打扰）
     if (now >= nextChase) { nextChase = now + rand(60_000, 150_000); if (features.chase && !focusing) tryChase(now); }
     if (now >= nextSnack) { nextSnack = now + rand(90_000, 200_000); if (features.snack && !focusing) trySnack(now); }
@@ -1177,6 +1307,7 @@
     api.onAskContinue(onAskContinue);
     api.onPhoto(takePhoto);
     api.onTest(onTest);
+    api.onTease(onTeaseRequest);
     api.onSay(text => { for (const pet of pets) if (pet.visible) say(pet.combo || pet, text, 10_000); });
     api.onSize(applySize);
     api.onPresence(online => { peerOnline = online; });

@@ -6,6 +6,7 @@ const { gifInfo } = require('./lib/gif');
 const { watchForeground } = require('./lib/activity');
 const { createTypingDetector } = require('./lib/typing');
 const { parseComboFile } = require('./renderer/combos');
+const Teases = require('./renderer/teases');
 const { festivalOn, birthdaysOn, normalizeBirthday } = require('./lib/calendar');
 const { fetchWeather } = require('./lib/weather');
 const { pixelTrayImage } = require('./lib/pixel-icon');
@@ -29,6 +30,7 @@ const FEATURES = [
   { key: 'weather', label: '天气（下雨 / 大晴天 / 降温换待机）' },
   { key: 'festival', label: '过节（国庆 / 万圣节 / 圣诞 / 春节）' },
   { key: 'birthday', label: '生日' },
+  { key: 'tease', label: '挑衅哥哥（千千猫猫→哥哥狗狗，梨梨兔兔→梨梨哥哥）' },
   { key: 'update', label: '自动更新' },
   { key: 'compat', label: '兼容模式（屏幕卡住时试试，重启桌宠后生效）', off: true },
 ];
@@ -589,8 +591,10 @@ function createWindow() {
 ipcMain.handle('load', () => loadAssets());
 let mouseOnPet = false;
 ipcMain.on('set-ignore', (_event, ignore) => { mouseOnPet = !ignore; win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }); });
-function buildMenu() {
+// petName：右键的是哪只宠物（托盘菜单没有）。千千猫猫和梨梨兔兔会多一个「挑衅哥哥」
+function buildMenu(petName = null) {
   return Menu.buildFromTemplate([
+    ...(Teases.PAIRS[petName] ? [{ label: `😈 挑衅哥哥（${Teases.PAIRS[petName].target}）`, click: () => send('tease', petName) }, { type: 'separator' }] : []),
     ...(updateReady ? [{ label: `🎉 立即重启更新（${updateReady}）`, click: restartToUpdate }, { type: 'separator' }] : []),
     {
       label: '选择宠物',
@@ -635,6 +639,7 @@ function buildMenu() {
         { label: '送零食', click: () => sendTest('snack') },
         { label: '两个哥哥贴贴（接着打架）', click: () => sendTest('brothers') },
         { label: '两个哥哥和好', click: () => sendTest('makeup') },
+        ...Object.keys(Teases.PAIRS).map(name => ({ label: `${name}挑衅${Teases.PAIRS[name].target}`, click: () => send('tease', name) })),
       ],
     },
     { type: 'separator' },
@@ -668,7 +673,7 @@ function buildMenu() {
   ]);
 }
 
-ipcMain.on('menu', () => buildMenu().popup({ window: win }));
+ipcMain.on('menu', (_event, petName) => buildMenu(PETS.includes(petName) ? petName : null).popup({ window: win }));
 
 // ---- 托盘 ----
 let tray = null;
