@@ -143,6 +143,21 @@ let stopWatcher = null;
 let watcherMode = null;
 let activity = { kind: null, typing: false };
 let ledge = null;
+// 「站在窗口顶上」现在的情况，显示在菜单里，方便看哪里不对
+let perchStatus = 'waiting';
+const PERCH_STATUS = {
+  waiting: '窗口：正在找窗口…',
+  ok: '窗口：找到了，宠物会跳上去',
+  high: '窗口：太靠屏幕顶上了（最大化了？），站不上去',
+  none: '窗口：现在没有能站的窗口',
+  failed: '窗口：读不到窗口位置（可能被安全软件拦了）',
+  unsupported: '窗口：只有 Windows 能用',
+};
+function setPerchStatus(status) {
+  if (status === perchStatus) return;
+  perchStatus = status;
+  refreshTray();
+}
 
 function sendLedge(next) {
   if (JSON.stringify(next) === JSON.stringify(ledge)) return;
@@ -152,9 +167,11 @@ function sendLedge(next) {
 
 function onForeground(info) {
   if (watcherMode === 'full' && info.kind !== activity.kind) { activity.kind = info.kind; send('activity', activity); }
-  if (!settings.features.perch || !info.rect || !win) return sendLedge(null);
+  if (!settings.features.perch || !info.rect || !win) { setPerchStatus('none'); return sendLedge(null); }
   const dip = process.platform === 'win32' ? screen.screenToDipRect(null, info.rect) : info.rect;
   const b = win.getBounds();
+  const petHeight = 250 * 0.7 * settings.size;
+  setPerchStatus(dip.y - b.y >= petHeight ? 'ok' : 'high');
   sendLedge({ id: info.handle, x: Math.round(dip.x - b.x), y: Math.round(dip.y - b.y), w: Math.round(dip.width) });
 }
 
@@ -162,7 +179,8 @@ function updateWatcher() {
   const mode = settings.features.activity ? 'full' : settings.features.perch ? 'rect' : null;
   if (mode === watcherMode) return;
   if (stopWatcher) stopWatcher();
-  stopWatcher = mode ? watchForeground(onForeground, { full: mode === 'full' }) : null;
+  perchStatus = 'waiting';
+  stopWatcher = mode ? watchForeground(onForeground, { full: mode === 'full', onFail: reason => setPerchStatus(reason === 'unsupported' ? 'unsupported' : 'failed') }) : null;
   watcherMode = mode;
   if (mode !== 'full' && activity.kind) { activity.kind = null; send('activity', activity); }
   if (!settings.features.perch) sendLedge(null);
@@ -362,12 +380,12 @@ function buildMenu() {
       })),
     },
     { type: 'separator' },
-    ...FEATURES.map(feature => ({
+    ...FEATURES.flatMap(feature => [{
       label: feature.label,
       type: 'checkbox',
       checked: settings.features[feature.key],
       click: item => setFeature(feature.key, item.checked),
-    })),
+    }, ...(feature.key === 'perch' && settings.features.perch ? [{ label: `　　${PERCH_STATUS[perchStatus]}`, enabled: false }] : [])]),
     { type: 'separator' },
     { label: '戳一下对方', enabled: online.peerOnline, click: pokePeer },
     {

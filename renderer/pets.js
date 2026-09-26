@@ -397,7 +397,11 @@
     ledge = next;
     const moved = !next || !old || next.id !== old.id || Math.abs(next.x - old.x) > 2 || Math.abs(next.y - old.y) > 2 || Math.abs(next.w - old.w) > 2;
     if (!moved) return;
-    for (const pet of pets) if (pet.onLedge) dropFrom(pet);
+    const now = performance.now();
+    for (const pet of pets) {
+      if (pet.onLedge) dropFrom(pet);
+      else if (next && pet.state === 'idle') pet.nextThink = Math.min(pet.nextThink, now + rand(500, 2000)); // 有新窗口了，快点过去看看
+    }
   }
 
   // ---- 打字反应：只知道「在不在打字」，不知道按了什么 ----
@@ -502,8 +506,8 @@
         if (now - pet.lastAttention > SLEEP_AFTER) { pet.state = 'sleep'; setAnim(pet, '睡觉'); break; }
         if (now >= pet.nextThink) {
           const nearLedge = !pet.onLedge && pet.y === 0 && ledgeUsable(pet) && pet.x > ledge.x - 150 && pet.x < ledge.x + ledge.w + 150;
-          if (nearLedge && Math.random() < 0.5) jumpUp(pet);
-          else if (!pet.onLedge && ledgeUsable(pet) && Math.random() < 0.3) walkTo(pet, rand(...ledgeRange(pet)));
+          if (nearLedge && Math.random() < 0.8) jumpUp(pet);
+          else if (!pet.onLedge && ledgeUsable(pet) && Math.random() < 0.6) walkTo(pet, rand(...ledgeRange(pet)));
           else if (Math.random() < 0.6) {
             const [min, max] = walkRange(pet);
             let x = rand(min, max);
