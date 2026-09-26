@@ -684,9 +684,9 @@
   }
 
   // 对方的宠物来串门：从边缘走进来，打招呼，玩几分钟再走（不会留下来）
-  function welcomeVisitor(name, owner) {
-    if (!features.visit || !petData[name] || pets.some(p => p.visitor && p.name === name)) {
-      api.sendVisit('visit-end', name); // 现在不方便接待，请它回去
+  function welcomeVisitor(name, owner, demo = false) {
+    if (!petData[name] || pets.some(p => p.visitor && p.name === name) || (!demo && !features.visit)) {
+      if (!demo) api.sendVisit('visit-end', name); // 现在不方便接待，请它回去
       return;
     }
     const now = performance.now();
@@ -696,7 +696,8 @@
     guest.visible = true;
     guest.si = primaryIndex();
     guest.el.title = `${owner}的${name}（来串门）`;
-    guest.leaveAt = now + rand(...VISIT_STAY);
+    guest.demo = demo; // 测试用的假客人：不用联网，玩 30 秒就走
+    guest.leaveAt = now + (demo ? 30_000 : rand(...VISIT_STAY));
     pets.push(guest);
     setAnim(guest, '待机');
     walkIn(guest, now, t => { playNamed(guest, '打招呼', t, 2000); say(guest, `${owner}来串门啦`, 6000); });
@@ -721,8 +722,8 @@
 
   function checkVisits(now) {
     for (const guest of pets.filter(p => p.visitor)) {
-      if (!peerOnline) visitorLeave(guest, now, false);
-      else if (now >= guest.leaveAt && ['idle', 'walk'].includes(guest.state)) visitorLeave(guest, now);
+      if (!peerOnline && !guest.demo) visitorLeave(guest, now, false);
+      else if (now >= guest.leaveAt && ['idle', 'walk'].includes(guest.state)) visitorLeave(guest, now, !guest.demo);
     }
     for (const pet of pets.filter(p => p.away)) {
       if (!peerOnline || now - pet.awaySince > AWAY_MAX) { if (peerOnline) api.sendVisit('visit-end', pet.name); comeHome(pet, now); }
@@ -1200,6 +1201,10 @@
     } else if (type === 'snack') {
       for (const pet of pets) freeForTest(pet, now);
       if (!trySnack(now)) hint('要同时显示千千猫猫和梨梨兔兔，而且在同一块屏幕的地上哦');
+    } else if (type === 'fake-guest') {
+      // 假装对方的宠物来串门（不用联网），看看客人进门、打招呼、玩一会儿再走的样子
+      const name = pick(Object.keys(petData));
+      welcomeVisitor(name, '测试的朋友', true);
     } else if (type === 'visit') {
       if (!peerOnline) return hint('要先联网配对，而且对方也在线，才能去串门哦');
       if (pets.some(p => p.away)) return hint('已经有一只在对方家串门啦');

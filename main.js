@@ -12,6 +12,7 @@ const { fetchWeather } = require('./lib/weather');
 const { pixelTrayImage } = require('./lib/pixel-icon');
 const { autoUpdater } = require('electron-updater');
 const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
+const { checkRelay } = require('./lib/relay-check');
 
 const ASSETS = path.join(__dirname, '桌宠素材');
 // 五只宠物（名字就是「桌宠素材」里的文件夹名）
@@ -489,6 +490,17 @@ ipcMain.on('visit-state', (_event, next) => {
   refreshTray();
 });
 
+// 自己连两次服务器，互相发一条「串门开始」，看服务器转不转发（不用朋友也能检查）
+async function runRelayCheck() {
+  send('say', '正在检查服务器…');
+  const result = await checkRelay(serverAddress(), () => new OnlineLink());
+  send('say', {
+    ok: '服务器是新版，可以串门啦 ✓',
+    old: '服务器还是旧版，要在 server 文件夹里再运行一次 npm run deploy',
+    offline: '连不上服务器，看看网络或者服务器地址',
+  }[result]);
+}
+
 function pokePeer() {
   online.send('poke', settings.online.name);
 }
@@ -666,6 +678,8 @@ function buildMenu(petName = null) {
         { label: '两个哥哥贴贴（接着打架）', click: () => sendTest('brothers') },
         { label: '两个哥哥和好', click: () => sendTest('makeup') },
         { label: '串门：马上派一只去对方家', click: () => sendTest('visit') },
+        { label: '串门：假装有客人来玩（不用朋友）', click: () => sendTest('fake-guest') },
+        { label: '检查服务器能不能串门（不用朋友）', click: runRelayCheck },
         ...Object.keys(Teases.PAIRS).map(name => ({ label: `${name}挑衅${Teases.PAIRS[name].target}`, click: () => send('tease', name) })),
       ],
     },
