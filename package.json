@@ -42,7 +42,7 @@
         "provider": "github",
         "owner": "Lumi729",
         "repo": "desk-pets",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ]
   },

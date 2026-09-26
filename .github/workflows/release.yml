@@ -30,9 +30,14 @@ jobs:
             echo "::error::标签 $GITHUB_REF_NAME 和 package.json 里的版本 $version 对不上"
             exit 1
           fi
-          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          # 已经完整发布过（有 latest.yml）就跳过；上次没发完的半成品删掉重来（标签保留）
+          assets=$(gh release view "v$version" --repo "$GITHUB_REPOSITORY" --json assets,isDraft --jq '(.isDraft|tostring) + " " + ([.assets[].name] | join(","))' 2>/dev/null || echo "none")
+          if [[ "$assets" == false*latest.yml* ]]; then
             echo "v$version 已经发布过了，跳过"
             echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$assets" != "none" ]]; then
+            echo "v$version 上次没发完，删掉重新发"
+            gh release delete "v$version" --repo "$GITHUB_REPOSITORY" --yes
           fi
       - uses: actions/setup-node@v4
         if: steps.version.outputs.skip != 'true'
@@ -57,3 +62,9 @@ jobs:
         run: npx electron-builder --win nsis --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 全部上传好了，正式公开
+        if: steps.version.outputs.skip != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "v${{ steps.version.outputs.version }}" --repo "$GITHUB_REPOSITORY" --draft=false --latest
