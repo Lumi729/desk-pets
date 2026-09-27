@@ -1050,7 +1050,8 @@
   function helpUp(fallen, now) {
     const dog = byName(DOG);
     if (!dog || dog === fallen || fallen.visitor || !isFree(dog) || dog.si !== fallen.si || !onFloor(fallen) || !dog.clips['互动_扶起来']) return;
-    fallen.then = null; // 有人扶，就不用自己假装没摔过了
+    // 有人来扶：摔完先趴着别起来（一直播摔趴趴），等哥哥狗狗扶起来；也就不用自己假装没摔过了
+    fallen.then = () => { fallen.state = 'idle'; setAnim(fallen, '摔趴趴'); };
     const cast = [dog, fallen];
     for (const pet of cast) pet.inScene = true;
     scenes.push({
@@ -1282,7 +1283,8 @@
   // ---- 天气 ----
   function applyWeather(kind) {
     weatherKind = kind || null;
-    for (const pet of pets) if (pet.state === 'idle' && !pet.looking) setAnim(pet, idleAnim(pet));
+    // 正在演剧情的（比如趴着等哥哥狗狗来扶）不换，免得被天气待机顶掉
+    for (const pet of pets) if (pet.state === 'idle' && !pet.looking && !pet.inScene) setAnim(pet, idleAnim(pet));
   }
 
   // ---- 番茄钟 ----
