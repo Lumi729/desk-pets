@@ -66,3 +66,20 @@ test('session end and 10 minutes of silence stop the typing', () => {
   a.sweep(11 * 60_000);
   assert.strictEqual(a.working, false);
 });
+
+test('waiting for the user stops the typing; tool results keep it going', () => {
+  const a = createClaudeActivity(() => {});
+  a.event('UserPromptSubmit', 's1', 0);
+  a.event('Notification', 's1', 1000);
+  assert.strictEqual(a.working, false);
+  a.event('PostToolUse', 's1', 2000);
+  assert.strictEqual(a.working, true);
+});
+
+test('older installs get the new hooks added', () => {
+  const old = addHooks({});
+  delete old.hooks.PostToolUse;
+  assert.ok(!hasHooks(old));
+  assert.ok(hasHooks(addHooks(old)));
+  assert.strictEqual(addHooks(old).hooks.Stop.length, 1);
+});

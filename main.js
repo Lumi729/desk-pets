@@ -697,6 +697,7 @@ const claudeActivity = createClaudeActivity(change => {
   else if (change.type === 'notify') send('claude-notify');
 });
 let claudeServer = null;
+const claudeRecent = [];
 let claudeSweep = null;
 function startClaudeServer() {
   if (claudeServer) return;
@@ -712,6 +713,9 @@ function startClaudeServer() {
       let sessionId = '';
       try { sessionId = JSON.parse(body).session_id || ''; } catch {}
       claudeActivity.event(match[1], sessionId);
+      claudeRecent.unshift({ at: new Date(), event: match[1] }); // 菜单里看最近收到了什么（只有事件名和时间）
+      claudeRecent.length = Math.min(claudeRecent.length, 5);
+      refreshTray();
     });
     req.on('error', () => {});
   });
@@ -1228,6 +1232,13 @@ function buildMenu(petName = null, expression = null) {
         { label: '只对这台电脑上运行的 Claude Code 有效，云端会话不会触发', enabled: false },
         { label: '不联网，不往外发任何数据', enabled: false },
         { label: 'Claude Code 干活时哥哥狗狗陪着敲代码，干完举牌，等你回复时打招呼', enabled: false },
+        ...(settings.claudeLink ? [
+          { type: 'separator' },
+          { label: claudeActivity.working ? '现在：Claude Code 在干活' : '现在：没在干活', enabled: false },
+          { label: '狗狗卡住了？让它停下来', click: () => { claudeActivity.clear(); send('claude-work', false); refreshTray(); } },
+          { label: '最近收到的：', enabled: false },
+          ...(claudeRecent.length ? claudeRecent.map(r => ({ label: `　${r.at.toTimeString().slice(0, 8)}  ${r.event}`, enabled: false })) : [{ label: '　（还没有）', enabled: false }]),
+        ] : []),
       ],
     },
     {
@@ -1313,7 +1324,15 @@ if (!app.requestSingleInstanceLock()) {
     updateWatcher();
     createTray();
     startOnline();
-    if (settings.claudeLink) startClaudeServer();
+    if (settings.claudeLink) {
+      startClaudeServer();
+      // 老版本加的 hooks 少了新的事件：补上（只加我们的）
+      try {
+        const file = claudeSettingsFile();
+        const current = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8') || '{}') : {};
+        if (!ClaudeHooks.hasHooks(current)) editClaudeSettings(ClaudeHooks.addHooks);
+      } catch {}
+    }
     runWeather();
     setInterval(runWeather, 30 * 60_000);
     setInterval(() => { sendToday(); checkPomodoro(); updateWeatherIdle(); checkDiary(); }, 30_000);
