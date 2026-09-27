@@ -83,6 +83,7 @@ const settings = {
   guideSeen: false,               // 新手引导看过 / 跳过了没有
   codexLink: false,               // 联动 Codex（灰鸮g老师）
   claudeLink: false,              // 联动 Claude Code
+  claudePet: '哥哥狗狗',           // 谁陪 Claude Code 干活
   nest: null,                     // 小窝放在哪：{ si: 第几块屏幕, offset: 离屏幕左边多远 }
   diaryTime: '22:00',             // 每天几点写日记
   diaryWriter: '哥哥狗狗',         // 谁来写日记
@@ -137,6 +138,7 @@ function loadSettings() {
     settings.location = normalizeLocation(saved.location);
     settings.guideSeen = saved.guideSeen === true;
     settings.claudeLink = saved.claudeLink === true;
+    if (PETS.includes(saved.claudePet)) settings.claudePet = saved.claudePet;
     settings.codexLink = saved.codexLink === true;
     if (Number.isFinite(saved.nest?.offset)) settings.nest = { si: Number.isInteger(saved.nest.si) ? saved.nest.si : 0, offset: saved.nest.offset };
     if (validTime(saved.diaryTime)) settings.diaryTime = saved.diaryTime;
@@ -199,7 +201,7 @@ function loadAssets() {
     combos[key][kind] = readGif(path.join(comboDir, file));
     comboFiles[key] = { ...comboFiles[key], [kind]: path.join(comboDir, file) };
   }
-  return { claudeWorking: claudeActivity.working, codexWorking: codexLink.activity.working, nest: settings.nest, nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
+  return { claudePet: settings.claudePet, claudeWorking: claudeActivity.working, codexWorking: codexLink.activity.working, nest: settings.nest, nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -768,6 +770,15 @@ function editClaudeSettings(change) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(change(current), null, 2)}\n`);
 }
+// 换一只陪 Claude Code 干活（原来那只正在敲代码的会停下来）
+function setClaudePet(name) {
+  if (!PETS.includes(name)) return;
+  settings.claudePet = name;
+  saveSettings();
+  send('claude-pet', name);
+  refreshTray();
+}
+
 function setClaudeLink(on) {
   try {
     editClaudeSettings(on ? ClaudeHooks.addHooks : ClaudeHooks.removeHooks);
@@ -1394,11 +1405,15 @@ function menuTemplate(petName = null, expression = null) {
         { label: '联动 Claude Code', type: 'checkbox', checked: settings.claudeLink, click: item => setClaudeLink(item.checked) },
         { label: '只对这台电脑上运行的 Claude Code 有效，云端会话不会触发', enabled: false },
         { label: '不联网，不往外发任何数据', enabled: false },
-        { label: 'Claude Code 干活时哥哥狗狗陪着敲代码，干完举牌，等你回复时打招呼', enabled: false },
+        { label: `Claude Code 干活时${settings.claudePet}陪着敲代码，干完${settings.claudePet === '哥哥狗狗' ? '举牌' : '蹦蹦'}，等你回复时打招呼`, enabled: false },
+        {
+          label: `谁陪着干活：${settings.claudePet}`,
+          submenu: PETS.map(name => ({ label: name, type: 'radio', checked: settings.claudePet === name, click: () => setClaudePet(name) })),
+        },
         ...(settings.claudeLink ? [
           { type: 'separator' },
           { label: claudeActivity.working ? '现在：Claude Code 在干活' : '现在：没在干活', enabled: false },
-          { label: '狗狗卡住了？让它停下来', click: () => { claudeActivity.clear(); send('claude-work', false); refreshTray(); } },
+          { label: `${settings.claudePet}卡住了？让它停下来`, click: () => { claudeActivity.clear(); send('claude-work', false); refreshTray(); } },
           { label: '最近收到的：', enabled: false },
           ...(claudeRecent.length ? claudeRecent.map(r => ({ label: `　${r.at.toTimeString().slice(0, 8)}  ${r.event}`, enabled: false })) : [{ label: '　（还没有）', enabled: false }]),
         ] : []),

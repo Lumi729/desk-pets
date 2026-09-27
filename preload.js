@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('petApi', {
   onClaudeDone: fn => ipcRenderer.on('claude-done', (_event, info) => fn(info)),
   onClaudeNotify: fn => ipcRenderer.on('claude-notify', () => fn()),
   onClaudeFail: fn => ipcRenderer.on('claude-fail', () => fn()),
+  onClaudePet: fn => ipcRenderer.on('claude-pet', (_event, name) => fn(name)),
   saveNest: pos => ipcRenderer.send('nest-save', pos),
   onSayPet: fn => ipcRenderer.on('say-pet', (_event, info) => fn(info)),
   onFullscreen: fn => ipcRenderer.on('fullscreen', (_event, on) => fn(!!on)),

@@ -92,6 +92,7 @@
   let typingRun = null;            // { start, lastEnd } 这一段连续打字
   let blanketNight = '';           // 今晚盖过被子了没有
   let nickname = '千千';            // 宠物们怎么称呼你（设置里能改）
+  let claudePetName = '哥哥狗狗'; // 谁陪 Claude Code 干活（右键菜单里选）
   let claudeWorking = false;       // 这台电脑上的 Claude Code 正在干活
   let codexWorking = false;        // 这台电脑上的 Codex 正在干活
   // g老师的书里夹没夹书签（批改作业结束后夹上，下次批改作业时用掉）；关了再开也记得
@@ -2469,7 +2470,13 @@
   }
 
   // ---- 联动 Claude Code ----
-  const claudeDog = () => { const dog = byName(DOG); return dog && dog.visible && !showcase && !leaving ? dog : null; }; // 狗狗没放出来就什么都不做
+  // 陪着干活的那只（默认哥哥狗狗，可以换）；没放出来就什么都不做
+  const claudeDog = () => { const dog = byName(claudePetName); return dog && dog.visible && !showcase && !leaving ? dog : null; };
+  function onClaudePet(name) {
+    const old = byName(claudePetName);
+    claudePetName = name;
+    if (old && old.name !== name && old.state === 'claude') goIdle(old, performance.now());
+  }
   function onClaudeWork(on) {
     claudeWorking = on;
     const dog = claudeDog();
@@ -2531,7 +2538,7 @@
 
   function think(pet, now, dt) {
     // Claude Code 在干活：哥哥狗狗陪着敲代码（在发呆、走路、睡觉、打字的时候才换过去，不打断别的动作）
-    if (claudeWorking && pet.name === DOG && !pet.visitor && !showcase && !leaving && !pet.inScene && !pet.inNest && !pet.routine
+    if (claudeWorking && pet.name === claudePetName && !pet.visitor && !showcase && !leaving && !pet.inScene && !pet.inNest && !pet.routine
       && ['idle', 'walk', 'sleep', 'typing'].includes(pet.state) && pet.clips['敲代码']) {
       pet.state = 'claude';
       pet.tucked = false;
@@ -2828,6 +2835,7 @@
     size = data.size || 1;
     nickname = data.nickname || '千千';
     claudeWorking = !!data.claudeWorking;
+    if (data.claudePet) claudePetName = data.claudePet;
     codexWorking = !!data.codexWorking;
     peerOnline = !!data.peerOnline;
     for (const pet of pets) { pet.el.hidden = true; setAnim(pet, '待机'); }
@@ -2862,6 +2870,7 @@
     api.onClaudeDone(onClaudeDone);
     api.onClaudeNotify(onClaudeNotify);
     api.onClaudeFail(onClaudeFail);
+    api.onClaudePet(onClaudePet);
     api.onSayPet(({ name, text } = {}) => { const pet = pets.find(p => p.name === name && p.visible) || pets.find(p => p.visible); if (pet) say(pet.combo || pet, text, 4000); });
     api.onFullscreen(on => {
       pauseClock(on);
