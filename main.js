@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, Notification, Tray, clipboard, globalShortcut, ipcMain, nativeImage, powerMonitor, screen, shell } = require('electron');
 const fs = require('node:fs');
+const { spawn } = require('node:child_process');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -41,8 +42,14 @@ const FEATURES = [
   { key: 'tease', label: '挑衅哥哥（千千猫猫→哥哥狗狗，梨梨兔兔→梨梨哥哥）' },
   { key: 'bugfix', label: '狗狗修 bug（出错时记进本机的错误日志）' },
   { key: 'diary', label: '今日小日记（只在本机数次数）' },
+  { key: 'episodes', label: '小插曲写进日记（接眼镜、盖被子、串门……）' },
   { key: 'anniversary', label: '在一起的纪念日' },
   { key: 'swap', label: '两个眼镜交换（哥哥狗狗和g老师）' },
+  { key: 'yawn', label: '打哈欠会传染' },
+  { key: 'fullscreen', label: '有程序全屏时自动躲起来' },
+  { key: 'season', label: '四季换装' },
+  { key: 'copyface', label: '右键宠物「复制这个表情」' },
+  { key: 'nest', label: '小窝（晚上 11 点后回窝睡觉）' },
   { key: 'update', label: '自动更新' },
   { key: 'compat', label: '兼容模式（屏幕卡住时试试，重启桌宠后生效）', off: true },
 ];
@@ -67,6 +74,7 @@ const settings = {
   birthdays: {},                  // 宠物名 → 「MM-DD」
   pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
   guideSeen: false,               // 新手引导看过 / 跳过了没有
+  nest: null,                     // 小窝放在哪：{ si: 第几块屏幕, offset: 离屏幕左边多远 }
   diaryTime: '22:00',             // 每天几点写日记
   diaryWriter: '哥哥狗狗',         // 谁来写日记
   nickname: '千千',                // 宠物们怎么称呼你（联网时也用这个名字）
@@ -115,6 +123,7 @@ function loadSettings() {
     if (saved.visitPets && typeof saved.visitPets === 'object') for (const name of PETS) if (typeof saved.visitPets[name] === 'boolean') settings.visitPets[name] = saved.visitPets[name];
     settings.location = normalizeLocation(saved.location);
     settings.guideSeen = saved.guideSeen === true;
+    if (Number.isFinite(saved.nest?.offset)) settings.nest = { si: Number.isInteger(saved.nest.si) ? saved.nest.si : 0, offset: saved.nest.offset };
     if (validTime(saved.diaryTime)) settings.diaryTime = saved.diaryTime;
     if (PETS.includes(saved.diaryWriter)) settings.diaryWriter = saved.diaryWriter;
     settings.nickname = cleanName(saved.nickname) || cleanName(saved.online?.name) || '千千'; // 以前只有联网名字，就用它
@@ -155,6 +164,7 @@ function readGif(file) {
   return { bytes, ...gifInfo(bytes) };
 }
 
+const comboFiles = {}; // 组合名 → 种类 → 文件（复制表情用）
 function loadAssets() {
   const pets = {};
   for (const name of PETS) {
@@ -172,8 +182,9 @@ function loadAssets() {
     const { key, kind } = parseComboFile(path.basename(file, path.extname(file)));
     combos[key] = combos[key] || {};
     combos[key][kind] = readGif(path.join(comboDir, file));
+    comboFiles[key] = { ...comboFiles[key], [kind]: path.join(comboDir, file) };
   }
-  return { nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
+  return { nest: settings.nest, nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -194,6 +205,7 @@ function setSize(size) {
 
 function togglePets() {
   if (!win) return;
+  if (hiddenForFullscreen) { hiddenForFullscreen = false; send('fullscreen', false); } // 自己点了显示 / 隐藏，就不再管全屏的事
   if (win.isVisible()) win.hide();
   else { win.showInactive(); win.setAlwaysOnTop(true, 'screen-saver'); send('resync'); }
 }
@@ -222,7 +234,8 @@ function setFeature(key, on) {
   settings.features[key] = on;
   saveSettings();
   send('features', settings.features);
-  if (key === 'activity' || key === 'perch') updateWatcher();
+  if (key === 'activity' || key === 'perch' || key === 'fullscreen') updateWatcher();
+  if (key === 'fullscreen' && !on) setFullscreenHide(false);
   refreshTray();
   if (key === 'sit') sitStart = null;
   if (key === 'compat') send('say', on ? '兼容模式打开啦，退出再打开桌宠就生效' : '兼容模式关掉啦，退出再打开桌宠就生效');
@@ -539,12 +552,23 @@ function diaryRecord(event, value) {
   Diary.record(diaryData(), Diary.dayKey(), event, value);
   saveDiary();
 }
-ipcMain.on('diary-event', (_event, type) => { if (['pets', 'clicks', 'hugs', 'stacks'].includes(type)) diaryRecord(type); });
+ipcMain.on('nest-save', (_event, pos) => {
+  if (!Number.isFinite(pos?.offset)) return;
+  settings.nest = { si: Number.isInteger(pos.si) ? pos.si : 0, offset: Math.round(pos.offset) };
+  saveSettings();
+});
+ipcMain.on('diary-event', (_event, type) => {
+  if (['pets', 'clicks', 'hugs', 'stacks'].includes(type)) diaryRecord(type);
+  else if (typeof type === 'string' && type.startsWith('ep:') && settings.features.episodes) diaryRecord('episode', type.slice(3)); // 小插曲
+});
 const diaryName = () => settings.nickname;
 function diaryText(key) {
   const day = diaryData()[key];
-  if (key === Diary.dayKey() && !day?.written) return Diary.composeDiary(day, diaryName(), settings.diaryWriter); // 还没写：按现在的次数先看看
-  return day?.text || Diary.composeDiary(day, diaryName(), settings.diaryWriter);
+  if (key === Diary.dayKey() && !day?.written) return composeFor(day, settings.diaryWriter); // 还没写：按现在的次数先看看
+  return day?.text || composeFor(day, day?.writer || settings.diaryWriter);
+}
+function composeFor(day, writer, absent = '') {
+  return Diary.composeDiary(day, diaryName(), writer, absent, settings.features.episodes);
 }
 // 每天到点（默认晚上 10 点）哥哥狗狗写日记，写好弹出日记卡片
 function checkDiary() {
@@ -556,7 +580,8 @@ function checkDiary() {
   const day = diaryData()[key] || (diaryData()[key] = Diary.emptyDay());
   if (day.written) return;
   day.written = true;
-  day.text = Diary.composeDiary(day, diaryName(), settings.diaryWriter);
+  day.text = composeFor(day, settings.diaryWriter);
+  day.writer = settings.diaryWriter;
   saveDiary(true);
   writeDiaryNow(key);
 }
@@ -568,7 +593,7 @@ function writeDiaryNow(key, save = true) {
     diaryReply = null;
     if (save && writer && writer !== settings.diaryWriter) {
       const day = diaryData()[key];
-      if (day) { day.text = Diary.composeDiary(day, diaryName(), writer, settings.diaryWriter); saveDiary(true); }
+      if (day) { day.text = composeFor(day, writer, settings.diaryWriter); day.writer = writer; saveDiary(true); }
     }
     setTimeout(() => openDiary(key), 3500);
   };
@@ -578,11 +603,13 @@ function writeDiaryNow(key, save = true) {
 ipcMain.on('diary-writer', (_event, writer) => diaryReply?.(PETS.includes(writer) ? writer : null));
 let diaryWindow = null;
 let diaryShowKey = '';
-function openDiary(key = Diary.dayKey()) {
+let diaryFavOnly = false;
+function openDiary(key = Diary.dayKey(), favOnly = false) {
   diaryShowKey = key;
+  diaryFavOnly = favOnly;
   if (diaryWindow) { diaryWindow.webContents.send('diary-show', key); diaryWindow.show(); diaryWindow.focus(); return; }
   diaryWindow = new BrowserWindow({
-    width: 420, height: 520, resizable: false, minimizable: false, maximizable: false,
+    width: 420, height: 580, resizable: false, minimizable: false, maximizable: false,
     alwaysOnTop: true, autoHideMenuBar: true, title: '今天的日记', icon: trayImage(settings.trayIcon),
     webPreferences: { preload: path.join(__dirname, 'renderer', 'diary-preload.js'), contextIsolation: true, sandbox: true },
   });
@@ -595,8 +622,66 @@ ipcMain.handle('diary-get', () => {
   const keys = Object.keys(Diary.prune(diaryData(), today));
   if (!keys.includes(today)) keys.push(today);
   keys.sort().reverse();
-  return { show: diaryShowKey || today, today, entries: keys.map(key => ({ key, text: diaryText(key) })) };
+  const days = diaryData();
+  const entries = keys.map(key => ({ key, text: diaryText(key), fav: !!days[key]?.fav, writer: days[key]?.writer || settings.diaryWriter }))
+    .filter(e => !diaryFavOnly || e.fav);
+  return { show: diaryShowKey || today, today, favOnly: diaryFavOnly, entries };
 });
+// 收藏：这一天一直留着，不受 30 天限制
+ipcMain.handle('diary-fav', (_event, key, on) => {
+  if (!/^\d{4}-\d\d-\d\d$/.test(String(key))) return false;
+  const days = diaryData();
+  const day = days[key] || (days[key] = Diary.emptyDay());
+  day.fav = !!on;
+  saveDiary(true);
+  return day.fav;
+});
+// 存成图片：把日记卡片（连同写日记的宠物）截下来，存到「图片/桌宠照片」
+ipcMain.handle('diary-image', async (_event, key, rect) => {
+  if (!diaryWindow || !/^\d{4}-\d\d-\d\d$/.test(String(key))) return false;
+  try {
+    const r = { x: Math.max(0, Math.floor(rect.x)), y: Math.max(0, Math.floor(rect.y)), width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
+    const image = await diaryWindow.webContents.capturePage(r);
+    const dir = path.join(app.getPath('pictures'), '桌宠照片');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `日记-${key}.png`);
+    fs.writeFileSync(file, image.toPNG());
+    shell.showItemInFolder(file);
+    return true;
+  } catch { return false; }
+});
+
+// ---- 复制表情：把宠物正在播的 GIF 当成文件放进剪贴板，粘贴到 QQ、微信里是会动的 ----
+function expressionFile(expression) {
+  if (expression?.combo) return comboFiles[expression.combo]?.[expression.kind] || null;
+  const { pet, anim } = expression || {};
+  if (!PETS.includes(pet) || typeof anim !== 'string' || !anim || /[\\/:]|\.\./.test(anim)) return null;
+  const file = path.join(ASSETS, pet, `${anim}.gif`);
+  return fs.existsSync(file) ? file : null;
+}
+function copyExpression(expression) {
+  const source = expressionFile(expression);
+  const who = expression?.pet || expression?.members?.[0] || null;
+  if (!source) return send('say-pet', { name: who, text: '这个表情复制不了…' });
+  try {
+    // 程序里的素材打包在一起，先复制一份真的文件出来
+    const dir = path.join(app.getPath('temp'), '桌宠表情');
+    fs.mkdirSync(dir, { recursive: true });
+    const dest = path.join(dir, `${expression.pet || expression.combo}-${expression.anim || expression.kind}.gif`);
+    fs.writeFileSync(dest, fs.readFileSync(source));
+    if (process.platform === 'win32') {
+      clipboard.writeBuffer('FileNameW', Buffer.from(`${dest}\0`, 'ucs2'));
+      // 再用 PowerShell 放成「复制了一个文件」，QQ、微信都认
+      const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Set-Clipboard -LiteralPath '${dest.replace(/'/g, "''")}'`], { windowsHide: true, stdio: 'ignore' });
+      ps.on('error', () => {});
+    } else {
+      clipboard.writeText(dest);
+    }
+    send('say-pet', { name: who, text: '已复制，去斗图吧～' });
+  } catch {
+    send('say-pet', { name: who, text: '这个表情复制不了…' });
+  }
+}
 
 // ---- 「测试一下」：马上看到各种效果 ----
 const sendTest = (type, value) => send('test', { type, value });
@@ -629,7 +714,31 @@ function sendLedge(next) {
   send('perch', ledge);
 }
 
+// ---- 有程序全屏（看视频、玩游戏、放 PPT）时躲起来 ----
+let hiddenForFullscreen = false;
+function isFullscreenRect(rect) {
+  if (!rect) return false;
+  const dip = process.platform === 'win32' ? screen.screenToDipRect(null, rect) : rect;
+  const b = screen.getDisplayMatching(dip).bounds;
+  return dip.x <= b.x + 1 && dip.y <= b.y + 1 && dip.x + dip.width >= b.x + b.width - 1 && dip.y + dip.height >= b.y + b.height - 1;
+}
+function setFullscreenHide(full, force = false) {
+  if (!win || win.isDestroyed()) return;
+  if (full && (settings.features.fullscreen || force) && !hiddenForFullscreen && win.isVisible()) {
+    hiddenForFullscreen = true;
+    send('fullscreen', true); // 页面里的动画和计时先停住
+    win.hide();
+  } else if (!full && hiddenForFullscreen) {
+    hiddenForFullscreen = false;
+    win.showInactive();
+    win.setAlwaysOnTop(true, 'screen-saver');
+    send('fullscreen', false);
+    send('resync');
+  }
+}
+
 function onForeground(info) {
+  setFullscreenHide(isFullscreenRect(info.rect));
   if (watcherMode === 'full' && info.kind !== activity.kind) { activity.kind = info.kind; send('activity', activity); }
   if (!settings.features.perch || !info.rect || !win) { setPerchStatus('none'); return sendLedge(null); }
   const dip = process.platform === 'win32' ? screen.screenToDipRect(null, info.rect) : info.rect;
@@ -640,7 +749,7 @@ function onForeground(info) {
 }
 
 function updateWatcher() {
-  const mode = settings.features.activity ? 'full' : settings.features.perch ? 'rect' : null;
+  const mode = settings.features.activity ? 'full' : settings.features.perch || settings.features.fullscreen ? 'rect' : null;
   if (mode === watcherMode) return;
   if (stopWatcher) stopWatcher();
   perchStatus = 'waiting';
@@ -702,7 +811,7 @@ function checkSitting() {
   if (sitStart === null) sitStart = now;
   if (settings.features.sit && now - sitStart >= SIT_LIMIT) {
     sitStart = now;
-    if (!showcaseOn) send('sit-reminder');
+    if (!showcaseOn && !hiddenForFullscreen) send('sit-reminder');
   }
 }
 
@@ -948,9 +1057,10 @@ ipcMain.handle('load', () => loadAssets());
 let mouseOnPet = false;
 ipcMain.on('set-ignore', (_event, ignore) => { mouseOnPet = !ignore; win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }); });
 // petName：右键的是哪只宠物（托盘菜单没有）。千千猫猫和梨梨兔兔会多一个「挑衅哥哥」
-function buildMenu(petName = null) {
+function buildMenu(petName = null, expression = null) {
   const visitor = petName?.startsWith('visitor:') ? petName.slice(8) : null;
   return Menu.buildFromTemplate([
+    ...(expression && settings.features.copyface ? [{ label: '📋 复制这个表情', click: () => copyExpression(expression) }, { type: 'separator' }] : []),
     ...(visitor ? [{ label: `🏠 送${visitor}回家`, click: () => send('send-home', visitor) }, { type: 'separator' }] : []),
     ...visitState.away.map(name => ({ label: `🏠 叫${name}回家（在对方家串门）`, click: () => send('call-home', name) })),
     ...(visitState.away.length ? [{ type: 'separator' }] : []),
@@ -959,6 +1069,7 @@ function buildMenu(petName = null) {
     showcaseOn ? { label: '⏹ 停止展示', click: stopShowcase } : { label: '✨ 功能展示', click: startShowcase },
     { label: '📖 新手引导', click: openGuide },
     { label: '📔 今天的日记', click: () => openDiary() },
+    { label: '🔖 收藏的日记', click: () => openDiary(null, true) },
     { type: 'separator' },
     {
       label: '选择宠物',
@@ -1020,6 +1131,12 @@ function buildMenu(petName = null) {
         { label: '灰鸮g老师：摔一跤', click: () => sendTest('g-fall') },
         { label: '灰鸮g老师：旁边的宠物接住眼镜', click: () => sendTest('g-catch') },
         { label: '两个眼镜交换', click: () => sendTest('swap') },
+        { label: '打哈欠传染', click: () => sendTest('yawn') },
+        { label: '晚上打哈欠，传完一起回小窝', click: () => sendTest('yawn', 'night') },
+        { label: '大家回小窝睡觉', click: () => sendTest('nest-night') },
+        { label: '早上从小窝起床（两副眼镜会拿错）', click: () => sendTest('nest-morning') },
+        { label: '全屏时躲起来（3 秒后出来）', click: () => { setFullscreenHide(true, true); setTimeout(() => setFullscreenHide(false), 3000); } },
+        { label: '四季换装', submenu: [['待机_春', '春'], ['待机_夏', '夏'], ['待机_秋', '秋'], ['待机_冬', '冬']].map(([anim, label]) => ({ label, click: () => sendTest('season', anim) })) },
         { label: '哥哥狗狗修 bug（不会真的记错误）', click: () => sendTest('bugfix') },
         { label: '写日记（选好的宠物来写）', click: () => writeDiaryNow(Diary.dayKey(), false) },
         { label: '纪念日', click: () => sendTest('anniversary', togetherDays()) },
@@ -1064,7 +1181,7 @@ function buildMenu(petName = null) {
   ]);
 }
 
-ipcMain.on('menu', (_event, petName) => buildMenu(typeof petName === 'string' ? petName : null).popup({ window: win }));
+ipcMain.on('menu', (_event, petName, expression) => buildMenu(typeof petName === 'string' ? petName : null, expression && typeof expression === 'object' ? expression : null).popup({ window: win }));
 
 // ---- 托盘 ----
 let tray = null;

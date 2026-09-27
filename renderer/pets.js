@@ -1,5 +1,14 @@
 // 桌宠的动作逻辑：待机、走路、拖动、点击动作、睡觉、贴贴、叠叠乐、提醒气泡、鼠标互动、看你在做什么。
 (() => {
+  // 页面里的钟：有程序全屏、宠物躲起来时停住，出来以后接着走（动画和各种计时都暂停）
+  let pausedTotal = 0;
+  let pausedSince = 0;
+  const performance = { now: () => (pausedSince || window.performance.now()) - pausedTotal };
+  function pauseClock(on) {
+    if (on && !pausedSince) pausedSince = window.performance.now();
+    else if (!on && pausedSince) { pausedTotal += window.performance.now() - pausedSince; pausedSince = 0; }
+  }
+
   // 出错了告诉主程序记进错误日志（只有错误信息，没有别的）
   const reportError = (message, stack) => { try { window.petApi.reportError({ message: String(message || '').slice(0, 500), stack: String(stack || '').slice(0, 1500) }); } catch {} };
   window.addEventListener('error', event => reportError(event.message, event.error?.stack));
@@ -31,7 +40,7 @@
   const SHAKE_STEP = 12;           // 鼠标来回晃：每次至少移动这么多像素
   const SHAKE_TURNS = 4;           // 1 秒内来回这么多次算「晃」
   // 这些是特定时候才播的，点宠物时不会随机抽到
-  const CORE = ['纪念日', '待机', '向左走', '向右走', '睡觉', '向左看', '向右看', '掉落', '摔趴趴', '冒冷汗',
+  const CORE = ['纪念日', '打哈欠', '犯困向左走', '犯困向右走', '睡觉_没戴眼镜', '待机', '向左走', '向右走', '睡觉', '向左看', '向右看', '掉落', '摔趴趴', '冒冷汗',
     '专注', '叼胡萝卜向左走', '叼胡萝卜向右走', '叼小鱼向左走', '叼小鱼向右走',
     '国庆', '万圣节', '圣诞', '春节', '生日'];
   const CHASE_SPEED = 3;           // 煤球猫猫冲过去的速度（平时的几倍）
@@ -193,14 +202,27 @@
     return clip;
   }
 
-  // 待机动画：打开天气时按天气换
+  // 待机动画的优先级：节日 > 特殊天气（雨、雪、雾、雷雨、炎热、降温）> 四季换装 > 其它天气（晴、多云、阴）> 普通待机
+  const SPECIAL_WEATHER = ['待机_毛毛雨', '待机_雨天', '待机_大雨', '待机_雷雨', '待机_下雪', '待机_雾', '待机_炎热', '待机_降温'];
+  function seasonIdle(date = new Date()) {
+    const m = date.getMonth() + 1;
+    return m >= 3 && m <= 5 ? '待机_春' : m >= 6 && m <= 8 ? '待机_夏' : m >= 9 && m <= 11 ? '待机_秋' : '待机_冬';
+  }
   function idleAnim(pet) {
-    const name = weatherKind;
-    return features.weather && name && pet.clips[name] ? name : '待机'; // 这只没有这个天气的动画 → 普通待机
+    if (features.festival && today.festival && pet.clips[today.festival]) return today.festival;
+    const weather = features.weather ? weatherKind : null;
+    if (weather && SPECIAL_WEATHER.includes(weather) && pet.clips[weather]) return weather;
+    const season = features.season ? seasonIdle() : null;
+    if (season && pet.clips[season]) return season;
+    if (weather && pet.clips[weather]) return weather;
+    return '待机'; // 这只没有对应的动画 → 普通待机
   }
 
   function goIdle(pet, now) {
     pet.looking = false;
+    if (pet.inNest) { pet.inNest = false; pet.tucked = false; pet.el.classList.remove('in-nest'); }
+    pet.goingToNest = false;
+    pet.goal = null;
     // 正在演剧情（挑衅、扶起来……）的中间：一步做完马上接下一步，这时不换回待机动画，
     // 免得每一步中间闪一下待机。只有走路停下来时才换成待机
     if (pet.inScene) {
@@ -240,6 +262,7 @@
 
   function wake(pet, now) {
     pet.lastAttention = now;
+    if (pet.inNest) return leaveNest(pet, now); // 从小窝里出来
     pet.tucked = false;
     if (pet.state === 'sleep') goIdle(pet, now);
   }
@@ -265,7 +288,7 @@
     const now = performance.now();
     const told = new Set();
     for (const pet of pets) {
-      if (!pet.visible) continue;
+      if (!pet.visible || pet.inNest) continue; // 窝里睡着的不吵它
       if (pet.state === 'hug') { if (pet.combo && !told.has(pet.combo)) say(pet.combo, text, 8000); told.add(pet.combo); continue; }
       if (pet.state === 'drag' || pet.state === 'fall') { say(pet, text, 8000); continue; }
       pet.lastAttention = now;
@@ -311,6 +334,10 @@
       pet.state = 'drag';
       pet.then = null;
       pet.onLedge = false;
+      if (pet.inNest) { pet.inNest = false; pet.tucked = false; pet.el.classList.remove('in-nest'); }
+      pet.goingToNest = false;
+      pet.routine = false;
+      pet.goal = null;
       pet.shake = null;
       pet.el.classList.add('dragging');
       setAnim(pet, pet.clips['吓一跳'] ? '吓一跳' : '待机');
@@ -341,7 +368,9 @@
   }
 
   // 右键哪只宠物，菜单里就可能多出这只的专属选项（比如「挑衅哥哥」）
-  window.addEventListener('contextmenu', event => { event.preventDefault(); const pet = petUnder(event.clientX, event.clientY) || petBoxUnder(event.clientX, event.clientY); api.showMenu(pet ? (pet.visitor ? `visitor:${pet.name}` : pet.name) : null); });
+  window.addEventListener('contextmenu', event => { event.preventDefault(); const pet = petUnder(event.clientX, event.clientY) || petBoxUnder(event.clientX, event.clientY); api.showMenu(pet ? (pet.visitor ? `visitor:${pet.name}` : pet.name) : null, pet ? expressionOf(pet) : null); });
+  // 这只现在在播哪个 GIF（复制表情用）
+  const expressionOf = pet => (pet.combo ? { combo: pet.combo.key, kind: pet.combo.kind, members: pet.combo.members.map(p => p.name) } : { pet: pet.name, anim: pet.anim || '待机' });
 
   // 鼠标在宠物身上（不透明的地方）时才接住点击，其他地方点击会穿透到桌面。
   function petBoxUnder(x, y) {
@@ -369,9 +398,9 @@
   }
 
   function updateMouseCatch(force = false) {
-    const dragging = pets.some(pet => pet.drag);
+    const dragging = pets.some(pet => pet.drag) || !!nestDrag;
     // 已经接住鼠标时，只要还在宠物的方框里就一直接着，不会因为动画换帧、透明的缝一下子漏掉点击
-    const over = cursor && (petUnder(cursor.x, cursor.y) || (!ignoringMouse && petBoxUnder(cursor.x, cursor.y)) || overUpdateButton(cursor.x, cursor.y));
+    const over = cursor && (petUnder(cursor.x, cursor.y) || (!ignoringMouse && petBoxUnder(cursor.x, cursor.y)) || overUpdateButton(cursor.x, cursor.y) || nestUnder(cursor.x, cursor.y));
     const ignore = !dragging && !over;
     // 只在状态真的变了（或者主程序要求对一下）时才告诉主程序，不反复去动窗口
     if (force || ignore !== ignoringMouse) {
@@ -497,6 +526,7 @@
     const combo = makeCombo('catch', pair, Combos.comboKey(pair.map(p => p.name)), (friend.x + g.x) / 2, g.y, now, 0);
     clampToScreen(combo, g);
     place(combo);
+    api.diary('ep:catch');
     return true;
   }
 
@@ -730,6 +760,7 @@
       pet.el.hidden = true;
       pet.state = 'idle';
       api.sendVisit('visit-start', pet.name);
+      api.diary('ep:visit');
       reportVisits();
     });
   }
@@ -776,6 +807,7 @@
     guest.el.title = `${owner}的${name}（来串门）`;
     guest.demo = demo; // 测试用的假客人：不用联网，玩 30 秒就走
     guest.leaveAt = now + (demo ? 30_000 : rand(...VISIT_STAY));
+    if (!demo) api.diary('ep:visit');
     pets.push(guest);
     setAnim(guest, '待机');
     walkIn(guest, now, t => { playNamed(guest, '打招呼', t, 2000); say(guest, `${owner}来串门啦`, 6000); });
@@ -887,6 +919,7 @@
 
   function startFight(hug, now) {
     const fight = makeCombo('fight', hug.members, hug.key, hug.x, hug.y, now, 0); // 播一遍
+    if (!showcase) api.diary('ep:fight');
     fight.si = hug.si;
     fight.onLedge = hug.onLedge;
     const s = screenOf(hug.members[0]);
@@ -1179,6 +1212,7 @@
         t => {
           const pair = [fallen, dog].sort((a, b) => a.x - b.x);
           const combo = makeCombo('helpup', pair, key, (fallen.x + dog.x) / 2, fallen.y, t, 0); // 播一遍
+          api.diary(fallen.name === G ? 'ep:ghelp' : 'ep:helpup');
           const s = screenOf(fallen);
           combo.x = Math.min(Math.max(combo.x, s.x + combo.w / 2), s.x + s.w - combo.w / 2);
           place(combo);
@@ -1252,6 +1286,7 @@
           if (cat.state !== 'sleep') return () => true; // 走过去的时候它醒了
           const pair = [cat, dog].sort((a, b) => a.x - b.x);
           const combo = makeCombo('blanket', pair, key, (cat.x + dog.x) / 2, cat.y, t, 3000);
+          api.diary('ep:blanket');
           const s = screenOf(cat);
           combo.x = Math.min(Math.max(combo.x, s.x + combo.w / 2), s.x + s.w - combo.w / 2);
           place(combo);
@@ -1308,6 +1343,7 @@
     target.teasedAt.push(now);
     const cast = [teaser, target];
     for (const pet of cast) { pet.inScene = true; pet.state = 'idle'; pet.looking = false; pet.lastAttention = now; }
+    if (!showcase) api.diary('ep:tease');
     const steps = [
       t => face(teaser, target),
       t => play(teaser, `挑衅_${tease}`, t, 2000),
@@ -1421,6 +1457,8 @@
 
   function onToday(next) {
     today = { festival: next?.festival || null, birthdays: next?.birthdays || [] };
+    if (!showcase) refreshIdle(); // 过节 / 换季
+
     const together = next?.together;
     if (together?.anniversary && celebratedDays !== together.days) {
       celebratedDays = together.days;
@@ -1434,7 +1472,11 @@
   function applyWeather(kind) {
     if (showcase) { showcase.saved.weather = kind || null; return; } // 展示完再换
     weatherKind = kind || null;
-    // 正在演剧情的（比如趴着等哥哥狗狗来扶）不换，免得被天气待机顶掉
+    refreshIdle();
+  }
+
+  // 天气、节日、季节变了：正在发呆的换成新的待机动画（正在演剧情的不换，免得被顶掉）
+  function refreshIdle() {
     for (const pet of pets) if (pet.state === 'idle' && !pet.looking && !pet.inScene) setAnim(pet, idleAnim(pet));
   }
 
@@ -1577,6 +1619,24 @@
       if (type === 'g-read') { startReading(g, now); g.until = now + 60_000; say(g, '拖一只宠物到我旁边，一起看书吧', 5000); }
       if (type === 'g-doze') doze(g, now);
       if (type === 'g-fall') { g.y = floorOf(g) + 300; dropFrom(g); }
+    } else if (type === 'yawn') {
+      const list = pets.filter(p => !p.visitor && p.visible && freeForTest(p, now));
+      if (!list.length) return hint('要先让宠物显示出来哦');
+      const s = screenOf(list[0]);
+      list.forEach((p, i) => { p.si = list[0].si; p.y = floorOf(p); p.x = Math.min(s.x + s.w * 0.25 + i * 150 * size, s.x + s.w - p.w / 2); }); // 离近一点才会传染（又不会贴贴）
+      yawnChain = null;
+      if (startYawn(list[0], now, value === 'night' ? 'night' : true) && value === 'night') yawnChain.night = !!nest && features.nest;
+      if (value === 'night' && !(nest && features.nest)) hint('要先在「功能开关」里打开小窝哦');
+    } else if (type === 'nest-night') {
+      if (!nest || !features.nest) return hint('要先在「功能开关」里打开小窝哦');
+      pets.filter(p => !p.visitor && p.visible).forEach((p, i) => { if (freeForTest(p, now)) setTimeout(() => goToNest(p, performance.now()), i * 600); });
+    } else if (type === 'nest-morning') {
+      if (!nest || !pets.some(p => p.inNest)) return hint('先点「大家回小窝睡觉」，等它们睡着再试哦');
+      checkMorning(now, true, true);
+    } else if (type === 'season') {
+      for (const p of pets) if (p.visible && !p.visitor && freeForTest(p, now)) { setAnim(p, value); p.state = 'idle'; }
+      const p = pets.find(q => q.visible);
+      if (p) say(p, { 待机_春: '🌸 春天（3～5 月）', 待机_夏: '🍉 夏天（6～8 月）', 待机_秋: '🍂 秋天（9～11 月）', 待机_冬: '⛄ 冬天（12～2 月）' }[value] || '', 4000);
     } else if (type === 'bugfix') {
       if (!dogDoes('互动_修bug', '出了点小问题，我记下来了（这是测试）')) hint('要先显示哥哥狗狗哦');
     } else if (type === 'anniversary') {
@@ -1659,6 +1719,8 @@
   // 让一只宠物安静站好（不走、不演剧情）
   function scCalm(pet, now = performance.now()) {
     if (pet.combo) scFinishCombo(pet.combo);
+    if (pet.inNest || pet.goingToNest) { pet.inNest = false; pet.goingToNest = false; pet.tucked = false; pet.el.classList.remove('in-nest'); }
+    pet.goal = null;
     pet.chase = null; pet.chaser = null; pet.snack = null; pet.then = null; pet.approach = null; pet.fleeDir = 0;
     pet.inScene = false; pet.looking = false; pet.drag = null; pet.onLedge = false; pet.restUntil = 0;
     pet.y = floorOf(pet);
@@ -1926,6 +1988,32 @@
       const [dog2, g] = scLineup([DOG, G], 0.12);
       await scCombo('swap', [dog2, g], '哥哥狗狗和g老师偶尔会换眼镜戴', 4000);
     }],
+    ['四季换装', async () => {
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', G], 0.6);
+      for (const [anim, text] of [['待机_春', '🌸 春天'], ['待机_夏', '🍉 夏天'], ['待机_秋', '🍂 秋天'], ['待机_冬', '⛄ 冬天']]) {
+        for (const pet of list) setAnim(pet, anim);
+        tell(list[2], `${text}会换上季节的衣服（节日和特别的天气优先）`, 2800);
+        await scWait(2800);
+      }
+    }],
+    ['打哈欠和小窝', async () => {
+      const list = scLineup(['千千猫猫', '梨梨兔兔', '煤球猫猫', DOG, G], 0.25);
+      if (!nest || nest.back.hidden) return;
+      tell(list[0], '打哈欠会传染哦……', 3000);
+      yawnChain = null;
+      startYawn(list[0], performance.now(), 'night');
+      if (yawnChain) yawnChain.night = true;
+      await scWaitFor(() => !yawnChain, 20000);
+      tell(list[3], `晚上 11 点后，困了就回小窝睡（小窝可以拖着换位置）`, 5000);
+      for (const pet of list) if (!pet.inNest && !pet.goingToNest) { pet.state = 'idle'; goToNest(pet, performance.now()); }
+      await scWaitFor(() => list.every(p => p.inNest), 30000);
+      tell(list[4], '哥哥狗狗和g老师会先把眼镜放到架子上', 3500);
+      await scWait(3500);
+      tell(list[1], '早上 7 点后，或者鼠标去叫，就会出来', 4000);
+      checkMorning(performance.now(), true, true);
+      await scWaitFor(() => list.every(p => !p.inNest && !p.goal && p.state !== 'action'), 25000);
+      await scWait(4000);
+    }],
     ['送零食', async () => {
       const [cat, bunny] = scLineup(['千千猫猫', '梨梨兔兔'], 0.4);
       tell(cat, '千千猫猫和梨梨兔兔会互相送零食', 4000);
@@ -2008,6 +2096,8 @@
     for (const combo of [...combos]) scFinishCombo(combo);
     scenes = [];
     for (const guest of pets.filter(p => p.visitor && p.showcase)) removeVisitor(guest); // 演示用的客人
+    yawnChain = null;
+    if (nest) { nest.glasses = { [DOG]: false, [G]: false }; updateRack(); }
     weatherKind = saved.weather;
     focusing = saved.focusing;
     focusHalfAt = saved.focusHalfAt;
@@ -2029,6 +2119,242 @@
     api.showcaseState(false);
   }
 
+  // ---- 小窝：两层图片（后层 → 宠物 → 前层），晚上 11 点后困了的宠物回窝睡，早上 7 点后或被鼠标叫醒时出来 ----
+  // 眼镜架放在小窝门口旁边：哥哥狗狗和g老师睡前摘眼镜放上去，早上再戴回去（有时会拿错）
+  const NEST_W = 460, NEST_H = 120, RACK_W = 140, RACK_H = 120;
+  const NEST_ART = '../桌宠素材/小窝/';
+  const GLASSES_OWNERS = [DOG, G];
+  let nest = null;                 // { si, offset, back, front, rack, glasses: { 哥哥狗狗: false, 灰鸮g老师: false } }
+  let nestDrag = null;
+  const isNight = (date = new Date()) => date.getHours() >= 23 || date.getHours() < 7;
+  const nestW = () => NEST_W * SCALE * size;
+  const nestH = () => NEST_H * SCALE * size;
+  const nestScreen = () => screens[nest?.si] || screens[primaryIndex()];
+  const nestX = () => { const s = nestScreen(); return Math.min(Math.max(s.x + nest.offset, s.x + nestW() / 2), s.x + s.w - nestW() / 2 - RACK_W * SCALE * size); };
+  const rackX = () => nestX() + nestW() / 2 + RACK_W * SCALE * size * 0.55;
+  const nestFloor = () => { const s = nestScreen(); return H() - (s.y + s.h); };
+
+  function makeNestImage(className, file) {
+    const img = document.createElement('img');
+    img.className = `nest ${className}`;
+    img.alt = '';
+    img.draggable = false;
+    img.src = NEST_ART + file;
+    img.addEventListener('pointerdown', onNestDown);
+    img.addEventListener('pointermove', onNestMove);
+    img.addEventListener('pointerup', onNestUp);
+    img.addEventListener('pointercancel', onNestUp);
+    stage.append(img);
+    return img;
+  }
+
+  function setupNest(saved) {
+    if (nest) return;
+    const s = screens[primaryIndex()];
+    nest = {
+      si: Number.isInteger(saved?.si) && screens[saved.si] ? saved.si : primaryIndex(),
+      offset: Number.isFinite(saved?.offset) ? saved.offset : 24 + nestW() / 2,
+      back: makeNestImage('back', '小窝_后.png'),
+      front: makeNestImage('front', '小窝_前.png'),
+      rack: makeNestImage('rack', '眼镜架_空.png'),
+      glasses: { [DOG]: false, [G]: false },
+    };
+    if (!s) nest.si = 0;
+    showNest(features.nest !== false);
+  }
+
+  function showNest(on) {
+    if (!nest) return;
+    for (const img of [nest.back, nest.front, nest.rack]) img.hidden = !on;
+    if (!on) for (const pet of pets) if (pet.inNest) leaveNest(pet, performance.now(), false);
+  }
+
+  function updateRack() {
+    const { [DOG]: dog, [G]: g } = nest.glasses;
+    const file = dog && g ? '眼镜架_两副.png' : dog ? '眼镜架_狗狗眼镜.png' : g ? '眼镜架_g老师眼镜.png' : '眼镜架_空.png';
+    if (!nest.rack.src.endsWith(encodeURI(file)) && !nest.rack.src.endsWith(file)) nest.rack.src = NEST_ART + file;
+  }
+
+  function placeNest() {
+    if (!nest || nest.back.hidden) return;
+    const w = nestW(), h = nestH(), x = nestX(), bottom = H() - nestFloor();
+    for (const img of [nest.back, nest.front]) {
+      img.style.width = `${w}px`;
+      img.style.height = `${h}px`;
+      img.style.transform = `translate(${Math.round(x - w / 2)}px, ${Math.round(bottom - h)}px)`;
+    }
+    const rw = RACK_W * SCALE * size, rh = RACK_H * SCALE * size;
+    nest.rack.style.width = `${rw}px`;
+    nest.rack.style.height = `${rh}px`;
+    nest.rack.style.transform = `translate(${Math.round(rackX() - rw / 2)}px, ${Math.round(bottom - rh)}px)`;
+    // 窝里睡的挤在一起
+    const sleepers = pets.filter(p => p.inNest && p.visible);
+    const gap = sleepers.length > 1 ? Math.min(sleepers[0].w * 0.42, (w * 0.8) / (sleepers.length - 1)) : 0;
+    sleepers.forEach((pet, i) => {
+      pet.si = nest.si;
+      pet.x = x + (i - (sleepers.length - 1) / 2) * gap;
+      pet.y = nestFloor();
+    });
+  }
+
+  const nestUnder = (x, y) => nest && !nest.back.hidden && [nest.back, nest.rack].some(img => {
+    const r = img.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top + r.height * 0.1 && y <= r.bottom;
+  });
+
+  // 拖动小窝（眼镜架跟着走）
+  function onNestDown(event) {
+    if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    nestDrag = { dx: event.clientX - nestX() };
+  }
+  function onNestMove(event) {
+    if (!nestDrag) return;
+    if (!(event.buttons & 1)) return onNestUp(event);
+    const x = event.clientX - nestDrag.dx;
+    nest.si = screenAt(x, event.clientY);
+    nest.offset = x - nestScreen().x;
+  }
+  function onNestUp(event) {
+    if (!nestDrag) return;
+    nestDrag = null;
+    if (event.currentTarget?.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    nest.offset = nestX() - nestScreen().x; // 存夹在屏幕里的位置
+    api.saveNest({ si: nest.si, offset: Math.round(nest.offset) });
+  }
+
+  // 慢慢走到某个地方（困了用「犯困向左走 / 犯困向右走」），到了再做 done
+  function goTo(pet, x, done, sleepy = false) {
+    pet.state = 'goto';
+    pet.goal = { x, done, sleepy };
+    pet.looking = false;
+    pet.onLedge = false;
+  }
+
+  // 回窝睡觉：哥哥狗狗 / g老师先去眼镜架摘眼镜
+  function goToNest(pet, now = performance.now()) {
+    if (!nest || !features.nest || pet.visitor || pet.inNest || pet.goingToNest) return false;
+    pet.goingToNest = true;
+    pet.routine = true; // 回窝路上打字也不打断
+    pet.si = nest.si;
+    pet.y = floorOf(pet);
+    const settle = () => {
+      pet.goingToNest = false;
+      pet.routine = false;
+      pet.inNest = true;
+      pet.nightSleep = isNight(); // 晚上睡的，早上才会自己起来
+      pet.el.classList.add('in-nest');
+      pet.state = 'sleep';
+      pet.tucked = true; // 打字吵不醒，只有鼠标能叫醒
+      setAnim(pet, nest.glasses[pet.name] && pet.clips['睡觉_没戴眼镜'] ? '睡觉_没戴眼镜' : '睡觉');
+    };
+    const intoNest = () => goTo(pet, nestX() + rand(-0.2, 0.2) * nestW(), settle, true);
+    if (GLASSES_OWNERS.includes(pet.name) && !nest.glasses[pet.name] && pet.clips['互动_摘眼镜']) {
+      goTo(pet, rackX(), t => {
+        nest.glasses[pet.name] = true; // 一开始摘就算放上去了（中途被打断也不会乱）
+        playNamed(pet, '互动_摘眼镜', t, 0, () => { updateRack(); intoNest(); });
+      }, true);
+    } else intoNest();
+    return true;
+  }
+
+  // 从窝里出来：戴眼镜的先去眼镜架戴回去；swapAfter = 早上两只都拿错了眼镜
+  function leaveNest(pet, now = performance.now(), walk = true, done = null) {
+    if (!pet.inNest && !pet.goingToNest) return;
+    pet.inNest = false;
+    pet.goingToNest = false;
+    pet.tucked = false;
+    pet.el.classList.remove('in-nest');
+    pet.lastAttention = now;
+    pet.routine = true;
+    const walkOff = () => {
+      pet.routine = false;
+      if (done) return done(performance.now());
+      goIdle(pet, performance.now());
+      if (walk && !focusing) walkTo(pet, pet.x + (Math.random() < 0.5 ? -1 : 1) * rand(120, 260));
+    };
+    if (walk && nest && nest.glasses[pet.name] && pet.clips['互动_戴眼镜']) {
+      goTo(pet, rackX(), t => { nest.glasses[pet.name] = false; updateRack(); playNamed(pet, '互动_戴眼镜', t, 0, walkOff); });
+    } else {
+      if (nest && nest.glasses[pet.name]) { nest.glasses[pet.name] = false; updateRack(); }
+      walkOff();
+    }
+  }
+
+  // 早上 7 点以后：窝里的一个一个出来；两副眼镜都在架子上时 30% 会拿错，戴好以后接着换眼镜
+  let nextMorningCheck = 0;
+  function checkMorning(now, force = false, forceMistake = false) {
+    if (!force && (now < nextMorningCheck || isNight())) return;
+    nextMorningCheck = now + 30_000;
+    const sleepers = pets.filter(p => p.inNest && (force || p.nightSleep));
+    if (!sleepers.length) return;
+    const mistake = nest.glasses[DOG] && nest.glasses[G] && (forceMistake || Math.random() < 0.3);
+    let owners = 0;
+    // 拿错眼镜：先戴好的那只站着等另一只，两只都戴好了再一起换
+    const ownerDone = (pet, t) => {
+      pet.state = 'drowsy';
+      pet.drowsyUntil = t + 15_000; // 另一只一直没来就不等了
+      setAnim(pet, idleAnim(pet));
+      if (++owners < 2) return;
+      const dog = byName(DOG), g = byName(G);
+      if (!dog || !g) return;
+      dog.x = Math.min(g.x + 90 * size, xRange(dog)[1]);
+      dog.state = g.state = 'idle';
+      if (!trySwapGlasses(t, true)) { goIdle(dog, t); goIdle(g, t); }
+    };
+    sleepers.forEach((pet, i) => setTimeout(() => {
+      if (!pet.inNest) return;
+      const owner = mistake && GLASSES_OWNERS.includes(pet.name);
+      leaveNest(pet, performance.now(), true, owner ? t => ownerDone(pet, t) : null);
+    }, i * 1500));
+  }
+
+  // ---- 打哈欠会传染：一只打哈欠，旁边的隔 2～4 秒也跟着打，最多传给 3 只 ----
+  // g老师被传染先「强撑」，再「缩进毛里」睡着；晚上 11 点后传完就一起慢慢走回小窝
+  const YAWN_NEAR = 350;
+  let nextYawn = performance.now() + 180_000;
+  let yawnChain = null;            // { queue, nextAt, yawned, night }
+  const canYawn = p => p && p.visible && !p.visitor && !p.combo && !p.inScene && !p.drag && !p.inNest && !p.goingToNest && onFloor(p) && ['idle', 'walk'].includes(p.state) && p.clips['打哈欠'];
+
+  function startYawn(src, now, force = false) {
+    if (!canYawn(src) || (yawnChain && !force)) return false;
+    const night = isNight() && features.nest && !!nest;
+    const near = pets.filter(p => p !== src && canYawn(p) && p.si === src.si && Math.abs(p.x - src.x) < YAWN_NEAR * size)
+      .sort((a, b) => Math.abs(a.x - src.x) - Math.abs(b.x - src.x)).slice(0, 3);
+    yawnChain = { queue: near, nextAt: now + rand(2000, 4000), yawned: [src], night: night || force === 'night' };
+    yawnOne(src, now);
+    return true;
+  }
+
+  function yawnOne(pet, now) {
+    pet.lastAttention = now;
+    const chain = yawnChain;
+    const drowsy = () => { pet.state = 'drowsy'; pet.drowsyUntil = performance.now() + 30_000; setAnim(pet, idleAnim(pet)); }; // 打完哈欠呆站着，等大家传完
+    if (pet.name === G && pet.clips['互动_强撑']) {
+      playNamed(pet, '互动_强撑', now, 0, t => {
+        if (chain.night) return drowsy();
+        playNamed(pet, pet.clips['互动_缩进毛里'] ? '互动_缩进毛里' : '睡觉', t, 0, () => { pet.state = 'sleep'; pet.tucked = true; setAnim(pet, '睡觉'); });
+      });
+    } else playNamed(pet, '打哈欠', now, 0, chain.night ? drowsy : null);
+  }
+
+  function processYawn(now) {
+    const chain = yawnChain;
+    if (!chain) return;
+    if (chain.queue.length && now >= chain.nextAt) {
+      const pet = chain.queue.shift();
+      if (canYawn(pet) || pet.state === 'sleep') { if (pet.state === 'sleep') pet.state = 'idle'; chain.yawned.push(pet); yawnOne(pet, now); }
+      chain.nextAt = now + rand(2000, 4000);
+    }
+    if (chain.queue.length || chain.yawned.some(p => p.state === 'action')) return;
+    yawnChain = null;
+    // 传完了：晚上就一起慢慢走回小窝
+    for (const pet of chain.yawned) {
+      if (pet.state !== 'drowsy') continue;
+      if (!goToNest(pet, now)) goIdle(pet, now);
+    }
+  }
+
   // ---- 两个眼镜交换：哥哥狗狗和g老师离得不远时，偶尔换眼镜戴（最多两小时一次） ----
   let nextSwapCheck = performance.now() + 120_000;
   function trySwapGlasses(now, force = false) {
@@ -2044,6 +2370,7 @@
     try { localStorage.setItem('glasses-swap-at', String(Date.now())); } catch {}
     const pair = [dog, g].sort((a, b) => a.x - b.x);
     const combo = makeCombo('swap', pair, key, (dog.x + g.x) / 2, g.y, now, 0); // 播一遍
+    api.diary('ep:swap');
     clampToScreen(combo, g);
     place(combo);
     return true;
@@ -2107,7 +2434,7 @@
   const CAN_START_TYPING = ['idle', 'walk', 'sleep', 'action'];
 
   function think(pet, now, dt) {
-    if (CAN_START_TYPING.includes(pet.state) && !pet.inScene && !pet.tucked && !showcase && isTypingLong(now)) {
+    if (CAN_START_TYPING.includes(pet.state) && !pet.inScene && !pet.tucked && !pet.routine && !showcase && isTypingLong(now)) {
       pet.state = 'typing';
       pet.then = null;
       pet.lastAttention = now;
@@ -2179,7 +2506,7 @@
         if (pet.name === G && !pet.visitor && now >= pet.nextThink && Math.random() < 0.15 && startReading(pet, now)) break;
         if (maybeSweat(pet, now)) break;
         if (maybeDoActivity(pet, now)) break;
-        if (now - pet.lastAttention > SLEEP_AFTER) { pet.state = 'sleep'; setAnim(pet, '睡觉'); break; }
+        if (now - pet.lastAttention > SLEEP_AFTER) { if (!(features.nest && isNight() && goToNest(pet, now))) { pet.state = 'sleep'; setAnim(pet, '睡觉'); } break; } // 晚上困了回小窝
         if (now >= pet.nextThink) {
           if (wantsLedge(pet) && Math.random() < 0.9) {
             // 离窗口不远就直接跳；远的话走到离自己最近的那头再跳
@@ -2212,6 +2539,22 @@
       case 'curious':
         pet.lastAttention = now; // 歪着头一直看，等鼠标动
         break;
+      case 'drowsy':
+        pet.lastAttention = now; // 打完哈欠呆站着，等大家传完
+        if (now > (pet.drowsyUntil || 0)) goIdle(pet, now);
+        break;
+      case 'goto': {
+        const goal = pet.goal;
+        if (!goal) { goIdle(pet, now); break; }
+        const step = WALK_SPEED * (goal.sleepy ? 0.6 : 1) * dt;
+        const dx = goal.x - pet.x;
+        const left = goal.sleepy && pet.clips['犯困向左走'] ? '犯困向左走' : '向左走';
+        const right = goal.sleepy && pet.clips['犯困向右走'] ? '犯困向右走' : '向右走';
+        if (Math.abs(dx) <= step) { pet.x = goal.x; pet.goal = null; goal.done(now); break; }
+        pet.x += Math.sign(dx) * step;
+        setAnim(pet, dx < 0 ? left : right);
+        break;
+      }
       case 'reading':
         if (now >= pet.until) goIdle(pet, now); // 看完书了
         else pet.lastAttention = now;
@@ -2257,9 +2600,11 @@
   }
 
   let lastWork = 0;
+  const nextFrame = () => frame(performance.now()); // 用页面里的钟（全屏时会停）
   function frame(now) {
     // 你在打字的时候，桌宠每秒只动 20 次（平时 60 次），少占一点电脑，让你打字的窗口画得更顺
-    if (activity.typing && now - lastWork < 50) { requestAnimationFrame(frame); return; }
+    if (pausedSince) { requestAnimationFrame(nextFrame); return; } // 全屏躲起来时什么都不做
+    if (activity.typing && now - lastWork < 50) { requestAnimationFrame(nextFrame); return; }
     lastWork = now;
     const dt = Math.min((now - lastTime) / 1000, 0.1);
     lastTime = now;
@@ -2279,16 +2624,23 @@
       else place(combo);
     }
     runScenes(now);
+    if (!leaving) processYawn(now);
+    placeNest();
     if (!showcase && !leaving) autoBehaviors(now);
     for (const combo of combos) { placeBubble(combo, now, true); placeHeart(combo, true); }
     placeUpdateButton();
     if (cursor) updateMouseCatch();
-    requestAnimationFrame(frame);
+    requestAnimationFrame(nextFrame);
   }
 
   // 平时自己发生的事（功能展示时都先停一停）
   function autoBehaviors(now) {
     checkVisits(now);
+    if (nest && features.nest) checkMorning(now);
+    if (now >= nextYawn) {
+      nextYawn = now + (isNight() ? rand(60_000, 180_000) : rand(240_000, 540_000)); // 晚上更容易打哈欠
+      if (features.yawn && !focusing) { const who = pets.filter(canYawn); if (who.length) startYawn(pick(who), now); }
+    }
     if (now >= nextSwapCheck) { nextSwapCheck = now + 60_000; if (features.swap && !focusing && Math.random() < 0.3) trySwapGlasses(now); }
     checkReadingHug(now);
     checkFocusDoze(now);
@@ -2326,6 +2678,7 @@
     if (!features.mouse) for (const pet of pets) { pet.shake = null; if (pet.looking) goIdle(pet, now); }
     if (!features.system) cpuHot = false;
     if (!features.perch) onPerch(null);
+    showNest(features.nest !== false);
   }
 
   async function start() {
@@ -2349,6 +2702,7 @@
     applyFeatures(data.features || {});
     if (data.activity) activity = data.activity;
     applyShow(data.show);
+    setupNest(data.nest);
     api.onShow(applyShow);
     api.onFeatures(applyFeatures);
     api.onActivity(onActivity);
@@ -2368,6 +2722,11 @@
     api.onPhoto(takePhoto);
     api.onTest(onTest);
     api.onGoodnight(goodnight);
+    api.onSayPet(({ name, text } = {}) => { const pet = pets.find(p => p.name === name && p.visible) || pets.find(p => p.visible); if (pet) say(pet.combo || pet, text, 4000); });
+    api.onFullscreen(on => {
+      pauseClock(on);
+      if (on) for (const pet of pets) { pet.drag = null; pet.el.classList.remove('dragging'); }
+    });
     api.onBugfix(onBugfix);
     api.onDiaryWrite(onDiaryWrite);
     api.onNickname(name => { nickname = name || '千千'; });
@@ -2385,7 +2744,7 @@
     // 鼠标在窗口上移动时的位置最准；主程序每 0.1 秒报的位置只在最近没收到移动时用（宠物自己走到鼠标下面）
     window.addEventListener('mousemove', event => { lastMouseMove = performance.now(); releaseStuckDrag(event); onCursor({ x: event.clientX, y: event.clientY }); });
     api.onResync(() => { for (const pet of pets) pet.drag = null; updateMouseCatch(true); });
-    requestAnimationFrame(frame);
+    requestAnimationFrame(nextFrame);
   }
 
   start().catch(error => console.error('桌宠启动失败', error));

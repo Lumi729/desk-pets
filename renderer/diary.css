@@ -6,3 +6,6 @@ body { display: flex; flex-direction: column; gap: 10px; }
 .sign { text-align: right; color: #977184; font-size: 13px; }
 .past { margin-top: 0; }
 select { display: block; width: 100%; margin-top: 4px; padding: 6px 8px; border: 2px solid #f0b6ca; border-radius: 10px; background: #fff; color: inherit; font: inherit; }
+.fav { position: absolute; top: 10px; right: 10px; padding: 2px 8px; border-radius: 10px; font-size: 18px; opacity: .35; filter: grayscale(1); background: #fff; }
+.fav.on { opacity: 1; filter: none; border-color: #e58aad; background: #fff0f6; }
+.saved { color: #4f9a6a; font-weight: 600; font-size: 13px; }

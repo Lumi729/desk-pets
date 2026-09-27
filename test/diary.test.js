@@ -49,3 +49,21 @@ test('a stand-in writer says so first', () => {
   assert.match(composeDiary({ pets: 1 }, '千千', '千千猫猫', '哥哥狗狗'), /^今天哥哥狗狗不在，由我代写～\n嘿嘿/);
   assert.ok(!composeDiary({ pets: 1 }, '千千', '哥哥狗狗', '哥哥狗狗').includes('代写'));
 });
+
+test('little episodes are mentioned in the writer\'s voice', () => {
+  const days = {};
+  const k = '2026-09-27';
+  record(days, k, 'pets');
+  record(days, k, 'episode', 'ghelp');
+  record(days, k, 'episode', 'swap');
+  record(days, k, 'episode', 'not-a-thing');
+  assert.deepStrictEqual(days[k].episodes, { ghelp: 1, swap: 1 });
+  assert.match(composeDiary(days[k], '千千', '灰鸮g老师'), /今日摔倒一次。哥哥及时赶到。此条请勿外传。/);
+  assert.match(composeDiary(days[k], '千千', '哥哥狗狗'), /对了，又和g老师把眼镜戴反了/);
+  assert.ok(!composeDiary(days[k], '千千', '哥哥狗狗', '', false).includes('对了'));
+});
+
+test('favorite days are kept forever', () => {
+  const days = { '2020-01-01': { fav: true }, '2020-01-02': {}, '2026-09-27': {} };
+  assert.deepStrictEqual(Object.keys(prune(days, '2026-09-27')), ['2020-01-01', '2026-09-27']);
+});

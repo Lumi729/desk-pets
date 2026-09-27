@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('petApi', {
   load: () => ipcRenderer.invoke('load'),
   setIgnoreMouse: ignore => ipcRenderer.send('set-ignore', ignore),
-  showMenu: petName => ipcRenderer.send('menu', petName),
+  showMenu: (petName, expression) => ipcRenderer.send('menu', petName, expression),
   onShow: fn => ipcRenderer.on('show', (_event, value) => fn(value)),
   onCursor: fn => ipcRenderer.on('cursor', (_event, point) => fn(point)),
   onFeatures: fn => ipcRenderer.on('features', (_event, features) => fn(features)),
@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('petApi', {
   onShowcase: fn => ipcRenderer.on('showcase', (_event, command) => fn(command)),
   onGreet: fn => ipcRenderer.on('greet', () => fn()),
   onGoodnight: fn => ipcRenderer.on('goodnight', () => fn()),
+  saveNest: pos => ipcRenderer.send('nest-save', pos),
+  onSayPet: fn => ipcRenderer.on('say-pet', (_event, info) => fn(info)),
+  onFullscreen: fn => ipcRenderer.on('fullscreen', (_event, on) => fn(!!on)),
   goodnightDone: () => ipcRenderer.send('goodnight-done'),
   onBugfix: fn => ipcRenderer.on('bugfix', () => fn()),
   onDiaryWrite: fn => ipcRenderer.on('diary-write', (_event, writer) => fn(writer)),

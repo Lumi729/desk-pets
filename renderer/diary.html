@@ -8,14 +8,20 @@
   <link rel="stylesheet" href="diary.css">
 </head>
 <body>
-  <div class="card">
-    <img class="dog" src="../桌宠素材/哥哥狗狗/互动_写日记.gif" alt="">
+  <div class="card" id="card">
+    <button type="button" id="fav" class="fav" title="收藏这一天">🔖</button>
+    <img class="dog" id="writer-gif" alt="">
     <div class="date" id="date"></div>
     <p class="text" id="text"></p>
-    <div class="sign">—— 哥哥狗狗 记 ✎</div>
+    <div class="sign" id="sign"></div>
   </div>
-  <label class="past">翻翻以前的日记<select id="days"></select></label>
-  <small>日记只存在这台电脑上，只数次数，最多留 30 天。</small>
+  <p id="empty" hidden>还没有收藏的日记哦，在日记卡片右上角点 🔖 就能收藏～</p>
+  <div class="row left">
+    <button type="button" id="save">🖼 存成图片</button>
+    <span id="status" class="saved"></span>
+  </div>
+  <label class="past" id="past-label"><span id="past-title">翻翻以前的日记</span><select id="days"></select></label>
+  <small>日记只存在这台电脑上，只数次数，最多留 30 天；收藏的会一直留着。</small>
   <script src="diary.js"></script>
 </body>
 </html>
