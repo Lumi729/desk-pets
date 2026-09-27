@@ -25,3 +25,4 @@ label.inline input { width: 70px; margin: 0; }
 select { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border: 2px solid #f0b6ca; border-radius: 10px; background: #fff; color: inherit; font: inherit; }
 select:focus { outline: none; border-color: #e58aad; }
 label.inline input[type=number] { width: 110px; }
+label.inline input[type=time] { width: 120px; }

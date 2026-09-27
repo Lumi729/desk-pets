@@ -13,6 +13,8 @@ const Teases = require('./renderer/teases');
 const { festivalOn, birthdaysOn, normalizeBirthday } = require('./lib/calendar');
 const { weatherIdle, fetchWeather, WEATHER_IDLES } = require('./lib/weather');
 const { REGIONS, DEFAULT_LOCATION, normalizeLocation, locationLabel } = require('./lib/regions');
+const { createErrorLog } = require('./lib/errorlog');
+const Diary = require('./lib/diary');
 const { pixelTrayImage } = require('./lib/pixel-icon');
 const { autoUpdater } = require('electron-updater');
 const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
@@ -37,6 +39,10 @@ const FEATURES = [
   { key: 'birthday', label: '生日' },
   { key: 'visit', label: '串门（联网配对后，宠物会去对方家玩）' },
   { key: 'tease', label: '挑衅哥哥（千千猫猫→哥哥狗狗，梨梨兔兔→梨梨哥哥）' },
+  { key: 'bugfix', label: '狗狗修 bug（出错时记进本机的错误日志）' },
+  { key: 'diary', label: '今日小日记（只在本机数次数）' },
+  { key: 'anniversary', label: '在一起的纪念日' },
+  { key: 'swap', label: '两个眼镜交换（哥哥狗狗和g老师）' },
   { key: 'update', label: '自动更新' },
   { key: 'compat', label: '兼容模式（屏幕卡住时试试，重启桌宠后生效）', off: true },
 ];
@@ -61,6 +67,8 @@ const settings = {
   birthdays: {},                  // 宠物名 → 「MM-DD」
   pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
   guideSeen: false,               // 新手引导看过 / 跳过了没有
+  diaryTime: '22:00',             // 每天几点写日记
+  firstDay: '',                   // 第一次打开的日子（算在一起多少天）
 };
 
 // 改过名字的宠物：旧设置里的名字换成新名字
@@ -78,6 +86,8 @@ function renameOldPets(saved) {
   }
 }
 
+const validTime = text => /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(text || ''));
+
 function loadSettings() {
   try {
     const saved = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
@@ -93,6 +103,15 @@ function loadSettings() {
     if (saved.visitPets && typeof saved.visitPets === 'object') for (const name of PETS) if (typeof saved.visitPets[name] === 'boolean') settings.visitPets[name] = saved.visitPets[name];
     settings.location = normalizeLocation(saved.location);
     settings.guideSeen = saved.guideSeen === true;
+    if (validTime(saved.diaryTime)) settings.diaryTime = saved.diaryTime;
+    if (/^\d{4}-\d\d-\d\d$/.test(saved.firstDay || '')) settings.firstDay = saved.firstDay;
+    else {
+      // 以前的版本没记：用设置文件是哪天建的
+      try {
+        const born = fs.statSync(settingsFile()).birthtime;
+        if (born.getFullYear() >= 2025 && born <= new Date()) settings.firstDay = Diary.dayKey(born);
+      } catch {}
+    }
     if (saved.birthdays && typeof saved.birthdays === 'object') {
       for (const name of PETS) { const md = normalizeBirthday(saved.birthdays[name]); if (md) settings.birthdays[name] = md; }
     }
@@ -216,6 +235,7 @@ async function runWeather() {
   if (!settings.features.weather || showcaseOn) return; // 功能展示时不查天气
   try {
     weather.data = await fetchWeather(settings.location || DEFAULT_LOCATION);
+    diaryRecord('weather', weather.data.description);
     weather.error = '';
   } catch (error) {
     weather.data = null;
@@ -271,17 +291,22 @@ ipcMain.on('place-cancel', () => placeWindow?.close());
 let todayKey = '';
 function computeToday() {
   const now = new Date();
+  const days = togetherDays();
   return {
     festival: settings.features.festival ? festivalOn(now) : null,
     birthdays: settings.features.birthday ? birthdaysOn(now, settings.birthdays) : [],
+    together: settings.features.anniversary ? { days, anniversary: Diary.isAnniversary(days) } : null,
   };
 }
+const togetherDays = () => Diary.daysTogether(settings.firstDay || Diary.dayKey());
 function sendToday(force = false) {
   const today = computeToday();
   const key = JSON.stringify(today);
   if (!force && key === todayKey) return;
   todayKey = key;
   send('today', today);
+  if (today.festival) diaryRecord('festival', today.festival);
+  refreshTray();
 }
 
 // ---- 番茄钟 ----
@@ -301,6 +326,7 @@ function checkPomodoro() {
   if (!pomodoro.mode) return;
   if (Date.now() < pomodoro.endsAt) return refreshTray(); // 更新菜单里的剩余时间
   if (pomodoro.mode === 'focus') {
+    diaryRecord('pomodoros');
     pomodoro = { mode: 'rest', endsAt: Date.now() + settings.pomodoro.rest * 60_000 };
     send('focus', false);
     send('focus-done');
@@ -342,7 +368,7 @@ let moreWindow = null;
 function openMoreSettings() {
   if (moreWindow) { moreWindow.show(); moreWindow.focus(); return; }
   moreWindow = new BrowserWindow({
-    width: 380, height: 660, useContentSize: true, resizable: false, minimizable: false, maximizable: false,
+    width: 380, height: 740, useContentSize: true, resizable: false, minimizable: false, maximizable: false,
     alwaysOnTop: true, autoHideMenuBar: true, title: '小设置', icon: trayImage(settings.trayIcon),
     webPreferences: { preload: path.join(__dirname, 'renderer', 'more-preload.js'), contextIsolation: true, sandbox: true },
   });
@@ -350,7 +376,7 @@ function openMoreSettings() {
   moreWindow.loadFile(path.join(__dirname, 'renderer', 'more.html'));
   moreWindow.on('closed', () => { moreWindow = null; });
 }
-ipcMain.handle('more-get', () => ({ pets: PETS, birthdays: settings.birthdays, pomodoro: settings.pomodoro }));
+ipcMain.handle('more-get', () => ({ pets: PETS, birthdays: settings.birthdays, pomodoro: settings.pomodoro, diaryTime: settings.diaryTime }));
 ipcMain.handle('more-save', (_event, next) => {
   settings.birthdays = {};
   for (const name of PETS) { const md = normalizeBirthday(next?.birthdays?.[name]); if (md) settings.birthdays[name] = md; }
@@ -358,6 +384,7 @@ ipcMain.handle('more-save', (_event, next) => {
     const n = Number(next?.pomodoro?.[key]);
     if (n >= 1 && n <= 180) settings.pomodoro[key] = Math.round(n);
   }
+  if (validTime(next?.diaryTime)) settings.diaryTime = next.diaryTime;
   saveSettings();
   sendToday(true);
   refreshTray();
@@ -445,6 +472,100 @@ function goodnightQuit() {
   setTimeout(() => app.quit(), 7000); // 页面没回话也照样退出
 }
 ipcMain.on('goodnight-done', () => app.quit());
+
+// ---- 狗狗修 bug：出错时记进本机的错误日志（只有错误信息、时间、版本号），哥哥狗狗在的话会去修 ----
+let errorLog = null;
+const errorLogFile = () => path.join(app.getPath('userData'), '错误日志.txt');
+function reportError(where, error) {
+  if (!settings.features.bugfix) return;
+  try {
+    if (!errorLog) errorLog = createErrorLog(errorLogFile(), app.getVersion());
+    if (errorLog.write(where, error)) send('bugfix');
+  } catch {}
+}
+process.on('uncaughtException', error => reportError('主程序', error));
+process.on('unhandledRejection', error => reportError('主程序', error));
+const logError = console.error.bind(console);
+console.error = (...args) => {
+  logError(...args);
+  reportError('主程序', args.find(a => a instanceof Error) || args.map(String).join(' '));
+};
+ipcMain.on('renderer-error', (_event, info) => reportError('桌宠页面', { message: String(info?.message || '未知错误'), stack: String(info?.stack || '') }));
+function openErrorLog() {
+  const file = errorLogFile();
+  if (!fs.existsSync(file)) fs.writeFileSync(file, '还没有错误，一切正常 ♡\n');
+  shell.openPath(file);
+}
+function copyLatestError() {
+  if (!errorLog) errorLog = createErrorLog(errorLogFile(), app.getVersion());
+  const text = errorLog.latest();
+  if (text && !text.startsWith('还没有错误')) { clipboard.writeText(text); send('say', '最近的错误复制好啦，发给哥哥吧'); }
+  else send('say', '还没有错误，一切正常 ♡');
+}
+
+// ---- 今日小日记：只在本机数次数（摸摸、点击、番茄钟、贴贴、叠叠乐、天气、节日），不记具体内容 ----
+const diaryFile = () => path.join(app.getPath('userData'), '日记.json');
+let diaryDays = null;
+let diarySaveTimer = null;
+function diaryData() {
+  if (!diaryDays) {
+    try { diaryDays = JSON.parse(fs.readFileSync(diaryFile(), 'utf8')).days || {}; } catch { diaryDays = {}; }
+  }
+  return diaryDays;
+}
+function saveDiary(now = false) {
+  clearTimeout(diarySaveTimer);
+  const write = () => { try { diaryDays = Diary.prune(diaryData(), Diary.dayKey()); fs.writeFileSync(diaryFile(), JSON.stringify({ days: diaryDays }, null, 1)); } catch {} };
+  if (now) write(); else diarySaveTimer = setTimeout(write, 5000);
+}
+function diaryRecord(event, value) {
+  if (!settings.features.diary || showcaseOn) return;
+  Diary.record(diaryData(), Diary.dayKey(), event, value);
+  saveDiary();
+}
+ipcMain.on('diary-event', (_event, type) => { if (['pets', 'clicks', 'hugs', 'stacks'].includes(type)) diaryRecord(type); });
+const diaryName = () => settings.online.name || '千千';
+function diaryText(key) {
+  const day = diaryData()[key];
+  if (key === Diary.dayKey()) return Diary.composeDiary(day, diaryName()); // 今天的随时按最新的次数写
+  return day?.text || Diary.composeDiary(day, diaryName());
+}
+// 每天到点（默认晚上 10 点）哥哥狗狗写日记，写好弹出日记卡片
+function checkDiary() {
+  if (!settings.features.diary || showcaseOn) return;
+  const now = new Date();
+  const [h, m] = settings.diaryTime.split(':').map(Number);
+  if (now.getHours() * 60 + now.getMinutes() < h * 60 + m) return;
+  const key = Diary.dayKey(now);
+  const day = diaryData()[key] || (diaryData()[key] = Diary.emptyDay());
+  if (day.written) return;
+  day.written = true;
+  day.text = Diary.composeDiary(day, diaryName());
+  saveDiary(true);
+  send('diary-write');
+  setTimeout(() => openDiary(key), 3500);
+}
+let diaryWindow = null;
+let diaryShowKey = '';
+function openDiary(key = Diary.dayKey()) {
+  diaryShowKey = key;
+  if (diaryWindow) { diaryWindow.webContents.send('diary-show', key); diaryWindow.show(); diaryWindow.focus(); return; }
+  diaryWindow = new BrowserWindow({
+    width: 420, height: 520, resizable: false, minimizable: false, maximizable: false,
+    alwaysOnTop: true, autoHideMenuBar: true, title: '今天的日记', icon: trayImage(settings.trayIcon),
+    webPreferences: { preload: path.join(__dirname, 'renderer', 'diary-preload.js'), contextIsolation: true, sandbox: true },
+  });
+  diaryWindow.removeMenu();
+  diaryWindow.loadFile(path.join(__dirname, 'renderer', 'diary.html'));
+  diaryWindow.on('closed', () => { diaryWindow = null; });
+}
+ipcMain.handle('diary-get', () => {
+  const today = Diary.dayKey();
+  const keys = Object.keys(Diary.prune(diaryData(), today));
+  if (!keys.includes(today)) keys.push(today);
+  keys.sort().reverse();
+  return { show: diaryShowKey || today, today, entries: keys.map(key => ({ key, text: diaryText(key) })) };
+});
 
 // ---- 「测试一下」：马上看到各种效果 ----
 const sendTest = (type, value) => send('test', { type, value });
@@ -806,6 +927,7 @@ function buildMenu(petName = null) {
     ...(updateReady ? [{ label: `🎉 立即重启更新（${updateReady}）`, click: restartToUpdate }, { type: 'separator' }] : []),
     showcaseOn ? { label: '⏹ 停止展示', click: stopShowcase } : { label: '✨ 功能展示', click: startShowcase },
     { label: '📖 新手引导', click: openGuide },
+    { label: '📔 今天的日记', click: () => openDiary() },
     { type: 'separator' },
     {
       label: '选择宠物',
@@ -836,7 +958,7 @@ function buildMenu(petName = null) {
       }, ...(feature.key === 'perch' && settings.features.perch ? [{ label: `　　${PERCH_STATUS[perchStatus]}`, enabled: false }] : [])]),
     },
     { label: weatherLabel(), click: openPlaceWindow },
-    { label: '宠物生日 / 番茄钟时间…', click: openMoreSettings },
+    { label: '宠物生日 / 番茄钟 / 日记时间…', click: openMoreSettings },
     {
       label: '允许去串门的宠物',
       submenu: PETS.map(name => ({
@@ -866,6 +988,10 @@ function buildMenu(petName = null) {
         { label: '灰鸮g老师：看书打瞌睡', click: () => sendTest('g-doze') },
         { label: '灰鸮g老师：摔一跤', click: () => sendTest('g-fall') },
         { label: '灰鸮g老师：旁边的宠物接住眼镜', click: () => sendTest('g-catch') },
+        { label: '两个眼镜交换', click: () => sendTest('swap') },
+        { label: '哥哥狗狗修 bug（不会真的记错误）', click: () => sendTest('bugfix') },
+        { label: '哥哥狗狗写日记', click: () => { send('diary-write'); setTimeout(() => openDiary(), 3500); } },
+        { label: '纪念日', click: () => sendTest('anniversary', togetherDays()) },
         { label: '灰鸮g老师：看书睡着被围观', click: () => sendTest('g-watch') },
         { label: '灰鸮g老师：批改作业（书里有书签就是书签版）', click: () => sendTest('g-grading') },
         { label: '串门：马上派一只去对方家', click: () => sendTest('visit') },
@@ -898,6 +1024,8 @@ function buildMenu(petName = null) {
       })),
     },
     { label: '桌宠卡住了？刷新一下', click: () => { win?.webContents.reload(); } },
+    { label: '打开错误日志', click: openErrorLog },
+    { label: '复制最近的错误', click: copyLatestError },
     { label: '开机自动启动', type: 'checkbox', checked: autoStartOn(), click: item => setAutoStart(item.checked) },
     { label: `检查更新（现在是 ${app.getVersion()}）`, click: () => runUpdateCheck(true) },
     { type: 'separator' },
@@ -934,7 +1062,7 @@ function createTray() {
 function refreshTray() {
   if (!tray) return;
   tray.setContextMenu(buildMenu());
-  tray.setToolTip(`梨间雪桌宠\n${weatherTip()}`);
+  tray.setToolTip(`梨间雪桌宠\n${weatherTip()}${settings.features.anniversary ? `\n在一起第 ${togetherDays()} 天` : ''}`);
 }
 
 function setTrayIcon(label) {
@@ -952,13 +1080,15 @@ if (!app.requestSingleInstanceLock()) {
   try { if (JSON.parse(fs.readFileSync(settingsFile(), 'utf8')).features?.compat === true) app.disableHardwareAcceleration(); } catch {}
   app.whenReady().then(() => {
     loadSettings();
+    if (!settings.firstDay) { settings.firstDay = Diary.dayKey(); saveSettings(); } // 第一次打开的日子
     createWindow();
     updateWatcher();
     createTray();
     startOnline();
     runWeather();
     setInterval(runWeather, 30 * 60_000);
-    setInterval(() => { sendToday(); checkPomodoro(); updateWeatherIdle(); }, 30_000);
+    setInterval(() => { sendToday(); checkPomodoro(); updateWeatherIdle(); checkDiary(); }, 30_000);
+    setTimeout(checkDiary, 8000);
     fixAutoStartPath();
     setupAutoUpdate();
     setTimeout(runUpdateCheck, 10_000);
@@ -972,5 +1102,5 @@ if (!app.requestSingleInstanceLock()) {
     powerMonitor.on('suspend', () => { sitStart = null; });
   });
   app.on('window-all-closed', () => app.quit());
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (stopWatcher) stopWatcher(); online.stop(); });
+  app.on('will-quit', () => { if (diaryDays) saveDiary(true); globalShortcut.unregisterAll(); if (stopWatcher) stopWatcher(); online.stop(); });
 }

@@ -10,6 +10,7 @@ window.moreApi.get().then(settings => {
   pets = settings.pets;
   field('focus').value = settings.pomodoro.focus;
   field('rest').value = settings.pomodoro.rest;
+  field('diaryTime').value = settings.diaryTime;
   for (const name of pets) {
     const row = document.createElement('label');
     row.className = 'birthday';
@@ -36,5 +37,6 @@ field('form').addEventListener('submit', event => {
   window.moreApi.save({
     birthdays,
     pomodoro: { focus: Number(field('focus').value), rest: Number(field('rest').value) },
+    diaryTime: field('diaryTime').value,
   });
 });

@@ -57,14 +57,15 @@
   // 「组合名_打架.gif」贴贴完的打架剧情，「组合名_和好.gif」打完架过一阵再见面时先和好，
   // 「组合名_盖被子.gif」哥哥狗狗给睡着的千千猫猫盖被子，「组合名_批改作业.gif」g老师看书时哥哥狗狗凑过来，
   // 「组合名_扶起来.gif」哥哥狗狗扶起摔趴趴的宠物，「组合名_批改作业_书签.gif」有书签时的批改作业，
-  // 「组合名_接眼镜.gif」g老师摔倒时旁边的宠物接住眼镜，「组合名_围观睡着.gif」g老师看书睡着时旁边的宠物围观
+  // 「组合名_接眼镜.gif」g老师摔倒时旁边的宠物接住眼镜，「组合名_围观睡着.gif」g老师看书睡着时旁边的宠物围观，
+  // 「组合名_换眼镜.gif」哥哥狗狗和g老师交换眼镜
   // （这些都不算贴贴，不会被随机选到）
   const SUFFIX_KINDS = {
     _2: 'stack', _打架: 'fight', _和好: 'makeup', _盖被子: 'blanket', _批改作业_书签: 'bookmark', _批改作业: 'grading',
-    _扶起来: 'helpup', _接眼镜: 'catch', _围观睡着: 'watch',
+    _扶起来: 'helpup', _接眼镜: 'catch', _围观睡着: 'watch', _换眼镜: 'swap',
   };
   // 这些是特别剧情，不是随机的贴贴版本
-  const SPECIAL_KINDS = ['fight', 'makeup', 'blanket', 'grading', 'bookmark', 'helpup', 'catch', 'watch'];
+  const SPECIAL_KINDS = ['fight', 'makeup', 'blanket', 'grading', 'bookmark', 'helpup', 'catch', 'watch', 'swap'];
   function parseComboFile(base) {
     for (const [suffix, kind] of Object.entries(SUFFIX_KINDS)) {
       if (base.endsWith(suffix)) return { key: base.slice(0, -suffix.length), kind };

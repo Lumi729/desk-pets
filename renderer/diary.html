@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file:; script-src 'self'; style-src 'self'">
+  <title>今天的日记</title>
+  <link rel="stylesheet" href="online.css">
+  <link rel="stylesheet" href="diary.css">
+</head>
+<body>
+  <div class="card">
+    <img class="dog" src="../桌宠素材/哥哥狗狗/互动_写日记.gif" alt="">
+    <div class="date" id="date"></div>
+    <p class="text" id="text"></p>
+    <div class="sign">—— 哥哥狗狗 记 ✎</div>
+  </div>
+  <label class="past">翻翻以前的日记<select id="days"></select></label>
+  <small>日记只存在这台电脑上，只数次数，最多留 30 天。</small>
+  <script src="diary.js"></script>
+</body>
+</html>

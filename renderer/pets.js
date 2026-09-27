@@ -1,5 +1,12 @@
 // 桌宠的动作逻辑：待机、走路、拖动、点击动作、睡觉、贴贴、叠叠乐、提醒气泡、鼠标互动、看你在做什么。
 (() => {
+  // 出错了告诉主程序记进错误日志（只有错误信息，没有别的）
+  const reportError = (message, stack) => { try { window.petApi.reportError({ message: String(message || '').slice(0, 500), stack: String(stack || '').slice(0, 1500) }); } catch {} };
+  window.addEventListener('error', event => reportError(event.message, event.error?.stack));
+  window.addEventListener('unhandledrejection', event => reportError(event.reason?.message || event.reason, event.reason?.stack));
+  const logError = console.error.bind(console);
+  console.error = (...args) => { logError(...args); const err = args.find(a => a instanceof Error); reportError(args.map(a => (a instanceof Error ? a.message : String(a))).join(' '), err?.stack); };
+
   const SCALE = 0.7;               // 「100%」时宠物的大小（GIF 原图 × 这个倍数）
   const WALK_SPEED = 70;           // 走路速度（像素/秒）
   const SLEEP_AFTER = 60_000;      // 多久没人理就睡觉（毫秒）
@@ -24,7 +31,7 @@
   const SHAKE_STEP = 12;           // 鼠标来回晃：每次至少移动这么多像素
   const SHAKE_TURNS = 4;           // 1 秒内来回这么多次算「晃」
   // 这些是特定时候才播的，点宠物时不会随机抽到
-  const CORE = ['待机', '向左走', '向右走', '睡觉', '向左看', '向右看', '掉落', '摔趴趴', '冒冷汗',
+  const CORE = ['纪念日', '待机', '向左走', '向右走', '睡觉', '向左看', '向右看', '掉落', '摔趴趴', '冒冷汗',
     '专注', '叼胡萝卜向左走', '叼胡萝卜向右走', '叼小鱼向左走', '叼小鱼向右走',
     '国庆', '万圣节', '圣诞', '春节', '生日'];
   const CHASE_SPEED = 3;           // 煤球猫猫冲过去的速度（平时的几倍）
@@ -83,6 +90,8 @@
   const CURIOUS_AFTER = 3000;      // 鼠标在g老师旁边停多久，它会歪头看
   const READ_TIME = [20_000, 40_000]; // g老师平时偶尔看书看多久
   const READ_HUG_TIME = 6000;      // 别的宠物挤进来一起看书看多久
+  const SWAP_EVERY = 2 * 3600_000; // 两个眼镜交换：最多多久一次
+  const SWAP_NEAR = 400;           // 离多近才会交换眼镜（像素，按大小缩放）
   const CATCH_NEAR = 300;          // g老师摔倒时，离多近的宠物能接住眼镜（像素，按大小缩放）
   const CATCH_CHANCE = 0.6;        // 接住眼镜的概率
   const WATCH_NEAR = 300;          // g老师看书睡着时，离多近的宠物会来围观
@@ -319,12 +328,13 @@
     pet.lastAttention = now;
     if (drag.moved) {
       pet.vy = 0;
-      if (tryStack(pet, now)) return; // 落在别的宠物头上 → 叠叠乐
+      if (tryStack(pet, now)) { api.diary('stacks'); return; } // 落在别的宠物头上 → 叠叠乐
       pet.si = screenAt(pet.x, H() - pet.y - pet.h / 2); // 松手时在哪块屏幕上，就落到那块屏幕的底部
       if (pet.y < floorOf(pet)) pet.y = floorOf(pet);
       if (pet.y > floorOf(pet)) dropFrom(pet); else goIdle(pet, now);
     } else if (event.type === 'pointerup') {
       if (pet.name === G && !pet.visitor && pet.clips[GLASSES[0]]) clickGlasses(pet, now); else playRandomAction(pet, now);
+      if (!pet.visitor) api.diary('clicks');
       api.touched();
     }
   }
@@ -393,6 +403,7 @@
       pet.shyUntil = now + 4000;
       pet.lastAttention = now;
       playNamed(pet, '害羞', now);
+      if (!pet.visitor) api.diary('pets'); // 鼠标在身上晃晃 = 摸摸
     }
   }
 
@@ -852,6 +863,7 @@
     }
     const mid = group.reduce((sum, p) => sum + p.x, 0) / group.length;
     const combo = makeCombo(kind, group, key, mid, group[0].y, now, kind === 'row' ? HUG_TIME : 0);
+    if (!showcase) api.diary('hugs');
     const s = screenOf(group[0]);
     combo.x = Math.min(Math.max(mid, s.x + combo.w / 2), s.x + s.w - combo.w / 2);
     place(combo);
@@ -970,6 +982,7 @@
       else if (combo.kind === 'helpup') endHelpUp(combo, now, !fallAll && !quiet);
       else if (combo.kind === 'watch' && !fallAll && !quiet) endWatch(combo, now);
       else if ((combo.kind === 'grading' || combo.kind === 'bookmark') && !fallAll && !quiet) endGrading(combo, now);
+      else if (combo.kind === 'swap') endHug(combo, now, false);
       else if (combo.kind === 'catch') { removeCombo(combo, false); combo.members.forEach((pet, i) => { pet.x = combo.x + (i - (combo.members.length - 1) / 2) * pet.w * 0.55; goIdle(pet, now); }); }
       else endHug(combo, now, combo.kind === 'row' && !fallAll && !quiet);
       if (fallAll) for (const pet of combo.members) if (pet.onLedge) dropFrom(pet);
@@ -1407,6 +1420,11 @@
 
   function onToday(next) {
     today = { festival: next?.festival || null, birthdays: next?.birthdays || [] };
+    const together = next?.together;
+    if (together?.anniversary && celebratedDays !== together.days) {
+      celebratedDays = together.days;
+      setTimeout(() => { if (!showcase && !leaving) celebrateTogether(together.days); }, 3000);
+    }
     const now = performance.now();
     if (today.festival || today.birthdays.length) for (const pet of pets) pet.nextCelebrate = Math.min(pet.nextCelebrate || Infinity, now + rand(2000, 8000));
   }
@@ -1558,6 +1576,16 @@
       if (type === 'g-read') { startReading(g, now); g.until = now + 60_000; say(g, '拖一只宠物到我旁边，一起看书吧', 5000); }
       if (type === 'g-doze') doze(g, now);
       if (type === 'g-fall') { g.y = floorOf(g) + 300; dropFrom(g); }
+    } else if (type === 'bugfix') {
+      if (!dogDoes('互动_修bug', '出了点小问题，我记下来了（这是测试）')) hint('要先显示哥哥狗狗哦');
+    } else if (type === 'anniversary') {
+      celebrateTogether(value || 1);
+    } else if (type === 'swap') {
+      const dog = byName(DOG), g = byName(G);
+      if (!dog || !g || !freeForTest(dog, now) || !freeForTest(g, now)) return hint('要同时显示哥哥狗狗和g老师哦');
+      dog.si = g.si;
+      dog.x = Math.min(g.x + 120 * size, xRange(dog)[1]);
+      if (!trySwapGlasses(now, true)) hint('换眼镜没成功，再试一次吧');
     } else if (type === 'g-catch' || type === 'g-watch' || type === 'g-grading') {
       const g = byName(G);
       if (!g || !freeForTest(g, now)) return hint(`要先在「选择宠物」里勾上${G}哦`);
@@ -1882,6 +1910,21 @@
       const [cat, dog2] = scLineup(['千千猫猫', DOG], 0.12);
       await scCombo('blanket', [cat, dog2], '晚上千千猫猫睡着了，哥哥狗狗会给它盖被子', 4000);
     }],
+    ['小惊喜', async () => {
+      const [dog] = scLineup([DOG]);
+      scPlay(dog, '互动_修bug', 3500);
+      tell(dog, '桌宠出错时哥哥狗狗会去修，还会记进错误日志', 3800);
+      await scWait(3800);
+      scPlay(dog, '互动_写日记', 3500);
+      tell(dog, '每天晚上 10 点写今日小日记，写好会给你看', 3800);
+      await scWait(3800);
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', G], 0.6);
+      for (const pet of list) scPlay(pet, '纪念日', 4000);
+      tell(list[2], '在一起第 7、30、100 天……大家会一起庆祝', 4200);
+      await scWait(4200);
+      const [dog2, g] = scLineup([DOG, G], 0.12);
+      await scCombo('swap', [dog2, g], '哥哥狗狗和g老师偶尔会换眼镜戴', 4000);
+    }],
     ['送零食', async () => {
       const [cat, bunny] = scLineup(['千千猫猫', '梨梨兔兔'], 0.4);
       tell(cat, '千千猫猫和梨梨兔兔会互相送零食', 4000);
@@ -1983,6 +2026,48 @@
     }
     if (saved.focus) applyFocus(saved.focus); // 展示时真的开始 / 结束了专注
     api.showcaseState(false);
+  }
+
+  // ---- 两个眼镜交换：哥哥狗狗和g老师离得不远时，偶尔换眼镜戴（最多两小时一次） ----
+  let nextSwapCheck = performance.now() + 120_000;
+  function trySwapGlasses(now, force = false) {
+    const dog = byName(DOG), g = byName(G);
+    const key = Combos.comboKey([DOG, G]);
+    if (!dog || !g || !comboClips[key]?.swap || !isFree(dog) || !isFree(g) || dog.si !== g.si) return false;
+    if (!force) {
+      if (Math.abs(dog.x - g.x) > SWAP_NEAR * size) return false;
+      let last = 0;
+      try { last = Number(localStorage.getItem('glasses-swap-at')) || 0; } catch {}
+      if (Date.now() - last < SWAP_EVERY) return false;
+    }
+    try { localStorage.setItem('glasses-swap-at', String(Date.now())); } catch {}
+    const pair = [dog, g].sort((a, b) => a.x - b.x);
+    const combo = makeCombo('swap', pair, key, (dog.x + g.x) / 2, g.y, now, 0); // 播一遍
+    clampToScreen(combo, g);
+    place(combo);
+    return true;
+  }
+
+  // ---- 狗狗修 bug / 写日记 / 纪念日 ----
+  function dogDoes(anim, text, ms = 3500) {
+    const dog = byName(DOG);
+    if (!dog || !dog.visible || dog.combo || dog.inScene || ['drag', 'fall', 'jump', 'hug', 'exit', 'enter'].includes(dog.state) || !dog.clips[anim]) return false;
+    dog.lastAttention = performance.now();
+    playNamed(dog, anim, performance.now(), ms);
+    say(dog, text, ms + 1500);
+    return true;
+  }
+  function onBugfix() { if (!showcase) dogDoes('互动_修bug', '出了点小问题，我记下来了'); }
+  function onDiaryWrite() { dogDoes('互动_写日记', '今天的日记写好啦～', 3500); }
+  let celebratedDays = 0;
+  function celebrateTogether(days) {
+    const now = performance.now();
+    for (const pet of pets) {
+      if (!pet.visible || pet.visitor) continue;
+      if (pet.combo) { say(pet.combo, `我们在一起第 ${days} 天啦`, 8000); continue; }
+      if (!BUSY.includes(pet.state) && !pet.inScene) { pet.lastAttention = now; playNamed(pet, '纪念日', now, 4000); }
+      say(pet, `我们在一起第 ${days} 天啦`, 8000);
+    }
   }
 
   // ---- 退出前道晚安：醒着的打招呼，睡着的接着睡，3 秒后慢慢变透明，再真正退出 ----
@@ -2194,6 +2279,7 @@
   // 平时自己发生的事（功能展示时都先停一停）
   function autoBehaviors(now) {
     checkVisits(now);
+    if (now >= nextSwapCheck) { nextSwapCheck = now + 60_000; if (features.swap && !focusing && Math.random() < 0.3) trySwapGlasses(now); }
     checkReadingHug(now);
     checkFocusDoze(now);
     if (now >= nextTease) { nextTease = now + rand(120_000, 300_000); if (features.tease && !focusing) tryTease(now); }
@@ -2271,6 +2357,8 @@
     api.onPhoto(takePhoto);
     api.onTest(onTest);
     api.onGoodnight(goodnight);
+    api.onBugfix(onBugfix);
+    api.onDiaryWrite(onDiaryWrite);
     api.onShowcase(command => { if (command === 'stop') stopShowcase(); else startShowcase(); });
     api.onGreet(() => { const now = performance.now(); for (const pet of pets) if (pet.visible && !pet.visitor && !BUSY.includes(pet.state)) { playNamed(pet, '打招呼', now, 3000); say(pet, '你好呀～', 4000); } });
     api.onTease(onTeaseRequest);
