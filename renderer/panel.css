@@ -1,0 +1,29 @@
+body { padding: 14px 16px 24px; }
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+header img { height: 64px; image-rendering: pixelated; }
+header h1 { margin: 0; }
+.section { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.buttons button { flex: 1 1 auto; text-align: left; }
+details.card { border: 2px solid #f3cddb; border-radius: 14px; background: #fff; padding: 8px 12px; }
+details.card[open] { border-color: #eab3c8; box-shadow: 0 3px 10px #e58aad22; }
+details.card > summary { font-weight: 700; color: #674350; list-style: none; cursor: pointer; padding: 2px 0; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::before { content: '▸ '; color: #e58aad; }
+details.card[open] > summary::before { content: '▾ '; }
+details.card .inner { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+details.card details.card { border-width: 1px; }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 4px; border-radius: 10px; cursor: pointer; font-weight: 400; margin: 0; }
+.toggle:hover { background: #fff0f6; }
+.toggle .switch { flex: none; width: 38px; height: 22px; border-radius: 11px; background: #e8d6de; position: relative; transition: background .15s; }
+.toggle .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0003; transition: left .15s; }
+.toggle.on .switch { background: #e58aad; }
+.toggle.on .switch::after { left: 19px; }
+.toggle.disabled { opacity: .45; cursor: default; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pills button { padding: 5px 12px; border-radius: 16px; }
+.pills button.on { background: #e9aec6; border-color: #d795b0; font-weight: 700; }
+.note { color: #977184; font-size: 13px; padding: 2px 4px; }
+.card button { text-align: left; }
+button:disabled { opacity: .45; cursor: default; }
+hr { border: 0; border-top: 1px dashed #f0b6ca; margin: 4px 0; width: 100%; }

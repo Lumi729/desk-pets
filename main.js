@@ -828,6 +828,49 @@ async function setCodexLink(on, startup = false) {
   } finally { changingCodexLink = false; refreshTray(); }
 }
 
+// ---- 控制面板：双击托盘图标打开，里面就是右键菜单的内容，点了窗口不会关 ----
+let panelWindow = null;
+let panelHandlers = new Map();
+// 把菜单变成页面能用的样子：每个能点的项目给一个编号，点的时候照菜单原来的办法做
+function panelTree() {
+  panelHandlers = new Map();
+  let next = 0;
+  const walk = items => items.filter(Boolean).map(item => {
+    if (item.type === 'separator') return { type: 'separator' };
+    const node = { label: String(item.label ?? ''), type: item.type || 'normal', checked: !!item.checked, enabled: item.enabled !== false };
+    if (Array.isArray(item.submenu)) node.submenu = walk(item.submenu);
+    else if (typeof item.click === 'function') {
+      node.id = ++next;
+      panelHandlers.set(node.id, item);
+    }
+    return node;
+  });
+  return walk(menuTemplate());
+}
+function sendPanel() {
+  if (panelWindow && !panelWindow.isDestroyed()) panelWindow.webContents.send('panel-tree', panelTree());
+}
+function openPanel() {
+  if (panelWindow) { panelWindow.show(); panelWindow.focus(); return; }
+  panelWindow = new BrowserWindow({
+    width: 480, height: Math.min(760, screen.getPrimaryDisplay().workAreaSize.height - 60), minWidth: 380, minHeight: 360,
+    autoHideMenuBar: true, title: '梨间雪桌宠 · 控制面板', icon: trayImage(settings.trayIcon),
+    webPreferences: { preload: path.join(__dirname, 'renderer', 'panel-preload.js'), contextIsolation: true, sandbox: true },
+  });
+  panelWindow.removeMenu();
+  panelWindow.loadFile(path.join(__dirname, 'renderer', 'panel.html'));
+  panelWindow.on('closed', () => { panelWindow = null; panelHandlers = new Map(); });
+}
+ipcMain.handle('panel-get', () => panelTree());
+ipcMain.on('panel-click', (_event, id) => {
+  const item = panelHandlers.get(Number(id));
+  if (!item || item.enabled === false) return;
+  // 勾选项：跟菜单一样，先变成相反的状态再交给原来的功能；单选项：选上
+  const checked = item.type === 'checkbox' ? !item.checked : item.type === 'radio' ? true : item.checked;
+  try { item.click({ checked }); } catch (error) { console.error('控制面板点了出错', error); }
+  setTimeout(sendPanel, 150); // 状态变了，刷新一下
+});
+
 // ---- 「测试一下」：马上看到各种效果 ----
 const sendTest = (type, value) => send('test', { type, value });
 
@@ -1203,14 +1246,19 @@ let mouseOnPet = false;
 ipcMain.on('set-ignore', (_event, ignore) => { mouseOnPet = !ignore; win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }); });
 // petName：右键的是哪只宠物（托盘菜单没有）。千千猫猫和梨梨兔兔会多一个「挑衅哥哥」
 function buildMenu(petName = null, expression = null) {
+  return Menu.buildFromTemplate(menuTemplate(petName, expression));
+}
+// 右键菜单的内容（控制面板也用这一份，所以两边的功能永远一样）
+function menuTemplate(petName = null, expression = null) {
   const visitor = petName?.startsWith('visitor:') ? petName.slice(8) : null;
-  return Menu.buildFromTemplate([
+  return [
     ...(expression && settings.features.copyface ? [{ label: '📋 复制这个表情', click: () => copyExpression(expression) }, { type: 'separator' }] : []),
     ...(visitor ? [{ label: `🏠 送${visitor}回家`, click: () => send('send-home', visitor) }, { type: 'separator' }] : []),
     ...visitState.away.map(name => ({ label: `🏠 叫${name}回家（在对方家串门）`, click: () => send('call-home', name) })),
     ...(visitState.away.length ? [{ type: 'separator' }] : []),
     ...(Teases.PAIRS[petName] ? [{ label: `😈 挑衅哥哥（${Teases.PAIRS[petName].target}）`, click: () => send('tease', petName) }, { type: 'separator' }] : []),
     ...(updateReady ? [{ label: `🎉 立即重启更新（${updateReady}）`, click: restartToUpdate }, { type: 'separator' }] : []),
+    { label: '🎛 控制面板（双击托盘图标也能打开）', click: openPanel },
     showcaseOn ? { label: '⏹ 停止展示', click: stopShowcase } : { label: '✨ 功能展示', click: startShowcase },
     { label: '📖 新手引导', click: openGuide },
     { label: '📔 今天的日记', click: () => openDiary() },
@@ -1355,7 +1403,7 @@ function buildMenu(petName = null, expression = null) {
     { label: `检查更新（现在是 ${app.getVersion()}）`, click: () => runUpdateCheck(true) },
     { type: 'separator' },
     { label: '退出', click: goodnightQuit },
-  ]);
+  ];
 }
 
 ipcMain.on('menu', (_event, petName, expression) => buildMenu(typeof petName === 'string' ? petName : null, expression && typeof expression === 'object' ? expression : null).popup({ window: win }));
@@ -1377,7 +1425,10 @@ function createTray() {
   try {
     tray = new Tray(trayImage(settings.trayIcon));
     tray.setToolTip('梨间雪桌宠');
-    tray.on('click', togglePets);   // 左键：显示 / 隐藏桌宠；右键：设置菜单
+    // 左键：显示 / 隐藏桌宠（等一小会儿，看是不是双击）；双击：打开控制面板；右键：设置菜单
+    let clickTimer = null;
+    tray.on('click', () => { clearTimeout(clickTimer); clickTimer = setTimeout(togglePets, 320); });
+    tray.on('double-click', () => { clearTimeout(clickTimer); openPanel(); });
     refreshTray();
   } catch (error) {
     console.error('托盘图标创建失败', error);
@@ -1387,6 +1438,7 @@ function createTray() {
 function refreshTray() {
   if (!tray) return;
   tray.setContextMenu(buildMenu());
+  sendPanel();
   tray.setToolTip(`梨间雪桌宠\n${weatherTip()}${settings.features.anniversary ? `\n在一起第 ${togetherDays()} 天` : ''}`);
 }
 
