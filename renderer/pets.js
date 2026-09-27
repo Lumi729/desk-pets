@@ -1053,6 +1053,7 @@
   }
 
   // ---- 哥哥狗狗 ----
+  const SPLAT_SEEN = 1000; // 摔趴趴至少先趴这么久，哥哥狗狗才扶
   // 有宠物摔趴趴了 → 哥哥狗狗走过去，两只一起播「贴贴/XX-哥哥狗狗_扶起来.gif」
   // （里面已经有扶起来、抖灰、道谢、摸摸头），播完两只各自慢慢走开
   function helpUp(fallen, now) {
@@ -1071,7 +1072,8 @@
       onGiveUp: () => afterSplat(fallen)?.(performance.now()),
       steps: [
         t => approach(dog, fallen),
-        t => () => fallen.state !== 'action', // 等它摔完
+        // 走到了就马上扶，不用等摔趴趴整段播完（只是摔得很近时让它先趴一小会儿，看得出摔了）
+        t => { const ready = now + SPLAT_SEEN; return t2 => t2 >= ready; },
         t => {
           const pair = [fallen, dog].sort((a, b) => a.x - b.x);
           const combo = makeCombo('helpup', pair, key, (fallen.x + dog.x) / 2, fallen.y, t, 0); // 播一遍
