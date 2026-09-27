@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Notification, Tray, clipboard, ipcMain, nativeImage, powerMonitor, screen, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, clipboard, globalShortcut, ipcMain, nativeImage, powerMonitor, screen, shell } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -57,6 +57,7 @@ const settings = {
   visitPets: Object.fromEntries(PETS.map(name => [name, true])), // 哪几只可以去串门
   birthdays: {},                  // 宠物名 → 「MM-DD」
   pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
+  guideSeen: false,               // 新手引导看过 / 跳过了没有
 };
 
 // 改过名字的宠物：旧设置里的名字换成新名字
@@ -88,6 +89,7 @@ function loadSettings() {
     if (SIZES.includes(saved.size)) settings.size = saved.size;
     if (saved.visitPets && typeof saved.visitPets === 'object') for (const name of PETS) if (typeof saved.visitPets[name] === 'boolean') settings.visitPets[name] = saved.visitPets[name];
     settings.location = normalizeLocation(saved.location);
+    settings.guideSeen = saved.guideSeen === true;
     if (saved.birthdays && typeof saved.birthdays === 'object') {
       for (const name of PETS) { const md = normalizeBirthday(saved.birthdays[name]); if (md) settings.birthdays[name] = md; }
     }
@@ -201,7 +203,7 @@ function updateWeatherIdle() {
   if (settings.features.weather) setWeatherIdle(weatherIdle(weather.data, new Date().getHours()));
 }
 async function runWeather() {
-  if (!settings.features.weather) return;
+  if (!settings.features.weather || showcaseOn) return; // 功能展示时不查天气
   try {
     weather.data = await fetchWeather(settings.location || DEFAULT_LOCATION);
     weather.error = '';
@@ -353,6 +355,76 @@ ipcMain.handle('more-save', (_event, next) => {
 });
 ipcMain.on('more-cancel', () => moreWindow?.close());
 
+// ---- 功能展示：页面里按顺序演一遍所有功能 ----
+// 演示时不改设置、不联网、不查天气、不弹提醒；按 Esc 或点托盘「停止展示」随时结束
+let showcaseOn = false;
+function startShowcase() {
+  if (!win || showcaseOn) return;
+  if (!win.isVisible()) { win.showInactive(); win.setAlwaysOnTop(true, 'screen-saver'); }
+  send('showcase', 'start');
+}
+function stopShowcase() { send('showcase', 'stop'); }
+ipcMain.on('showcase-state', (_event, on) => {
+  showcaseOn = !!on;
+  // Esc 只在展示时占用一下，结束就还回去
+  if (showcaseOn) { try { globalShortcut.register('Escape', stopShowcase); } catch {} }
+  else if (globalShortcut.isRegistered('Escape')) globalShortcut.unregister('Escape');
+  refreshTray();
+});
+
+// ---- 新手引导：第一次打开时自动出现，托盘里「新手引导」随时再看 ----
+let guideWindow = null;
+function openGuide() {
+  if (guideWindow) { guideWindow.show(); guideWindow.focus(); return; }
+  guideWindow = new BrowserWindow({
+    width: 520, height: 640, resizable: false, minimizable: false, maximizable: false,
+    alwaysOnTop: true, autoHideMenuBar: true, title: '新手引导', icon: trayImage(settings.trayIcon),
+    webPreferences: { preload: path.join(__dirname, 'renderer', 'guide-preload.js'), contextIsolation: true, sandbox: true },
+  });
+  guideWindow.removeMenu();
+  guideWindow.loadFile(path.join(__dirname, 'renderer', 'guide.html'));
+  guideWindow.webContents.once('did-finish-load', () => send('greet')); // 宠物们一起打招呼
+  // 看完、跳过或者直接关掉，都算看过了，下次不再自动弹出
+  guideWindow.on('closed', () => { guideWindow = null; if (!settings.guideSeen) { settings.guideSeen = true; saveSettings(); } });
+}
+ipcMain.handle('guide-get', () => ({
+  pets: PETS, shown: settings.pets, size: settings.size, sizes: SIZES,
+  regions: REGIONS, location: settings.location || DEFAULT_LOCATION, place: placeName(),
+  birthdays: settings.birthdays, pomodoro: settings.pomodoro,
+  online: { enabled: settings.online.enabled, hasCode: settings.online.code.trim().length >= 4 },
+}));
+ipcMain.on('guide-show-pet', (_event, name, on) => { if (PETS.includes(name)) setPetShown(name, !!on); });
+ipcMain.on('guide-size', (_event, size) => { if (SIZES.includes(size)) setSize(size); });
+ipcMain.handle('guide-place', (_event, place) => {
+  const location = normalizeLocation(place);
+  if (!location) return null;
+  settings.location = location;
+  saveSettings();
+  weather.data = null;
+  weather.error = '';
+  refreshTray();
+  runWeather();
+  return placeName();
+});
+ipcMain.handle('guide-birthdays', (_event, next) => {
+  for (const name of PETS) {
+    const text = String(next?.[name] ?? '').trim();
+    const md = normalizeBirthday(text);
+    if (md) settings.birthdays[name] = md;
+    else if (!text) delete settings.birthdays[name];
+    else return name; // 这只写得不对
+  }
+  saveSettings();
+  sendToday(true);
+  return '';
+});
+ipcMain.on('guide-open', (_event, what) => {
+  if (what === 'online') openOnlineSettings();
+  if (what === 'more') openMoreSettings();
+  if (what === 'showcase') { guideWindow?.close(); startShowcase(); }
+});
+ipcMain.on('guide-done', () => { settings.guideSeen = true; saveSettings(); guideWindow?.close(); });
+
 // ---- 「测试一下」：马上看到各种效果 ----
 const sendTest = (type, value) => send('test', { type, value });
 
@@ -457,7 +529,7 @@ function checkSitting() {
   if (sitStart === null) sitStart = now;
   if (settings.features.sit && now - sitStart >= SIT_LIMIT) {
     sitStart = now;
-    send('sit-reminder');
+    if (!showcaseOn) send('sit-reminder');
   }
 }
 
@@ -467,7 +539,7 @@ let onlineWindow = null;
 let lastPetSent = 0;
 
 online.on('change', () => { send('presence', online.peerOnline); refreshTray(); });
-online.on('remote', message => send('remote', message));
+online.on('remote', message => { if (!showcaseOn) send('remote', message); }); // 功能展示时先不理朋友戳戳
 
 const serverAddress = () => settings.online.server.trim() || DEFAULT_SERVER;
 
@@ -530,6 +602,7 @@ ipcMain.on('online-cancel', () => onlineWindow?.close());
 
 // 摸了自己的宠物 → 告诉对方（最多 2 秒一次）
 ipcMain.on('pet-touched', () => {
+  if (showcaseOn) return;
   const now = Date.now();
   if (now - lastPetSent < 2000) return;
   if (online.send('pet', settings.online.name)) lastPetSent = now;
@@ -538,6 +611,7 @@ ipcMain.on('pet-touched', () => {
 // ---- 串门：只转发「串门开始 / 串门结束」和宠物名、自己的名字 ----
 let visitState = { away: [], visitors: [] };
 ipcMain.on('visit-send', (_event, { type, pet } = {}) => {
+  if (showcaseOn) return;
   if ((type === 'visit-start' || type === 'visit-end') && PETS.includes(pet)) online.send(type, settings.online.name, pet);
 });
 ipcMain.on('visit-state', (_event, next) => {
@@ -591,6 +665,7 @@ function runUpdateCheck(manual = false) {
 // 通知要一直留着引用，不然 Windows 上点通知时它可能已经被回收，点了没反应
 const liveNotes = new Set();
 function showNote(options, onClick) {
+  if (showcaseOn) return; // 功能展示时不弹真正的提醒
   if (!Notification.isSupported()) return;
   const note = new Notification(options);
   liveNotes.add(note);
@@ -708,6 +783,9 @@ function buildMenu(petName = null) {
     ...(visitState.away.length ? [{ type: 'separator' }] : []),
     ...(Teases.PAIRS[petName] ? [{ label: `😈 挑衅哥哥（${Teases.PAIRS[petName].target}）`, click: () => send('tease', petName) }, { type: 'separator' }] : []),
     ...(updateReady ? [{ label: `🎉 立即重启更新（${updateReady}）`, click: restartToUpdate }, { type: 'separator' }] : []),
+    showcaseOn ? { label: '⏹ 停止展示', click: stopShowcase } : { label: '✨ 功能展示', click: startShowcase },
+    { label: '📖 新手引导', click: openGuide },
+    { type: 'separator' },
     {
       label: '选择宠物',
       submenu: PETS.map(name => ({
@@ -860,6 +938,8 @@ if (!app.requestSingleInstanceLock()) {
     setupAutoUpdate();
     setTimeout(runUpdateCheck, 10_000);
     setInterval(runUpdateCheck, 3 * 60 * 60_000);
+    // 第一次打开：等宠物出来以后弹出新手引导
+    if (!settings.guideSeen) win.webContents.once('did-finish-load', () => setTimeout(openGuide, 1500));
     screen.on('display-metrics-changed', fitToScreen);
     screen.on('display-added', fitToScreen);
     screen.on('display-removed', fitToScreen);
@@ -867,5 +947,5 @@ if (!app.requestSingleInstanceLock()) {
     powerMonitor.on('suspend', () => { sitStart = null; });
   });
   app.on('window-all-closed', () => app.quit());
-  app.on('will-quit', () => { if (stopWatcher) stopWatcher(); online.stop(); });
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (stopWatcher) stopWatcher(); online.stop(); });
 }
