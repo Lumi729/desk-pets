@@ -39,3 +39,4 @@
 - 小窝在 `renderer/pets.js` 的「小窝」一节（素材在 `桌宠素材/小窝/`），宠物在窝里时 `pet.inNest`，回窝 / 出窝的路上 `pet.routine` 为真（打字不会打断）。页面里的 `performance.now()` 是会在全屏躲起来时停住的钟。
 - 联动 Claude Code：`lib/claude-hooks.js`（往 Claude Code 的 settings.json 里加 / 删我们的 hooks，只认命令里带 `/desk-pets-claude/` 的）、`lib/claude-activity.js`（按 session_id 算在不在干活），主进程在 127.0.0.1:47291 收事件、回 204 空内容。hook 命令必须没有输出、失败也 `exit 0`。
 - 改了 `server/` 以后要提醒千千在 `server` 文件夹里运行 `npm run deploy` 重新部署。
+- 联动 Codex：`lib/codex-hooks.js` 管理用户目录 `.codex/hooks.json`（尊重 `CODEX_HOME`），`lib/codex-link.js` 在 127.0.0.1:47292 收本机状态，`lib/codex-activity.js` 按 session_id / turn_id 记工作。只转发会话、轮次、时间、是否等回应，不转发聊天或工具内容；不动信任、审批设置。首次或命令变更后须由用户在 Codex 审核信任 hooks；开关开启不等于已接上，菜单收到真实事件才算。收工 / 中断 / 等待不能打断另一场仍在工作的聊天，也不能抢贴贴、摔倒、小窝或剧情。

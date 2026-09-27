@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Notification, Tray, clipboard, globalShortcut, ipcMain, nativeImage, powerMonitor, screen, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, clipboard, dialog, globalShortcut, ipcMain, nativeImage, powerMonitor, screen, shell } = require('electron');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const os = require('node:os');
@@ -19,6 +19,8 @@ const Diary = require('./lib/diary');
 const http = require('node:http');
 const ClaudeHooks = require('./lib/claude-hooks');
 const { createClaudeActivity } = require('./lib/claude-activity');
+const CodexHooks = require('./lib/codex-hooks');
+const { createCodexLink } = require('./lib/codex-link');
 const { pixelTrayImage } = require('./lib/pixel-icon');
 const { autoUpdater } = require('electron-updater');
 const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
@@ -77,6 +79,7 @@ const settings = {
   birthdays: {},                  // 宠物名 → 「MM-DD」
   pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
   guideSeen: false,               // 新手引导看过 / 跳过了没有
+  codexLink: false,               // 联动 Codex（灰鸮g老师）
   claudeLink: false,              // 联动 Claude Code
   nest: null,                     // 小窝放在哪：{ si: 第几块屏幕, offset: 离屏幕左边多远 }
   diaryTime: '22:00',             // 每天几点写日记
@@ -128,6 +131,7 @@ function loadSettings() {
     settings.location = normalizeLocation(saved.location);
     settings.guideSeen = saved.guideSeen === true;
     settings.claudeLink = saved.claudeLink === true;
+    settings.codexLink = saved.codexLink === true;
     if (Number.isFinite(saved.nest?.offset)) settings.nest = { si: Number.isInteger(saved.nest.si) ? saved.nest.si : 0, offset: saved.nest.offset };
     if (validTime(saved.diaryTime)) settings.diaryTime = saved.diaryTime;
     if (PETS.includes(saved.diaryWriter)) settings.diaryWriter = saved.diaryWriter;
@@ -189,7 +193,7 @@ function loadAssets() {
     combos[key][kind] = readGif(path.join(comboDir, file));
     comboFiles[key] = { ...comboFiles[key], [kind]: path.join(comboDir, file) };
   }
-  return { claudeWorking: claudeActivity.working, nest: settings.nest, nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
+  return { claudeWorking: claudeActivity.working, codexWorking: codexLink.activity.working, nest: settings.nest, nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -759,6 +763,61 @@ function setClaudeLink(on) {
   refreshTray();
 }
 
+// ---- 联动 Codex：灰鸮跟着本机的工作状态敲键盘 ----
+const codexRecent = [];
+const codexLink = createCodexLink({
+  onChange(change) {
+    if (change.type === 'working') send('codex-work', change.working);
+    else if (change.type === 'done') send('codex-done', { short: change.short });
+    else if (change.type === 'waiting') send('codex-waiting', { stillWorking: change.stillWorking });
+    refreshTray();
+  },
+  onEvent(info) { codexRecent.unshift(info); codexRecent.length = Math.min(codexRecent.length, 5); refreshTray(); },
+});
+const codexSettingsFile = () => path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'hooks.json');
+// 只修改我们的命令，先验证再备份，写到临时文件后替换；不写入任何信任或审批设置。
+function editCodexSettings(change) {
+  const file = codexSettingsFile();
+  const original = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const current = original.trim() ? JSON.parse(original.replace(/^﻿/, '')) : {};
+  const next = change(current);
+  if (JSON.stringify(current) === JSON.stringify(next)) return;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (fs.existsSync(file)) fs.copyFileSync(file, file + '.desk-pets-backup-' + new Date().toISOString().replace(/[:.]/g, '-'));
+  const temp = file + '.desk-pets-' + process.pid + '.tmp';
+  try { fs.writeFileSync(temp, JSON.stringify(next, null, 2) + '\n'); fs.renameSync(temp, file); }
+  finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
+}
+async function codexHelp() {
+  const result = await dialog.showMessageBox({
+    type: 'info', title: '让灰鸮跟着 g老师开工',
+    message: '打开联动后，还要在 Codex 里审核并信任「灰鸮桌宠联动」hooks。',
+    detail: '命令只把开工、等待、收工等状态送给这台电脑上的桌宠，不发送聊天内容。\n\n可在 Codex 命令行输入 /hooks，找到「灰鸮桌宠联动」并审核启用；之后在 Codex 新开本地聊天。看到菜单「最近收到的」有记录，就接上了。\n\n若当前 Codex 版本没有 hooks 管理入口，请先更新到支持 hooks 的版本。普通 ChatGPT 网页和云端任务不会触发。',
+    buttons: ['知道啦', '查看官方说明'], defaultId: 0,
+  });
+  if (result.response === 1) shell.openExternal('https://learn.chatgpt.com/docs/hooks');
+}
+let changingCodexLink = false;
+async function setCodexLink(on, startup = false) {
+  if (changingCodexLink) return;
+  changingCodexLink = true;
+  try {
+    if (on) await codexLink.start(); // 端口真的打开才算开启，失败时不改 hooks
+    editCodexSettings(current => on ? (CodexHooks.hasHooks(current) ? current : CodexHooks.addHooks(current)) : CodexHooks.removeHooks(current));
+    if (!on) await codexLink.stop();
+    settings.codexLink = on;
+    saveSettings();
+    if (!startup) {
+      send('say-pet', { name: '灰鸮g老师', text: on ? '准备好啦，去 Codex 审核启用联动后，我就陪着敲～' : '不联动 Codex 啦' });
+      if (on) void codexHelp();
+    }
+  } catch (error) {
+    if (on) { await codexLink.stop(); settings.codexLink = false; saveSettings(); }
+    const message = error.code === 'EADDRINUSE' ? '联动端口被占用了，关闭另一份桌宠后再试哦。' : 'Codex 的联动设置没有保存成功，请检查 hooks.json 后再试。';
+    void dialog.showMessageBox({ type: 'warning', title: 'Codex 联动没接上', message });
+  } finally { changingCodexLink = false; refreshTray(); }
+}
+
 // ---- 「测试一下」：马上看到各种效果 ----
 const sendTest = (type, value) => send('test', { type, value });
 
@@ -1202,6 +1261,7 @@ function buildMenu(petName = null, expression = null) {
         { label: '哥哥狗狗：扶起摔倒的宠物', click: () => sendTest('dog-help') },
         { label: '哥哥狗狗：举牌测试通过', click: () => sendTest('dog-sign') },
         { label: '哥哥狗狗：给千千猫猫盖被子', click: () => sendTest('dog-blanket') },
+        { label: '灰鸮g老师：联动 Codex', submenu: [['working', '开工敲键盘'], ['waiting', '等你回应'], ['done', '收工啦']].map(([value, label]) => ({ label, click: () => sendTest('codex', value) })) },
         { label: '灰鸮g老师：看书（拖别的宠物过去一起看）', click: () => sendTest('g-read') },
         { label: '灰鸮g老师：看书打瞌睡', click: () => sendTest('g-doze') },
         { label: '灰鸮g老师：摔一跤', click: () => sendTest('g-fall') },
@@ -1226,6 +1286,21 @@ function buildMenu(petName = null, expression = null) {
     },
     { type: 'separator' },
     { label: '戳一下对方', enabled: online.peerOnline, click: pokePeer },
+    {
+      label: '联动 Codex（g老师）',
+      submenu: [
+        { label: '让灰鸮跟着 g老师开工', type: 'checkbox', checked: settings.codexLink, enabled: !changingCodexLink, click: item => setCodexLink(item.checked) },
+        { label: '第一次怎么接上？', click: codexHelp },
+        { label: '仅本机 Codex；需要审核启用 hooks', enabled: false },
+        ...(settings.codexLink ? [
+          { type: 'separator' },
+          { label: codexLink.activity.working ? '现在：g老师在干活' : codexRecent.length ? '现在：歇一歇，或等你回应' : '准备好了，等待 Codex 发来第一个状态', enabled: false },
+          { label: '灰鸮卡住了？让它停下来', click: () => { codexLink.activity.clear(); send('codex-work', false); refreshTray(); } },
+          { label: '最近收到的：', enabled: false },
+          ...(codexRecent.length ? codexRecent.map(r => ({ label: '　' + r.at.toTimeString().slice(0, 8) + '  ' + r.event, enabled: false })) : [{ label: '　（还没有，请先在 Codex 审核启用 hooks）', enabled: false }]),
+        ] : []),
+      ],
+    },
     {
       label: '联动 Claude Code',
       submenu: [
@@ -1334,6 +1409,7 @@ if (!app.requestSingleInstanceLock()) {
         if (!ClaudeHooks.hasHooks(current)) editClaudeSettings(ClaudeHooks.addHooks);
       } catch {}
     }
+    if (settings.codexLink) void setCodexLink(true, true);
     runWeather();
     setInterval(runWeather, 30 * 60_000);
     setInterval(() => { sendToday(); checkPomodoro(); updateWeatherIdle(); checkDiary(); }, 30_000);
@@ -1351,5 +1427,5 @@ if (!app.requestSingleInstanceLock()) {
     powerMonitor.on('suspend', () => { sitStart = null; });
   });
   app.on('window-all-closed', () => app.quit());
-  app.on('will-quit', () => { stopClaudeServer(); if (diaryDays) saveDiary(true); globalShortcut.unregisterAll(); if (stopWatcher) stopWatcher(); online.stop(); });
+  app.on('will-quit', () => { void codexLink.stop(); stopClaudeServer(); if (diaryDays) saveDiary(true); globalShortcut.unregisterAll(); if (stopWatcher) stopWatcher(); online.stop(); });
 }

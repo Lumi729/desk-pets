@@ -93,6 +93,7 @@
   let blanketNight = '';           // 今晚盖过被子了没有
   let nickname = '千千';            // 宠物们怎么称呼你（设置里能改）
   let claudeWorking = false;       // 这台电脑上的 Claude Code 正在干活
+  let codexWorking = false;        // 这台电脑上的 Codex 正在干活
   // g老师的书里夹没夹书签（批改作业结束后夹上，下次批改作业时用掉）；关了再开也记得
   let hasBookmark = false;
   try { hasBookmark = localStorage.getItem('g-bookmark') === '1'; } catch {}
@@ -1622,6 +1623,11 @@
       cat.state = 'sleep';
       setAnim(cat, '睡觉');
       if (!checkBlanket(now, true)) hint('盖被子没成功，再试一次吧');
+    } else if (type === 'codex') {
+      const g = byName(G);
+      if (!g || !freeForTest(g, now)) return hint('要先在「选择宠物」里勾上灰鸮g老师哦');
+      const anim = { working: '敲代码', waiting: '互动_扶眼镜1', done: '开心蹦蹦' }[value];
+      if (anim) { playNamed(g, anim, now, 3000); say(g, { working: 'g老师开工，我也开工～（这是测试）', waiting: '千千，g老师在等你回应哦（这是测试）', done: '收工啦～（这是测试）' }[value], 4000); }
     } else if (type === 'g-read' || type === 'g-doze' || type === 'g-fall') {
       const g = byName(G);
       if (!g || !freeForTest(g, now)) return hint(`要先在「选择宠物」里勾上${G}哦`);
@@ -1794,6 +1800,14 @@
   }
 
   const SHOWCASE_STEPS = [
+    ['灰鸮跟着 Codex 开工', async () => {
+      const [g] = scLineup([G]);
+      tell(g, '托盘打开「联动 Codex」，审核启用后，g老师干活我也敲键盘～', 7000);
+      scPlay(g, '敲代码', 3000); await scWait(3000);
+      tell(g, '等你回应时扶扶眼镜，收工就开心蹦一下', 5000);
+      scPlay(g, '互动_扶眼镜1', 1800); await scWait(1800);
+      scPlay(g, '开心蹦蹦', 1800); await scWait(1800);
+    }],
     ['走路', async () => {
       const [cat, bunny] = scLineup(['千千猫猫', '梨梨兔兔'], 0.3);
       tell(cat, `${nickname}，看好啦～平时我们会自己走来走去哦`);
@@ -2416,6 +2430,27 @@
     }
   }
 
+  // ---- 联动 Codex：有一场聊天仍在开工就接着敲，不打断贴贴、摔倒、小窝和剧情 ----
+  const codexOwl = () => { const g = byName(G); return g && g.visible && !g.visitor && !showcase && !leaving ? g : null; };
+  const codexFree = g => g && !g.combo && !g.inScene && !g.inNest && !g.routine && !g.tucked && ['idle', 'walk', 'sleep', 'typing', 'reading', 'curious', 'codex'].includes(g.state);
+  function onCodexWork(on) {
+    codexWorking = on;
+    const g = codexOwl();
+    if (!on && g?.state === 'codex') goIdle(g, performance.now());
+  }
+  function onCodexDone() {
+    const g = codexOwl();
+    if (codexWorking || !codexFree(g)) return;
+    g.lastAttention = performance.now();
+    playNamed(g, '开心蹦蹦', g.lastAttention, 0);
+  }
+  function onCodexWaiting({ stillWorking } = {}) {
+    const g = codexOwl();
+    if (!g) return;
+    if (!stillWorking && !codexWorking && codexFree(g)) { g.lastAttention = performance.now(); playNamed(g, '互动_扶眼镜1', g.lastAttention, 2000); }
+    say(g.combo || g, nickname + '，g老师在等你回应哦', 6000);
+  }
+
   // ---- 联动 Claude Code ----
   const claudeDog = () => { const dog = byName(DOG); return dog && dog.visible && !showcase && !leaving ? dog : null; }; // 狗狗没放出来就什么都不做
   function onClaudeWork(on) {
@@ -2484,6 +2519,10 @@
       pet.state = 'claude';
       pet.tucked = false;
       pet.looking = false;
+      setAnim(pet, '敲代码');
+    }
+    if (codexWorking && pet.name === G && !pet.visitor && !showcase && !leaving && codexFree(pet) && pet.state !== 'codex' && pet.clips['敲代码']) {
+      pet.state = 'codex'; pet.then = null; pet.looking = false;
       setAnim(pet, '敲代码');
     }
     if (CAN_START_TYPING.includes(pet.state) && !pet.inScene && !pet.tucked && !pet.routine && !showcase && isTypingLong(now)) {
@@ -2590,6 +2629,10 @@
         break;
       case 'curious':
         pet.lastAttention = now; // 歪着头一直看，等鼠标动
+        break;
+      case 'codex':
+        pet.lastAttention = now;
+        if (!codexWorking) goIdle(pet, now);
         break;
       case 'claude':
         pet.lastAttention = now;
@@ -2753,6 +2796,7 @@
     size = data.size || 1;
     nickname = data.nickname || '千千';
     claudeWorking = !!data.claudeWorking;
+    codexWorking = !!data.codexWorking;
     peerOnline = !!data.peerOnline;
     for (const pet of pets) { pet.el.hidden = true; setAnim(pet, '待机'); }
     if (data.focusInfo?.on) onFocus(data.focusInfo);
@@ -2779,6 +2823,9 @@
     api.onPhoto(takePhoto);
     api.onTest(onTest);
     api.onGoodnight(goodnight);
+    api.onCodexWork(onCodexWork);
+    api.onCodexDone(onCodexDone);
+    api.onCodexWaiting(onCodexWaiting);
     api.onClaudeWork(onClaudeWork);
     api.onClaudeDone(onClaudeDone);
     api.onClaudeNotify(onClaudeNotify);
