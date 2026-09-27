@@ -25,9 +25,8 @@
   const SHAKE_TURNS = 4;           // 1 秒内来回这么多次算「晃」
   // 这些是特定时候才播的，点宠物时不会随机抽到
   const CORE = ['待机', '向左走', '向右走', '睡觉', '向左看', '向右看', '掉落', '摔趴趴', '冒冷汗',
-    '待机_雨天', '待机_晴天', '待机_降温', '专注', '叼胡萝卜向左走', '叼胡萝卜向右走', '叼小鱼向左走', '叼小鱼向右走',
+    '专注', '叼胡萝卜向左走', '叼胡萝卜向右走', '叼小鱼向左走', '叼小鱼向右走',
     '国庆', '万圣节', '圣诞', '春节', '生日'];
-  const WEATHER_IDLE = { rain: '待机_雨天', sunny: '待机_晴天', cold: '待机_降温' };
   const CHASE_SPEED = 3;           // 绿眼猫猫冲过去的速度（平时的几倍）
   const FLEE_SPEED = 2.2;          // 被追的跑开的速度
   const SNACK_SPEED = 1.2;         // 叼着零食走的速度
@@ -53,7 +52,7 @@
   let comboClips = {};             // 组合名 → { row: 贴贴, stack: 叠叠乐 }
   const comboCooldown = new Map(); // 「row/stack:组合名」→ 冷却到什么时候
   let shown = {};                  // 每只宠物显示不显示
-  let weatherKind = null;          // rain / sunny / cold / null
+  let weatherKind = null;          // 主程序按天气选好的待机动画名（比如「待机_阴天」），null = 普通待机
   let today = { festival: null, birthdays: [] };
   let focusing = false;            // 番茄钟专注中
   let nextChase = performance.now() + 100_000;
@@ -149,7 +148,7 @@
     const now = performance.now();
     const pet = {
       id, name: data.name, clips,
-      actions: Object.keys(clips).filter(name => !CORE.includes(name) && !Teases.isTeaseAnim(name)), // 挑衅_ / 回应_ 只在挑衅互动里用
+      actions: Object.keys(clips).filter(name => !CORE.includes(name) && !name.startsWith('待机_') && !Teases.isTeaseAnim(name)), // 天气待机、挑衅_ / 回应_ 只在特定时候用
       ...makeSprite('pet'),
       x: startX, y: 0, vy: 0,
       state: 'idle', anim: '', until: 0, nextThink: now + rand(1500, 4000), nextActivity: now + rand(3000, 8000), nextSweat: 0,
@@ -179,8 +178,8 @@
 
   // 待机动画：打开天气时按天气换
   function idleAnim(pet) {
-    const name = WEATHER_IDLE[weatherKind];
-    return features.weather && name && pet.clips[name] ? name : '待机';
+    const name = weatherKind;
+    return features.weather && name && pet.clips[name] ? name : '待机'; // 这只没有这个天气的动画 → 普通待机
   }
 
   function goIdle(pet, now) {

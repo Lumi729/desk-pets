@@ -8,7 +8,6 @@ let pets = [];
 
 window.moreApi.get().then(settings => {
   pets = settings.pets;
-  field('city').value = settings.city;
   field('focus').value = settings.pomodoro.focus;
   field('rest').value = settings.pomodoro.rest;
   for (const name of pets) {
@@ -35,7 +34,6 @@ field('form').addEventListener('submit', event => {
     birthdays[input.dataset.pet] = input.value.trim();
   }
   window.moreApi.save({
-    city: field('city').value.trim(),
     birthdays,
     pomodoro: { focus: Number(field('focus').value), rest: Number(field('rest').value) },
   });

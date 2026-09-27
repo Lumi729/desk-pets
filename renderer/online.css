@@ -22,3 +22,6 @@ label.inline input { width: 70px; margin: 0; }
 .birthday { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-weight: 600; }
 .birthday span { width: 72px; }
 .birthday input { margin: 0; }
+#results { display: flex; flex-direction: column; gap: 6px; }
+button.place { text-align: left; }
+button.place:hover { border-color: #e58aad; background: #fff0f6; }

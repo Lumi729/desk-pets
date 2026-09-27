@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+  <title>天气地点</title>
+  <link rel="stylesheet" href="online.css">
+</head>
+<body>
+  <form id="form">
+    <h1>天气地点 ♡</h1>
+    <small>现在用的：<span id="current"></span></small>
+    <label>地址<input id="query" maxlength="40" required placeholder="比如 长沙市岳麓区"></label>
+    <small>可以精确到区县。地点只存在这台电脑上，只用来查天气，不会发给朋友。</small>
+    <div class="row">
+      <button type="button" id="cancel">取消</button>
+      <button type="submit" id="search">搜索</button>
+    </div>
+  </form>
+  <p id="error" role="alert"></p>
+  <div id="results"></div>
+  <script src="place.js"></script>
+</body>
+</html>

@@ -8,7 +8,7 @@ const { createTypingDetector } = require('./lib/typing');
 const { parseComboFile } = require('./renderer/combos');
 const Teases = require('./renderer/teases');
 const { festivalOn, birthdaysOn, normalizeBirthday } = require('./lib/calendar');
-const { fetchWeather } = require('./lib/weather');
+const { weatherIdle, searchPlaces, fetchWeather, WEATHER_IDLES } = require('./lib/weather');
 const { pixelTrayImage } = require('./lib/pixel-icon');
 const { autoUpdater } = require('electron-updater');
 const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
@@ -28,7 +28,7 @@ const FEATURES = [
   { key: 'makeup', label: '两个哥哥打完架过一阵会和好' },
   { key: 'chase', label: '追着玩（绿眼猫猫突然冲过去）' },
   { key: 'snack', label: '送零食（千千猫猫和梨梨兔兔互相送）' },
-  { key: 'weather', label: '天气（下雨 / 大晴天 / 降温换待机）' },
+  { key: 'weather', label: '天气（按天气换待机动画）' },
   { key: 'festival', label: '过节（国庆 / 万圣节 / 圣诞 / 春节）' },
   { key: 'birthday', label: '生日' },
   { key: 'visit', label: '串门（联网配对后，宠物会去对方家玩）' },
@@ -52,7 +52,8 @@ const settings = {
   trayIcon: '千千猫猫',
   features: Object.fromEntries(FEATURES.map(f => [f.key, !f.off])),
   online: { enabled: false, name: '千千', code: '', server: '' },
-  city: '长沙',
+  city: '长沙',                   // 还没选过地点时，用这个名字搜第一个结果
+  location: null,                 // 选好的天气地点 { name, label, latitude, longitude }，只存在本机
   visitPets: Object.fromEntries(PETS.map(name => [name, true])), // 哪几只可以去串门
   birthdays: {},                  // 宠物名 → 「MM-DD」
   pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
@@ -71,6 +72,7 @@ function loadSettings() {
     if (SIZES.includes(saved.size)) settings.size = saved.size;
     if (saved.visitPets && typeof saved.visitPets === 'object') for (const name of PETS) if (typeof saved.visitPets[name] === 'boolean') settings.visitPets[name] = saved.visitPets[name];
     if (typeof saved.city === 'string' && saved.city.trim()) settings.city = saved.city.trim().slice(0, 40);
+    settings.location = normalizeLocation(saved.location);
     if (saved.birthdays && typeof saved.birthdays === 'object') {
       for (const name of PETS) { const md = normalizeBirthday(saved.birthdays[name]); if (md) settings.birthdays[name] = md; }
     }
@@ -118,7 +120,7 @@ function loadAssets() {
     combos[key] = combos[key] || {};
     combos[key][kind] = readGif(path.join(comboDir, file));
   }
-  return { focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.kind, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
+  return { focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -167,34 +169,97 @@ function setFeature(key, on) {
   if (key === 'update' && on) runUpdateCheck();
   if (key === 'system') { hotCount = 0; coolCount = 0; setCpuHot(false); }
   if (key === 'typing' || key === 'activity') checkTyping();
-  if (key === 'weather') { if (on) runWeather(); else setWeather(null); }
+  if (key === 'weather') { if (on) runWeather(); else { weather = { data: null, error: '', idle: null }; setWeatherIdle(null); } }
   if (key === 'festival' || key === 'birthday') sendToday(true);
 }
 
 // ---- 天气（Open-Meteo，每 30 分钟查一次） ----
-let weather = { kind: null, place: '', temperature: null, error: '' };
-function setWeather(kind) {
-  weather.kind = kind;
-  send('weather', kind);
-  refreshTray();
+// 地点的经纬度只存在本机设置里，只用来查天气，不发给联网服务器，也不发给朋友
+let weather = { data: null, error: '', idle: null };
+function normalizeLocation(place) {
+  if (!place || typeof place !== 'object') return null;
+  const latitude = Number(place.latitude), longitude = Number(place.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+  const name = String(place.name || '').trim().slice(0, 40) || '选好的地点';
+  const label = String(place.label || name).trim().slice(0, 80);
+  return { name, label, latitude, longitude };
+}
+function setWeatherIdle(idle) {
+  if (weather.idle === idle) return;
+  weather.idle = idle;
+  send('weather', idle);
+}
+// 晴天白天 / 晚上要看钟点，所以每分钟用查到的天气再算一次
+function updateWeatherIdle() {
+  if (settings.features.weather) setWeatherIdle(weatherIdle(weather.data, new Date().getHours()));
 }
 async function runWeather() {
   if (!settings.features.weather) return;
   try {
-    const result = await fetchWeather(settings.city);
-    weather = { ...result, error: '' };
-    setWeather(result.kind);
+    if (!settings.location) {
+      // 以前只存了城市名：搜一下，用第一个结果
+      const [first] = await searchPlaces(settings.city);
+      if (!first) throw new Error('找不到地点');
+      settings.location = normalizeLocation(first);
+      saveSettings();
+    }
+    weather.data = await fetchWeather(settings.location);
+    weather.error = '';
   } catch (error) {
+    weather.data = null;
     weather.error = '查不到天气';
-    setWeather(null); // 查不到就用普通待机
   }
+  updateWeatherIdle(); // 查不到就用普通待机
+  refreshTray();
+}
+function placeName() {
+  return settings.location?.name || settings.city;
 }
 function weatherLabel() {
-  if (!settings.features.weather) return `天气城市：${settings.city}…`;
-  if (weather.error) return `天气城市：${settings.city}（${weather.error}）…`;
-  const text = { rain: '下雨', sunny: '大晴天', cold: '有点冷' }[weather.kind] || '普通天气';
-  return `天气城市：${settings.city}（${text}${weather.temperature != null ? ` ${Math.round(weather.temperature)}°` : ''}）…`;
+  return `天气地点：${placeName()}…`;
 }
+// 托盘悬停提示：比如「岳麓区 · 阴 · 18°C · 代码 3」，方便看天气查得对不对
+function weatherTip() {
+  if (!settings.features.weather) return '天气：没打开';
+  if (weather.error) return `${placeName()} · ${weather.error}`;
+  if (!weather.data) return `${placeName()} · 正在查天气…`;
+  const { description, temperature, code } = weather.data;
+  const temp = temperature == null ? '' : ` · ${Math.round(temperature)}°C`;
+  return `${placeName()} · ${description}${temp} · 代码 ${code}`;
+}
+
+let placeWindow = null;
+function openPlaceWindow() {
+  if (placeWindow) { placeWindow.show(); placeWindow.focus(); return; }
+  placeWindow = new BrowserWindow({
+    width: 420, height: 480, resizable: false, minimizable: false, maximizable: false,
+    alwaysOnTop: true, autoHideMenuBar: true, title: '天气地点', icon: trayImage(settings.trayIcon),
+    webPreferences: { preload: path.join(__dirname, 'renderer', 'place-preload.js'), contextIsolation: true, sandbox: true },
+  });
+  placeWindow.removeMenu();
+  placeWindow.loadFile(path.join(__dirname, 'renderer', 'place.html'));
+  placeWindow.on('closed', () => { placeWindow = null; });
+}
+ipcMain.handle('place-get', () => ({ current: settings.location?.label || settings.city }));
+ipcMain.handle('place-search', async (_event, text) => {
+  const query = String(text || '').trim().slice(0, 40);
+  if (!query) return [];
+  return searchPlaces(query);
+});
+ipcMain.handle('place-choose', (_event, place) => {
+  const location = normalizeLocation(place);
+  if (!location) return false;
+  settings.location = location;
+  settings.city = location.name;
+  saveSettings();
+  weather.data = null;
+  weather.error = '';
+  refreshTray();
+  runWeather();
+  placeWindow?.close();
+  return true;
+});
+ipcMain.on('place-cancel', () => placeWindow?.close());
 
 // ---- 过节 / 生日（每分钟看一下日期变了没有） ----
 let todayKey = '';
@@ -266,7 +331,7 @@ ipcMain.on('save-photo', async (_event, bytes) => {
   }
 });
 
-// ---- 小设置窗口：天气城市、生日、番茄钟时间 ----
+// ---- 小设置窗口：生日、番茄钟时间 ----
 let moreWindow = null;
 function openMoreSettings() {
   if (moreWindow) { moreWindow.show(); moreWindow.focus(); return; }
@@ -279,10 +344,8 @@ function openMoreSettings() {
   moreWindow.loadFile(path.join(__dirname, 'renderer', 'more.html'));
   moreWindow.on('closed', () => { moreWindow = null; });
 }
-ipcMain.handle('more-get', () => ({ pets: PETS, city: settings.city, birthdays: settings.birthdays, pomodoro: settings.pomodoro }));
+ipcMain.handle('more-get', () => ({ pets: PETS, birthdays: settings.birthdays, pomodoro: settings.pomodoro }));
 ipcMain.handle('more-save', (_event, next) => {
-  const cityChanged = String(next?.city || '').trim() && String(next.city).trim() !== settings.city;
-  if (String(next?.city || '').trim()) settings.city = String(next.city).trim().slice(0, 40);
   settings.birthdays = {};
   for (const name of PETS) { const md = normalizeBirthday(next?.birthdays?.[name]); if (md) settings.birthdays[name] = md; }
   for (const key of ['focus', 'rest']) {
@@ -290,7 +353,6 @@ ipcMain.handle('more-save', (_event, next) => {
     if (n >= 1 && n <= 180) settings.pomodoro[key] = Math.round(n);
   }
   saveSettings();
-  if (cityChanged) runWeather();
   sendToday(true);
   refreshTray();
   moreWindow?.close();
@@ -676,7 +738,7 @@ function buildMenu(petName = null) {
         click: item => setFeature(feature.key, item.checked),
       }, ...(feature.key === 'perch' && settings.features.perch ? [{ label: `　　${PERCH_STATUS[perchStatus]}`, enabled: false }] : [])]),
     },
-    { label: weatherLabel(), click: openMoreSettings },
+    { label: weatherLabel(), click: openPlaceWindow },
     { label: '宠物生日 / 番茄钟时间…', click: openMoreSettings },
     {
       label: '允许去串门的宠物',
@@ -695,7 +757,7 @@ function buildMenu(petName = null) {
       submenu: [
         { label: '过节', submenu: ['国庆', '万圣节', '圣诞', '春节'].map(name => ({ label: name, click: () => sendTest('festival', name) })) },
         { label: '生日', submenu: PETS.map(name => ({ label: name, click: () => sendTest('birthday', name) })) },
-        { label: '天气', submenu: [['rain', '下雨'], ['sunny', '大晴天'], ['cold', '降温'], [null, '普通']].map(([kind, label]) => ({ label, click: () => send('weather', kind) })) },
+        { label: '天气', submenu: [...WEATHER_IDLES.map(name => [name, name.replace('待机_', '')]), [null, '普通']].map(([idle, label]) => ({ label, click: () => send('weather', idle) })) },
         { label: '追着玩', click: () => sendTest('chase') },
         { label: '送零食', click: () => sendTest('snack') },
         { label: '两个哥哥贴贴（接着打架）', click: () => sendTest('brothers') },
@@ -770,7 +832,9 @@ function createTray() {
 }
 
 function refreshTray() {
-  if (tray) tray.setContextMenu(buildMenu());
+  if (!tray) return;
+  tray.setContextMenu(buildMenu());
+  tray.setToolTip(`千千梨梨桌宠\n${weatherTip()}`);
 }
 
 function setTrayIcon(label) {
@@ -794,7 +858,7 @@ if (!app.requestSingleInstanceLock()) {
     startOnline();
     runWeather();
     setInterval(runWeather, 30 * 60_000);
-    setInterval(() => { sendToday(); checkPomodoro(); }, 30_000);
+    setInterval(() => { sendToday(); checkPomodoro(); updateWeatherIdle(); }, 30_000);
     setupAutoUpdate();
     setTimeout(runUpdateCheck, 10_000);
     setInterval(runUpdateCheck, 3 * 60 * 60_000);
