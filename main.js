@@ -802,15 +802,22 @@ async function setCodexLink(on, startup = false) {
   if (changingCodexLink) return;
   changingCodexLink = true;
   try {
+    let hooksUpdated = false;
     if (on) await codexLink.start(); // 端口真的打开才算开启，失败时不改 hooks
-    editCodexSettings(current => on ? (CodexHooks.hasHooks(current) ? current : CodexHooks.addHooks(current)) : CodexHooks.removeHooks(current));
+    editCodexSettings(current => {
+      if (!on) return CodexHooks.removeHooks(current);
+      if (CodexHooks.hasHooks(current)) return current;
+      hooksUpdated = true;
+      return CodexHooks.addHooks(current);
+    });
     if (!on) await codexLink.stop();
     settings.codexLink = on;
     saveSettings();
     if (!startup) {
       send('say-pet', { name: '灰鸮g老师', text: on ? '准备好啦，去 Codex 审核启用联动后，我就陪着敲～' : '不联动 Codex 啦' });
-      if (on) void codexHelp();
     }
+    // 更新过命令后旧的信任不再适用，启动升级时也要告诉用户去审核。
+    if (on && (!startup || hooksUpdated)) void codexHelp();
   } catch (error) {
     if (on) { await codexLink.stop(); settings.codexLink = false; saveSettings(); }
     const message = error.code === 'EADDRINUSE' ? '联动端口被占用了，关闭另一份桌宠后再试哦。' : 'Codex 的联动设置没有保存成功，请检查 hooks.json 后再试。';

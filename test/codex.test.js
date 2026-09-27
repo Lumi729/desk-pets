@@ -24,6 +24,24 @@ test('Codex hooks 增删可重复，保留别人的命令与设置，格式坏�
   assert.throws(() => Hooks.hookCommand('Unknown'));
 });
 
+test('旧的三秒收工配置会升级，保留其他 hook；中断和退出仍遵守三秒上限', () => {
+  const other = { type: 'command', command: 'other-notify', timeout: 30 };
+  const current = Hooks.addHooks({ hooks: { Stop: [{ hooks: [other] }] } });
+  const old = JSON.parse(JSON.stringify(current));
+  old.hooks.Stop[1].hooks[0].timeout = 3;
+  assert.equal(Hooks.hasHooks(old), false);
+  const upgraded = Hooks.addHooks(old);
+  assert.ok(Hooks.hasHooks(upgraded));
+  assert.deepEqual(upgraded.hooks.Stop[0].hooks, [other]);
+  assert.equal(upgraded.hooks.Stop[1].hooks[0].timeout, 10);
+  for (const event of ['Interrupt', 'SessionEnd']) assert.equal(upgraded.hooks[event][0].hooks[0].timeout, 3);
+  const outdated = JSON.parse(JSON.stringify(current));
+  const hook = outdated.hooks.PreToolUse[0].hooks[0];
+  hook.command = 'powershell.exe -EncodedCommand ' + Buffer.from('# desk-pets-codex\nexit 0', 'utf16le').toString('base64');
+  assert.equal(Hooks.hasHooks(outdated), false);
+  assert.ok(Hooks.hasHooks(Hooks.addHooks(outdated)));
+});
+
 function tracker() {
   const changes = [];
   const a = createCodexActivity(e => changes.push(e));
@@ -123,11 +141,11 @@ test('端口占用会明确失败，释放后可以再开', async t => {
   assert.equal(await second.start(port), port);
 });
 
-function runHook(event, port, input) {
+function runHook(event, port, input, timeout = 10000) {
   return new Promise((resolve, reject) => {
     const cmd = Hooks.hookCommand(event, port);
-    const encoded = cmd.slice(cmd.lastIndexOf(' ') + 1);
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded], { windowsHide: true });
+    // 和 Codex 一样经过外层 shell；直接运行内层进程会漏测启动耗时。
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { windowsHide: true, timeout });
     let stdout = '', stderr = '';
     child.stdout.on('data', b => { stdout += b; });
     child.stderr.on('data', b => { stderr += b; });
@@ -136,12 +154,18 @@ function runHook(event, port, input) {
     child.stdin.end(input);
   });
 }
-test('Windows 真正执行 hook：只转发状态，聊天和工具内容被丢弃；桌宠没开也静默成功', { skip: process.platform !== 'win32', timeout: 30000 }, async t => {
+test('Windows 真正执行 hook：只转发状态，聊天和工具内容被丢弃；桌宠没开也静默成功', { skip: process.platform !== 'win32', timeout: 40000 }, async t => {
   const received = [];
+  const activity = createCodexActivity(() => {});
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', b => { body += b; });
-    req.on('end', () => { received.push(JSON.parse(body)); res.writeHead(204); res.end(); });
+    req.on('end', () => {
+      const payload = JSON.parse(body);
+      received.push(payload);
+      activity.event(req.url.slice(Hooks.MARK.length), payload);
+      res.writeHead(204); res.end();
+    });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -153,6 +177,11 @@ test('Windows 真正执行 hook：只转发状态，聊天和工具内容被丢�
   assert.deepEqual(Object.keys(received[0]).sort(), ['needs_input', 'sent_at', 'session_id', 'turn_id']);
   assert.equal(received[0].needs_input, true);
   assert.equal(received[0].session_id, 'a');
+  const busy = JSON.stringify({ session_id: 'a', turn_id: 'b', tool_name: 'exec_command' });
+  assert.deepEqual(await runHook('PreToolUse', port, busy), silent);
+  assert.equal(activity.working, true);
+  assert.deepEqual(await runHook('Stop', port, input), silent);
+  assert.equal(activity.working, false);
   assert.deepEqual(await runHook('Stop', port, '{bad json'), silent);
   await new Promise(resolve => server.close(resolve));
   assert.deepEqual(await runHook('Stop', port, input), silent);
