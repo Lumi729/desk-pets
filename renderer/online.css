@@ -20,7 +20,7 @@ h2 { margin: 18px 0 0; font-size: 15px; }
 label.inline { display: flex; align-items: center; gap: 6px; font-weight: 600; }
 label.inline input { width: 70px; margin: 0; }
 .birthday { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-weight: 600; }
-.birthday span { width: 72px; }
+.birthday span { width: 92px; white-space: nowrap; }
 .birthday input { margin: 0; }
 select { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border: 2px solid #f0b6ca; border-radius: 10px; background: #fff; color: inherit; font: inherit; }
 select:focus { outline: none; border-color: #e58aad; }

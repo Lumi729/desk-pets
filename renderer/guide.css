@@ -25,3 +25,9 @@ button.main { background: #e9aec6; border-color: #d795b0; color: #4a2939; font-w
 button:disabled { opacity: .4; cursor: default; }
 ol { margin: 6px 0; padding-left: 22px; }
 li { margin: 4px 0; }
+.demo { display: flex; justify-content: center; margin: 2px 0 -4px; }
+.demo-gif { height: 96px; image-rendering: pixelated; }
+.region { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.region label { margin-top: 6px; }
+.region select { padding: 8px 6px; }
+.birthday span { width: 92px; white-space: nowrap; }

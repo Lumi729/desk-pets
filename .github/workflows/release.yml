@@ -63,7 +63,7 @@ jobs:
             git push origin "$tag"
           fi
           # 先建好草稿，打包工具就只会往这一个里上传，不会同时建出两个
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "千千梨梨桌宠 $tag" --notes "千千梨梨桌宠 $tag"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "梨间雪桌宠 $tag" --notes "千千梨梨桌宠 $tag"
       - name: 打包并上传
         if: steps.version.outputs.skip != 'true'
         run: npx electron-builder --win nsis --publish always

@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('petApi', {
   onTest: fn => ipcRenderer.on('test', (_event, test) => fn(test)),
   onShowcase: fn => ipcRenderer.on('showcase', (_event, command) => fn(command)),
   onGreet: fn => ipcRenderer.on('greet', () => fn()),
+  onGoodnight: fn => ipcRenderer.on('goodnight', () => fn()),
+  goodnightDone: () => ipcRenderer.send('goodnight-done'),
   showcaseState: on => ipcRenderer.send('showcase-state', !!on),
   onSay: fn => ipcRenderer.on('say', (_event, text) => fn(text)),
   onPerch: fn => ipcRenderer.on('perch', (_event, ledge) => fn(ledge)),

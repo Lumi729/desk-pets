@@ -13,6 +13,17 @@ const INTROS = {
 
 let data;
 let step = 0;
+let demoTimer = null;
+
+// 千千猫猫在这一页演示：几段动画轮流播
+function demo(...anims) {
+  const img = el('img', { className: 'demo-gif', alt: '' });
+  let i = 0;
+  const show = () => { img.src = `../桌宠素材/千千猫猫/${anims[i % anims.length]}.gif`; i++; };
+  show();
+  if (anims.length > 1) demoTimer = setInterval(show, 2600);
+  return el('div', { className: 'demo' }, img);
+}
 
 function region(select, names, chosen) {
   select.replaceChildren(...names.map(name => new Option(name, name)));
@@ -22,7 +33,7 @@ function region(select, names, chosen) {
 const STEPS = [
   () => [
     el('div', { className: 'big', textContent: '👋' }),
-    el('h1', { textContent: '欢迎来到千千梨梨桌宠！' }),
+    el('h1', { textContent: '欢迎来到梨间雪桌宠！' }),
     el('p', { textContent: '这些小家伙以后就住在你的桌面上啦，先认识一下吧～' }),
     el('div', { className: 'pets' }, ...data.pets.map(name => el('div', { className: 'pet-card' }, icon(name), el('b', { textContent: name }), el('span', { textContent: INTROS[name] || '' })))),
   ],
@@ -64,7 +75,7 @@ const STEPS = [
     el('div', { className: 'tip', textContent: '小图标可能躲在「^」小箭头里面，点开就能看到啦。' }),
   ],
   () => [
-    el('div', { className: 'big', textContent: '🫳' }),
+    demo('吓一跳', '掉落', '摔趴趴'),
     el('h1', { textContent: '可以拖着宠物玩哦' }),
     el('ol', {},
       el('li', { textContent: '按住宠物就能拖着走～' }),
@@ -90,10 +101,10 @@ const STEPS = [
       if (label) { data.place = label; now.textContent = `${label} ✓`; }
     });
     return [
-      el('div', { className: 'big', textContent: '🌦️' }),
+      demo('待机_雨天', '待机_下雪', '待机_炎热', '待机_降温', '待机_晴天'),
       el('h1', { textContent: '你住在哪里呀？' }),
       el('p', { textContent: '宠物们会看你那里的天气换装扮：下雨撑伞、下雪、好热、好冷……' }),
-      el('label', {}, '省', province), el('label', {}, '市', city), el('label', {}, '区县', county),
+      el('div', { className: 'region' }, el('label', {}, '省', province), el('label', {}, '市', city), el('label', {}, '区县', county)),
       el('div', { className: 'row left' }, save),
       el('p', {}, '现在用的：', now),
       el('div', { className: 'tip', textContent: '地点只存在这台电脑上，只用来查天气。以后可以在右键菜单「天气地点」里改，也能手动填经纬度。' }),
@@ -111,6 +122,7 @@ const STEPS = [
       if (!wrong) data.pets.forEach((name, i) => { data.birthdays[name] = inputs[i].value.trim(); });
     });
     return [
+      demo('生日'),
       el('h1', { textContent: '🎂 宠物们的生日' }),
       el('p', { textContent: '写上生日，那天它们会一起过生日！不写也没关系～' }),
       ...data.pets.map((name, i) => el('label', { className: 'birthday' }, el('span', { textContent: name }), inputs[i])),
@@ -121,7 +133,7 @@ const STEPS = [
     const more = el('button', { type: 'button', textContent: '改专注 / 休息时间' });
     more.addEventListener('click', () => window.guideApi.open('more'));
     return [
-      el('div', { className: 'big', textContent: '🍅' }),
+      demo('专注', '开心蹦蹦'),
       el('h1', { textContent: '番茄钟专注模式' }),
       el('p', { textContent: `右键 →「开始专注」，宠物们会安安静静陪你专注 ${data.pomodoro.focus} 分钟，g老师还会在旁边看书。` }),
       el('p', { textContent: `时间到了大家会叫你休息 ${data.pomodoro.rest} 分钟，休息好了点一下就能接着专注～` }),
@@ -132,7 +144,7 @@ const STEPS = [
     const open = el('button', { type: 'button', className: 'main', textContent: '打开联网设置' });
     open.addEventListener('click', () => window.guideApi.open('online'));
     return [
-      el('div', { className: 'big', textContent: '💌' }),
+      demo('打招呼', '爱心眼'),
       el('h1', { textContent: '和朋友连在一起' }),
       el('ol', {},
         el('li', { textContent: '右键 →「联网」→「联网设置」，写上你的名字' }),
@@ -144,7 +156,7 @@ const STEPS = [
     ];
   },
   () => [
-    el('div', { className: 'big', textContent: '🎁' }),
+    demo('开心蹦蹦', '跳舞'),
     el('h1', { textContent: '会自己长大哦' }),
     el('p', { textContent: '有新版本时会自己在后台下载好，宠物头上会冒出「点我重启 ♡」，点一下就更新完啦。' }),
     el('p', { textContent: '不用自己去下载安装包～' }),
@@ -153,7 +165,7 @@ const STEPS = [
     const show = el('button', { type: 'button', textContent: '✨ 马上看功能展示' });
     show.addEventListener('click', () => window.guideApi.open('showcase'));
     return [
-      el('div', { className: 'big', textContent: '🎉' }),
+      demo('跳舞', '打招呼', '爱心眼'),
       el('h1', { textContent: '准备好啦！' }),
       el('p', { textContent: '想再看一遍，可以点托盘里的「新手引导」；' }),
       el('p', { textContent: '想看所有效果，可以点「功能展示」，宠物们会挨个表演给你看～' }),
@@ -163,6 +175,8 @@ const STEPS = [
 ];
 
 function render() {
+  clearInterval(demoTimer);
+  demoTimer = null;
   $('error').textContent = '';
   $('dots').replaceChildren(...STEPS.map((_, i) => el('span', { className: i === step ? 'on' : '' })));
   const page = $('page');

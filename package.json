@@ -13,7 +13,7 @@
   },
   "build": {
     "appId": "com.lumi729.deskpets",
-    "productName": "千千梨梨桌宠",
+    "productName": "梨间雪桌宠",
     "files": [
       "main.js",
       "preload.js",
@@ -32,7 +32,7 @@
       "uninstallerIcon": "桌宠素材/托盘图标/千千猫猫.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "千千梨梨桌宠",
+      "shortcutName": "梨间雪桌宠",
       "artifactName": "desk-pets-setup-${version}.${ext}",
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false

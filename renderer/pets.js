@@ -75,10 +75,17 @@
   const TYPING_GAP = 10_000;       // 停下来多久算写完了（中间停不到 10 秒还算连续）
   let typingRun = null;            // { start, lastEnd } 这一段连续打字
   let blanketNight = '';           // 今晚盖过被子了没有
+  // g老师的书里夹没夹书签（批改作业结束后夹上，下次批改作业时用掉）；关了再开也记得
+  let hasBookmark = false;
+  try { hasBookmark = localStorage.getItem('g-bookmark') === '1'; } catch {}
+  const setBookmark = on => { hasBookmark = on; try { localStorage.setItem('g-bookmark', on ? '1' : '0'); } catch {} };
   const GLASSES = ['互动_扶眼镜1', '互动_扶眼镜2', '互动_扶眼镜3', '互动_擦眼镜']; // 5 秒内连续点，一下比一下多
   const CURIOUS_AFTER = 3000;      // 鼠标在g老师旁边停多久，它会歪头看
   const READ_TIME = [20_000, 40_000]; // g老师平时偶尔看书看多久
   const READ_HUG_TIME = 6000;      // 别的宠物挤进来一起看书看多久
+  const CATCH_NEAR = 300;          // g老师摔倒时，离多近的宠物能接住眼镜（像素，按大小缩放）
+  const CATCH_CHANCE = 0.6;        // 接住眼镜的概率
+  const WATCH_NEAR = 300;          // g老师看书睡着时，离多近的宠物会来围观
   let focusHalfAt = Infinity;      // 专注到一半的时候（g老师打个瞌睡）
   let cursorStill = { x: -1, y: -1, since: 0 };
   let features = { time: true, sit: true, mouse: true, activity: true, typing: true, system: true, perch: true };
@@ -411,6 +418,7 @@
 
   function onCursor(point) {
     cursor = point;
+    if (showcase) { updateMouseCatch(); return; } // 功能展示时不看鼠标、不害羞，免得打断演示
     const now = performance.now();
     const movedFar = Math.hypot(point.x - cursorStill.x, point.y - cursorStill.y) > 6;
     for (const pet of pets) {
@@ -458,8 +466,26 @@
     pet.y = floorOf(pet);
     pet.vy = 0;
     pet.lastAttention = now;
-    if (pet.fallFrom >= SPLAT_HEIGHT) { playNamed(pet, pet.landAnim, now, 0, afterSplat(pet)); if (pet.landAnim === '摔趴趴') helpUp(pet, now); } // 播一遍，播完回待机
+    if (pet.fallFrom >= SPLAT_HEIGHT) {
+      const force = pet.forceCatch; pet.forceCatch = false;
+      if (pet.landAnim === '摔趴趴' && catchGlasses(pet, now, force)) return;
+      playNamed(pet, pet.landAnim, now, 0, afterSplat(pet)); // 播一遍，播完回待机
+      if (pet.landAnim === '摔趴趴') helpUp(pet, now);
+    }
     else goIdle(pet, now);
+  }
+
+  // g老师摔倒：哥哥狗狗能来扶就等它扶；不然旁边的宠物有一定概率接住眼镜
+  function catchGlasses(g, now, force = false) {
+    if (g.name !== G || g.visitor || canHelpUp(g)) return false;
+    if (!force && Math.random() >= CATCH_CHANCE) return false;
+    const friend = nearestFriend(g, CATCH_NEAR, p => ['idle', 'walk', 'action'].includes(p.state), 'catch');
+    if (!friend) return false;
+    const pair = [friend, g].sort((a, b) => a.x - b.x);
+    const combo = makeCombo('catch', pair, Combos.comboKey(pair.map(p => p.name)), (friend.x + g.x) / 2, g.y, now, 0);
+    clampToScreen(combo, g);
+    place(combo);
+    return true;
   }
 
   // g老师摔趴趴以后：假装没摔过，然后朝随便哪边走开
@@ -942,6 +968,9 @@
       else if (combo.kind === 'makeup' && !fallAll && !quiet) endMakeup(combo, now);
       else if (combo.kind === 'blanket' && !fallAll && !quiet) endBlanket(combo, now);
       else if (combo.kind === 'helpup') endHelpUp(combo, now, !fallAll && !quiet);
+      else if (combo.kind === 'watch' && !fallAll && !quiet) endWatch(combo, now);
+      else if ((combo.kind === 'grading' || combo.kind === 'bookmark') && !fallAll && !quiet) endGrading(combo, now);
+      else if (combo.kind === 'catch') { removeCombo(combo, false); combo.members.forEach((pet, i) => { pet.x = combo.x + (i - (combo.members.length - 1) / 2) * pet.w * 0.55; goIdle(pet, now); }); }
       else endHug(combo, now, combo.kind === 'row' && !fallAll && !quiet);
       if (fallAll) for (const pet of combo.members) if (pet.onLedge) dropFrom(pet);
     }
@@ -1035,7 +1064,10 @@
     const pair = [friend, g].sort((a, b) => a.x - b.x);
     const key = Combos.comboKey(pair.map(p => p.name));
     // 哥哥狗狗凑过来就是「批改作业」，别的宠物是一起看书
-    const kind = friend.name === DOG && comboClips[key]?.grading ? 'grading' : 'row';
+    // 有书签就播夹着书签的那段
+    const kind = friend.name !== DOG ? 'row'
+      : hasBookmark && comboClips[key]?.bookmark ? 'bookmark'
+        : comboClips[key]?.grading ? 'grading' : 'row';
     if (!comboReady(key, kind)) return;
     const mid = (friend.x + g.x) / 2;
     const combo = makeCombo(kind, pair, key, mid, g.y, now, READ_HUG_TIME);
@@ -1049,19 +1081,75 @@
     if (!focusing || now < focusHalfAt) return;
     focusHalfAt = Infinity;
     const g = byName(G);
-    if (g && g.visible && g.state === 'focus' && g.clips['互动_看书打瞌睡']) playNamed(g, '互动_看书打瞌睡', now, 3000);
+    if (g && g.visible && g.state === 'focus' && g.clips['互动_看书打瞌睡']) doze(g, now);
+  }
+
+  // g老师看书打瞌睡：旁边有别的宠物，就变成「围观睡着」，播完两只都睡着，等鼠标来叫醒
+  function doze(g, now) {
+    const friend = nearestFriend(g, WATCH_NEAR, p => ['idle', 'walk', 'focus'].includes(p.state), 'watch');
+    if (!friend) return playNamed(g, '互动_看书打瞌睡', now, 3000);
+    const pair = [friend, g].sort((a, b) => a.x - b.x);
+    const combo = makeCombo('watch', pair, Combos.comboKey(pair.map(p => p.name)), (friend.x + g.x) / 2, g.y, now, 0);
+    clampToScreen(combo, g);
+    place(combo);
+  }
+
+  // 离g老师最近、在同一个地面上、有这段贴贴动画的宠物
+  function nearestFriend(g, near, stateOk, kind) {
+    let best = null;
+    for (const p of pets) {
+      if (p === g || p.visitor || !p.visible || p.combo || p.inScene || p.drag || !stateOk(p)) continue;
+      if (p.si !== g.si || !onFloor(p) || !onFloor(g) || Math.abs(p.x - g.x) > near * size) continue;
+      if (!comboClips[Combos.comboKey([p.name, g.name])]?.[kind]) continue;
+      if (!best || Math.abs(p.x - g.x) < Math.abs(best.x - g.x)) best = p;
+    }
+    return best;
+  }
+
+  function clampToScreen(combo, pet) {
+    const s = screenOf(pet);
+    combo.x = Math.min(Math.max(combo.x, s.x + combo.w / 2), s.x + s.w - combo.w / 2);
+  }
+
+  // 围观完：两只都睡着（像盖被子一样，打字吵不醒，只有鼠标能叫醒）
+  function endWatch(combo, now) {
+    endBlanket(combo, now);
+  }
+
+  // 批改作业结束：哥哥狗狗走开以后，g老师夹上书签；夹着书签的那次批改完，书签就用掉了
+  function endGrading(combo, now) {
+    const g = combo.members.find(p => p.name === G);
+    const dog = combo.members.find(p => p.name === DOG);
+    endHug(combo, now, false);
+    if (combo.kind === 'bookmark') { setBookmark(false); return; }
+    if (!g || !g.clips['互动_夹书签']) return;
+    g.inScene = true;
+    g.state = 'idle';
+    setAnim(g, idleAnim(g));
+    scenes.push({
+      cast: [g], i: -1, done: () => true,
+      steps: [
+        t => { const until = t + 4000; return t2 => !dog || dog.state !== 'walk' || t2 >= until; }, // 等哥哥狗狗走开
+        t => { setBookmark(true); return play(g, '互动_夹书签', t, 0); },
+      ],
+    });
   }
 
   // ---- 哥哥狗狗 ----
   const SPLAT_SEEN = 1000; // 摔趴趴至少先趴这么久，哥哥狗狗才扶
   // 有宠物摔趴趴了 → 哥哥狗狗走过去，两只一起播「贴贴/XX-哥哥狗狗_扶起来.gif」
   // （里面已经有扶起来、抖灰、道谢、摸摸头），播完两只各自慢慢走开
-  function helpUp(fallen, now) {
+  function canHelpUp(fallen) {
     const dog = byName(DOG);
-    if (!dog || dog === fallen || fallen.visitor || dog.si !== fallen.si || !onFloor(fallen)) return;
-    if (!dog.visible || dog.combo || dog.drag || dog.inScene || !onFloor(dog) || !['idle', 'walk', 'action'].includes(dog.state)) return;
+    if (!dog || dog === fallen || fallen.visitor || dog.si !== fallen.si || !onFloor(fallen)) return false;
+    if (!dog.visible || dog.combo || dog.drag || dog.inScene || !onFloor(dog) || !['idle', 'walk', 'action'].includes(dog.state)) return false;
+    return !!comboClips[Combos.comboKey([fallen.name, DOG])]?.helpup;
+  }
+
+  function helpUp(fallen, now) {
+    if (!canHelpUp(fallen)) return;
+    const dog = byName(DOG);
     const key = Combos.comboKey([fallen.name, DOG]);
-    if (!comboClips[key]?.helpup) return;
     // 有人来扶：摔完先趴着别起来（一直播摔趴趴），等哥哥狗狗过来
     fallen.then = () => { fallen.state = 'idle'; setAnim(fallen, '摔趴趴'); };
     const cast = [dog, fallen];
@@ -1468,8 +1556,29 @@
       const g = byName(G);
       if (!g || !freeForTest(g, now)) return hint(`要先在「选择宠物」里勾上${G}哦`);
       if (type === 'g-read') { startReading(g, now); g.until = now + 60_000; say(g, '拖一只宠物到我旁边，一起看书吧', 5000); }
-      if (type === 'g-doze') playNamed(g, '互动_看书打瞌睡', now, 3000);
+      if (type === 'g-doze') doze(g, now);
       if (type === 'g-fall') { g.y = floorOf(g) + 300; dropFrom(g); }
+    } else if (type === 'g-catch' || type === 'g-watch' || type === 'g-grading') {
+      const g = byName(G);
+      if (!g || !freeForTest(g, now)) return hint(`要先在「选择宠物」里勾上${G}哦`);
+      const kind = { 'g-catch': 'catch', 'g-watch': 'watch', 'g-grading': 'grading' }[type];
+      const friends = pets.filter(p => p !== g && !p.visitor && p.visible && (type === 'g-grading' ? p.name === DOG : p.name !== DOG)
+        && comboClips[Combos.comboKey([p.name, G])]?.[kind]);
+      const friend = pick(friends);
+      if (!friend || !freeForTest(friend, now)) return hint(type === 'g-grading' ? '要同时显示哥哥狗狗和g老师哦' : '要再显示一只哥哥狗狗以外的宠物哦');
+      friend.si = g.si;
+      friend.y = g.y;
+      const [min, max] = xRange(g);
+      friend.x = g.x + 120 * size <= max ? g.x + 120 * size : Math.max(g.x - 120 * size, min);
+      if (type === 'g-catch') { g.forceCatch = true; g.y = floorOf(g) + 300; dropFrom(g); }
+      if (type === 'g-watch') doze(g, now);
+      if (type === 'g-grading') {
+        for (const k of ['grading', 'bookmark']) comboCooldown.delete(`${k}:${Combos.comboKey([DOG, G])}`);
+        g.restUntil = 0;
+        startReading(g, now);
+        checkReadingHug(now);
+        if (!g.combo) hint('批改作业没成功，再试一次吧');
+      }
     } else if (type === 'fake-guest') {
       // 假装对方的宠物来串门（不用联网），看看客人进门、打招呼、玩一会儿再走的样子
       const name = pick(Object.keys(petData));
@@ -1612,6 +1721,9 @@
     }],
     ['掉落和摔趴趴', async () => {
       const [bunny] = scLineup(['梨梨兔兔']);
+      scPlay(bunny, '吓一跳', 2000);
+      tell(bunny, '按住就能拖着走，被拎起来会吓一跳', 2500);
+      await scWait(2500);
       tell(bunny, '拖到高处松手会掉下来，摔趴趴！', 5000);
       bunny.y = floorOf(bunny) + 350;
       dropFrom(bunny);
@@ -1631,10 +1743,12 @@
       tell(list[0], '会按天气换待机动画哦（每 30 分钟查一次）', 3000);
       await scWait(2500);
       for (const [anim, text] of WEATHER_DEMO) {
+        weatherKind = anim;
         for (const pet of list) setAnim(pet, pet.clips[anim] ? anim : '待机');
         tell(list[2], text, 2600);
         await scWait(2600);
       }
+      weatherKind = showcase.saved.weather;
     }],
     ['节日', async () => {
       const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', G], 0.6);
@@ -1665,6 +1779,43 @@
       for (const pet of list) { scPlay(pet, '开心蹦蹦', 3000); tell(pet, '休息一下吧', 3000); }
       tell(list[1], '专注结束会叫你休息一下', 3200);
       await scWait(3400);
+    }],
+    ['跟着你一起', async () => {
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', G], 0.6);
+      for (const [anim, text, ms] of [
+        ['敲代码', '⌨️ 你打字的时候，大家会陪你敲键盘', 3500],
+        ['看视频', '📺 你看视频的时候，会一起看', 3500],
+        ['跳舞', '🎵 你听音乐的时候，会跟着跳舞', 3500],
+        ['冒冷汗', '💦 电脑很忙的时候会冒冷汗', 3000],
+        ['吃饭', '🍚 到饭点会提醒你吃饭', 3000],
+        ['开心蹦蹦', '🧘 坐太久会叫你起来活动一下', 3000],
+        ['睡觉', '🌙 半夜会催你睡觉，电量低了也会没电', 3500],
+      ]) {
+        for (const pet of list) scPlay(pet, anim, ms);
+        tell(list[2], text, ms);
+        await scWait(ms + 200);
+      }
+      tell(list[0], '看什么程序只在你电脑上判断，不会发出去哦', 3500);
+      await scWait(3500);
+    }],
+    ['和朋友联网', async () => {
+      const list = scLineup(['千千猫猫', '梨梨兔兔'], 0.3);
+      for (const pet of list) scPlay(pet, '打招呼', 2500);
+      tell(list[0], '朋友戳你一下，大家会打招呼', 2800);
+      await scWait(2800);
+      for (const pet of list) scPlay(pet, '开心蹦蹦', 2500);
+      tell(list[1], '朋友摸自己的宠物，你这边会开心蹦蹦', 2800);
+      await scWait(2800);
+      const name = petData['煤球猫猫'] ? '煤球猫猫' : Object.keys(petData)[0];
+      welcomeVisitor(name, '演示的朋友', true);
+      const guest = pets.find(p => p.visitor && p.name === name);
+      if (guest) {
+        guest.showcase = true;
+        tell(list[0], '朋友家的宠物偶尔会来串门（这只是演示）', 6000);
+        await scWait(6500);
+        visitorLeave(guest, performance.now(), false);
+        await scWaitFor(() => !pets.includes(guest), 8000);
+      }
     }],
     ['挑衅和回应', async () => {
       for (const [teaser, target] of [['千千猫猫', DOG], ['梨梨兔兔', '梨梨哥哥']]) {
@@ -1702,6 +1853,20 @@
       await scWait(2500);
       const [dog, g2] = scLineup([DOG, G], 0.12);
       await scCombo('grading', [dog, g2], '看书时哥哥狗狗凑过来，就是批改作业', 4000);
+      walkTo(dog, dog.x - 250);
+      await scWait(1500);
+      scPlay(g2, '互动_夹书签', 0);
+      tell(g2, '哥哥狗狗走开以后，g老师会夹上书签', 3500);
+      await scWait(3500);
+      const [dog2, g4] = scLineup([DOG, G], 0.12);
+      await scCombo('bookmark', [dog2, g4], '下次来批改作业，书签还在哦', 4000);
+      const [cat, g5] = scLineup(['千千猫猫', G], 0.12);
+      await scCombo('catch', [cat, g5], '摔倒时旁边有人，可能会帮它接住眼镜', 4000);
+      const [bunny, g6] = scLineup(['梨梨兔兔', G], 0.12);
+      await scCombo('watch', [bunny, g6], '看书睡着时，旁边的宠物会凑过来围观……', 4000);
+      for (const pet of [bunny, g6]) { pet.state = 'sleep'; setAnim(pet, '睡觉'); }
+      tell(g6, '然后一起睡着，鼠标靠近才会醒', 3000);
+      await scWait(3000);
       const [g3] = scLineup([G]);
       tell(g3, '没人扶的时候，摔倒了会假装没摔过', 7000);
       g3.y = floorOf(g3) + 350;
@@ -1798,6 +1963,7 @@
     const now = performance.now();
     for (const combo of [...combos]) scFinishCombo(combo);
     scenes = [];
+    for (const guest of pets.filter(p => p.visitor && p.showcase)) removeVisitor(guest); // 演示用的客人
     weatherKind = saved.weather;
     focusing = saved.focusing;
     focusHalfAt = saved.focusHalfAt;
@@ -1817,6 +1983,27 @@
     }
     if (saved.focus) applyFocus(saved.focus); // 展示时真的开始 / 结束了专注
     api.showcaseState(false);
+  }
+
+  // ---- 退出前道晚安：醒着的打招呼，睡着的接着睡，3 秒后慢慢变透明，再真正退出 ----
+  let leaving = false;
+  function goodnight() {
+    if (leaving) return;
+    leaving = true;
+    stopShowcase();
+    const now = performance.now();
+    for (const combo of combos) say(combo, '晚安～', 5000);
+    for (const pet of pets) {
+      if (!pet.visible || pet.combo) continue;
+      if (pet.state === 'sleep') continue; // 睡着的就让它睡
+      if (!['drag', 'fall', 'jump'].includes(pet.state)) { pet.inScene = false; playNamed(pet, '打招呼', now, 3000); }
+      say(pet, '晚安～', 5000);
+    }
+    setTimeout(() => {
+      document.body.style.transition = 'opacity 1.5s ease';
+      document.body.style.opacity = '0';
+      setTimeout(() => api.goodnightDone(), 1600);
+    }, 3000);
   }
 
   // ---- 每一帧 ----
@@ -1892,7 +2079,7 @@
       }
       case 'idle':
         if (pet.inScene) break; // 在演挑衅剧情，等下一步
-        if (showcase) break; // 功能展示时只做展示让它做的
+        if (showcase || leaving) break; // 功能展示时只做展示让它做的；要退出了就不乱跑
         if (maybeCelebrate(pet, now)) break;
         if (pet.name === G && !pet.visitor && now >= pet.nextThink && Math.random() < 0.15 && startReading(pet, now)) break;
         if (maybeSweat(pet, now)) break;
@@ -1997,7 +2184,7 @@
       else place(combo);
     }
     runScenes(now);
-    if (!showcase) autoBehaviors(now);
+    if (!showcase && !leaving) autoBehaviors(now);
     for (const combo of combos) { placeBubble(combo, now, true); placeHeart(combo, true); }
     placeUpdateButton();
     if (cursor) updateMouseCatch();
@@ -2083,6 +2270,7 @@
     api.onAskContinue(onAskContinue);
     api.onPhoto(takePhoto);
     api.onTest(onTest);
+    api.onGoodnight(goodnight);
     api.onShowcase(command => { if (command === 'stop') stopShowcase(); else startShowcase(); });
     api.onGreet(() => { const now = performance.now(); for (const pet of pets) if (pet.visible && !pet.visitor && !BUSY.includes(pet.state)) { playNamed(pet, '打招呼', now, 3000); say(pet, '你好呀～', 4000); } });
     api.onTease(onTeaseRequest);

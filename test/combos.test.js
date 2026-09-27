@@ -96,3 +96,11 @@ test('扶起来 files are dog + one pet in the fixed order, and never a hug', ()
     assert.strictEqual(comboKey(names), key);
   }
 });
+
+test('g老师 follow-ups are special kinds, never random hugs', () => {
+  assert.deepStrictEqual(parseComboFile('哥哥狗狗-灰鸮g老师_批改作业_书签'), { key: '哥哥狗狗-灰鸮g老师', kind: 'bookmark' });
+  assert.deepStrictEqual(parseComboFile('哥哥狗狗-灰鸮g老师_批改作业'), { key: '哥哥狗狗-灰鸮g老师', kind: 'grading' });
+  assert.deepStrictEqual(parseComboFile('千千猫猫-灰鸮g老师_接眼镜'), { key: '千千猫猫-灰鸮g老师', kind: 'catch' });
+  assert.deepStrictEqual(parseComboFile('煤球猫猫-灰鸮g老师_围观睡着'), { key: '煤球猫猫-灰鸮g老师', kind: 'watch' });
+  for (const kind of ['bookmark', 'catch', 'watch']) assert.ok(SPECIAL_KINDS.includes(kind));
+});

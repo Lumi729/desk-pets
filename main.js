@@ -2,6 +2,9 @@ const { app, BrowserWindow, Menu, Notification, Tray, clipboard, globalShortcut,
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+
+// 改名前叫「千千梨梨桌宠」，设置一直存在那个文件夹里；改了名字也接着用它，设置不会丢
+if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), '千千梨梨桌宠'));
 const { gifInfo } = require('./lib/gif');
 const { watchForeground } = require('./lib/activity');
 const { createTypingDetector } = require('./lib/typing');
@@ -170,6 +173,13 @@ function autoStartOptions() {
   return { path: process.execPath, args: [] };
 }
 const autoStartOn = () => app.getLoginItemSettings(autoStartOptions()).openAtLogin;
+// 改名以后程序文件名变了：以前开了开机自动启动的，登记的还是旧文件，换成现在的
+function fixAutoStartPath() {
+  if (!app.isPackaged || process.env.PORTABLE_EXECUTABLE_FILE) return;
+  const { launchItems = [] } = app.getLoginItemSettings(autoStartOptions());
+  const now = process.execPath.toLowerCase();
+  if (launchItems.some(item => item.enabled && item.path && item.path.toLowerCase() !== now)) setAutoStart(true);
+}
 function setAutoStart(on) {
   app.setLoginItemSettings({ openAtLogin: on, ...autoStartOptions() });
   refreshTray();
@@ -425,6 +435,17 @@ ipcMain.on('guide-open', (_event, what) => {
 });
 ipcMain.on('guide-done', () => { settings.guideSeen = true; saveSettings(); guideWindow?.close(); });
 
+// ---- 退出：先让宠物们道晚安、慢慢消失，再真正退出 ----
+let leaving = false;
+function goodnightQuit() {
+  if (leaving) return;
+  leaving = true;
+  if (!win || win.isDestroyed() || !win.isVisible()) return app.quit(); // 藏起来的时候直接退出
+  send('goodnight');
+  setTimeout(() => app.quit(), 7000); // 页面没回话也照样退出
+}
+ipcMain.on('goodnight-done', () => app.quit());
+
 // ---- 「测试一下」：马上看到各种效果 ----
 const sendTest = (type, value) => send('test', { type, value });
 
@@ -676,7 +697,7 @@ function showNote(options, onClick) {
 
 function notifyUpdateReady() {
   showNote({
-    title: '千千梨梨桌宠有新版本啦',
+    title: '梨间雪桌宠有新版本啦',
     body: `${updateReady} 已经下载好了，点这里重启就能用 ♡`,
     icon: trayImage(settings.trayIcon),
   }, restartToUpdate);
@@ -844,6 +865,9 @@ function buildMenu(petName = null) {
         { label: '灰鸮g老师：看书（拖别的宠物过去一起看）', click: () => sendTest('g-read') },
         { label: '灰鸮g老师：看书打瞌睡', click: () => sendTest('g-doze') },
         { label: '灰鸮g老师：摔一跤', click: () => sendTest('g-fall') },
+        { label: '灰鸮g老师：旁边的宠物接住眼镜', click: () => sendTest('g-catch') },
+        { label: '灰鸮g老师：看书睡着被围观', click: () => sendTest('g-watch') },
+        { label: '灰鸮g老师：批改作业（书里有书签就是书签版）', click: () => sendTest('g-grading') },
         { label: '串门：马上派一只去对方家', click: () => sendTest('visit') },
         { label: '串门：假装有客人来玩（不用朋友）', click: () => sendTest('fake-guest') },
         { label: '检查服务器能不能串门（不用朋友）', click: runRelayCheck },
@@ -877,7 +901,7 @@ function buildMenu(petName = null) {
     { label: '开机自动启动', type: 'checkbox', checked: autoStartOn(), click: item => setAutoStart(item.checked) },
     { label: `检查更新（现在是 ${app.getVersion()}）`, click: () => runUpdateCheck(true) },
     { type: 'separator' },
-    { label: '退出', click: () => app.quit() },
+    { label: '退出', click: goodnightQuit },
   ]);
 }
 
@@ -899,7 +923,7 @@ function trayImage(label) {
 function createTray() {
   try {
     tray = new Tray(trayImage(settings.trayIcon));
-    tray.setToolTip('千千梨梨桌宠');
+    tray.setToolTip('梨间雪桌宠');
     tray.on('click', togglePets);   // 左键：显示 / 隐藏桌宠；右键：设置菜单
     refreshTray();
   } catch (error) {
@@ -910,7 +934,7 @@ function createTray() {
 function refreshTray() {
   if (!tray) return;
   tray.setContextMenu(buildMenu());
-  tray.setToolTip(`千千梨梨桌宠\n${weatherTip()}`);
+  tray.setToolTip(`梨间雪桌宠\n${weatherTip()}`);
 }
 
 function setTrayIcon(label) {
@@ -935,6 +959,7 @@ if (!app.requestSingleInstanceLock()) {
     runWeather();
     setInterval(runWeather, 30 * 60_000);
     setInterval(() => { sendToday(); checkPomodoro(); updateWeatherIdle(); }, 30_000);
+    fixAutoStartPath();
     setupAutoUpdate();
     setTimeout(runUpdateCheck, 10_000);
     setInterval(runUpdateCheck, 3 * 60 * 60_000);
