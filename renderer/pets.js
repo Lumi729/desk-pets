@@ -27,7 +27,7 @@
   const CORE = ['待机', '向左走', '向右走', '睡觉', '向左看', '向右看', '掉落', '摔趴趴', '冒冷汗',
     '专注', '叼胡萝卜向左走', '叼胡萝卜向右走', '叼小鱼向左走', '叼小鱼向右走',
     '国庆', '万圣节', '圣诞', '春节', '生日'];
-  const CHASE_SPEED = 3;           // 绿眼猫猫冲过去的速度（平时的几倍）
+  const CHASE_SPEED = 3;           // 煤球猫猫冲过去的速度（平时的几倍）
   const FLEE_SPEED = 2.2;          // 被追的跑开的速度
   const SNACK_SPEED = 1.2;         // 叼着零食走的速度
   const MAKEUP_AFTER = 180_000;    // 打完架过多久才会和好
@@ -947,7 +947,7 @@
     }
   }
 
-  // ---- 追着玩：绿眼猫猫突然冲向另一只，那只加速跑开，追一会儿一起开心蹦蹦 ----
+  // ---- 追着玩：煤球猫猫突然冲向另一只，那只加速跑开，追一会儿一起开心蹦蹦 ----
   const byName = name => pets.find(pet => pet.name === name && !pet.visitor); // 不算来串门的客人
   const isFree = pet => pet.visible && !pet.visitor && !pet.combo && !pet.drag && !pet.inScene && onFloor(pet) && ['idle', 'walk'].includes(pet.state);
 
@@ -958,7 +958,7 @@
   }
 
   function tryChase(now) {
-    const cat = byName('绿眼猫猫');
+    const cat = byName('煤球猫猫');
     if (!cat || !isFree(cat)) return false;
     const others = pets.filter(p => p !== cat && isFree(p) && p.si === cat.si);
     if (!others.length) return false;
@@ -1431,7 +1431,7 @@
       else hint(`要先在「选择宠物」里勾上${value}哦`);
     } else if (type === 'chase') {
       for (const pet of pets) freeForTest(pet, now);
-      if (!tryChase(now)) hint('要显示绿眼猫猫和另一只宠物，而且在同一块屏幕的地上哦');
+      if (!tryChase(now)) hint('要显示煤球猫猫和另一只宠物，而且在同一块屏幕的地上哦');
     } else if (type === 'snack') {
       for (const pet of pets) freeForTest(pet, now);
       if (!trySnack(now)) hint('要同时显示千千猫猫和梨梨兔兔，而且在同一块屏幕的地上哦');
@@ -1663,7 +1663,7 @@
     checkReadingHug(now);
     checkFocusDoze(now);
     if (now >= nextTease) { nextTease = now + rand(120_000, 300_000); if (features.tease && !focusing) tryTease(now); }
-    // 时不时：绿眼猫猫追着玩、千千猫猫和梨梨兔兔送零食（专注时不打扰）
+    // 时不时：煤球猫猫追着玩、千千猫猫和梨梨兔兔送零食（专注时不打扰）
     if (now >= nextChase) { nextChase = now + rand(60_000, 150_000); if (features.chase && !focusing) tryChase(now); }
     if (now >= nextSnack) { nextSnack = now + rand(90_000, 200_000); if (features.snack && !focusing) trySnack(now); }
     // 自己走着走着挨在一起了 → 贴贴

@@ -17,7 +17,7 @@ const { checkRelay } = require('./lib/relay-check');
 
 const ASSETS = path.join(__dirname, '桌宠素材');
 // 五只宠物（名字就是「桌宠素材」里的文件夹名）
-const PETS = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '绿眼猫猫', '灰鸮g老师'];
+const PETS = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '灰鸮g老师'];
 const FEATURES = [
   { key: 'time', label: '时间提醒（该睡觉 / 该吃饭）' },
   { key: 'sit', label: '久坐提醒（60 分钟）' },
@@ -27,7 +27,7 @@ const FEATURES = [
   { key: 'system', label: '电脑状态（CPU 很忙冒冷汗 / 电量低）' },
   { key: 'perch', label: '站在窗口顶上' },
   { key: 'makeup', label: '两个哥哥打完架过一阵会和好' },
-  { key: 'chase', label: '追着玩（绿眼猫猫突然冲过去）' },
+  { key: 'chase', label: '追着玩（煤球猫猫突然冲过去）' },
   { key: 'snack', label: '送零食（千千猫猫和梨梨兔兔互相送）' },
   { key: 'weather', label: '天气（按天气换待机动画）' },
   { key: 'festival', label: '过节（国庆 / 万圣节 / 圣诞 / 春节）' },
@@ -59,9 +59,25 @@ const settings = {
   pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
 };
 
+// 改过名字的宠物：旧设置里的名字换成新名字
+const OLD_PET_NAMES = { 绿眼猫猫: '煤球猫猫' };
+function renameOldPets(saved) {
+  for (const [oldName, newName] of Object.entries(OLD_PET_NAMES)) {
+    for (const key of ['pets', 'visitPets', 'birthdays']) {
+      const map = saved[key];
+      if (map && typeof map === 'object' && oldName in map) {
+        if (!(newName in map)) map[newName] = map[oldName];
+        delete map[oldName];
+      }
+    }
+    if (saved.trayIcon === oldName) saved.trayIcon = newName;
+  }
+}
+
 function loadSettings() {
   try {
     const saved = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
+    renameOldPets(saved);
     if (saved.pets && typeof saved.pets === 'object') {
       for (const name of PETS) if (typeof saved.pets[name] === 'boolean') settings.pets[name] = saved.pets[name];
     } else if (saved.show === 'cat' || saved.show === 'bunny') {
