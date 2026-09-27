@@ -1056,6 +1056,8 @@
     for (const pet of cast) pet.inScene = true;
     scenes.push({
       cast, i: -1, done: () => true,
+      giveUpAt: now + 10_000, // 哥哥狗狗 10 秒还没走到，就不等了，自己起来
+      onGiveUp: () => { if (fallen.name === G && fallen.clips['互动_假装没摔过']) afterSplat(fallen)?.(performance.now()); },
       steps: [
         t => approach(dog, fallen),
         t => () => fallen.state !== 'action', // 等它摔完
@@ -1206,6 +1208,7 @@
     for (const scene of [...scenes]) {
       // 被拖走、藏起来、掉下去了……剧情就不演了
       if (focusing || scene.cast.some(pet => !pet.visible || ['drag', 'fall', 'jump'].includes(pet.state))) { endScene(scene, now); continue; }
+      if (scene.giveUpAt && now > scene.giveUpAt && scene.i <= 1) { endScene(scene, now); scene.onGiveUp?.(); continue; } // 等太久了
       if (!scene.done(now)) continue;
       scene.i++;
       if (scene.i >= scene.steps.length) { endScene(scene, now); continue; }
