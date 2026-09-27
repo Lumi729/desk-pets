@@ -2424,6 +2424,14 @@
     if (short || !dog.clips['互动_举牌测试通过']) playNamed(dog, '开心蹦蹦', now, 0);
     else playNamed(dog, '互动_举牌测试通过', now, 0, t => playNamed(dog, '开心蹦蹦', t, 0));
   }
+  // 这一轮因为 API 出错结束了（限流、额度用完……）：冒冷汗
+  function onClaudeFail() {
+    const dog = claudeDog();
+    if (!dog || dog.combo || dog.inNest || ['drag', 'fall', 'jump', 'hug'].includes(dog.state)) return;
+    const now = performance.now();
+    dog.lastAttention = now;
+    playNamed(dog, dog.clips['冒冷汗'] ? '冒冷汗' : '待机', now, 0);
+  }
   // 等你批准或回复：打招呼提醒
   function onClaudeNotify() {
     const dog = claudeDog();
@@ -2766,6 +2774,7 @@
     api.onClaudeWork(onClaudeWork);
     api.onClaudeDone(onClaudeDone);
     api.onClaudeNotify(onClaudeNotify);
+    api.onClaudeFail(onClaudeFail);
     api.onSayPet(({ name, text } = {}) => { const pet = pets.find(p => p.name === name && p.visible) || pets.find(p => p.visible); if (pet) say(pet.combo || pet, text, 4000); });
     api.onFullscreen(on => {
       pauseClock(on);

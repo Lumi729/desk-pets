@@ -695,6 +695,7 @@ const claudeActivity = createClaudeActivity(change => {
   if (change.type === 'working') send('claude-work', change.working);
   else if (change.type === 'done') send('claude-done', { short: change.short, stillWorking: change.stillWorking });
   else if (change.type === 'notify') send('claude-notify');
+  else if (change.type === 'fail') send('claude-fail');
 });
 let claudeServer = null;
 const claudeRecent = [];

@@ -30,7 +30,7 @@
 - 复制表情：右键宠物「复制这个表情」，把它正在播的 GIF 当成文件复制，粘贴到 QQ、微信里是会动的
 - 四季换装：3～5 月春、6～8 月夏、9～11 月秋、12～2 月冬，平时的待机换成季节的；优先级：节日 > 特殊天气（雨、雪、雾、雷雨、炎热、降温）> 季节 > 其它天气 > 普通待机
 - 小窝：默认在主屏幕左下角，可以拖动。晚上 11 点后困了的宠物自己走回小窝挤在一起睡，早上 7 点后或者被鼠标叫醒时出来；哥哥狗狗和g老师睡前先把眼镜放到门口的眼镜架上（睡觉没戴眼镜），起床再戴回去，两副都在架子上时早上有 30% 会拿错，戴好后接着换眼镜
-- 联动 Claude Code：托盘「联动 Claude Code」里打开。这台电脑上的 Claude Code 干活时，哥哥狗狗跟着做动作：开始干活（UserPromptSubmit / PreToolUse）就一直敲代码；干完一轮（Stop）举牌「测试通过」再开心蹦蹦（10 秒内的很短一轮只蹦一下）；等你批准或回复（Notification）时打招呼提醒；会话结束（SessionEnd）、在等你（Notification，比如按 Esc 打断后）或 10 分钟没消息就回到平时；卡住了可以点「狗狗卡住了？让它停下来」，菜单里也能看到最近收到的几条事件（只有事件名和时间）。好几个会话同时开着时按 session_id 分开记，有一个在干活就接着敲。狗狗没放出来就什么都不做。**只对这台电脑上运行的 Claude Code 有效，云端会话不会触发**
+- 联动 Claude Code：托盘「联动 Claude Code」里打开。这台电脑上的 Claude Code 干活时，哥哥狗狗跟着做动作：开始干活（UserPromptSubmit / PreToolUse）就一直敲代码；干完一轮（Stop）举牌「测试通过」再开心蹦蹦（10 秒内的很短一轮只蹦一下）；等你批准或回复（Notification，或者弹出批准框 PermissionRequest）时停下来打招呼提醒；这一轮因为 API 出错结束（StopFailure，比如限流、额度用完）就停下来冒冷汗；会话结束（SessionEnd）、在等你（Notification，比如按 Esc 打断后）或 10 分钟没消息就回到平时；卡住了可以点「狗狗卡住了？让它停下来」，菜单里也能看到最近收到的几条事件（只有事件名和时间）。好几个会话同时开着时按 session_id 分开记，有一个在干活就接着敲。狗狗没放出来就什么都不做。**只对这台电脑上运行的 Claude Code 有效，云端会话不会触发**
 - 退出：点「退出」时宠物们先道晚安（醒着的打招呼，睡着的接着睡），3 秒后慢慢变透明消失，再真正退出
 - 新手引导：第一次打开时自动出现，一步一步介绍宠物、选宠物和大小、托盘、拖动、天气地点、生日、番茄钟、联网配对、自动更新；看完或跳过后不再自动弹出，菜单「📖 新手引导」可以再看
 - 挑衅哥哥：千千猫猫离哥哥狗狗不远时偶尔会挑衅他（做鬼脸、略略略、就这、扭屁股、来打我呀、勾勾手指），哥哥狗狗会冒冷汗、跺脚、委屈、捂眼睛、追着打，或者走过来贴贴；梨梨兔兔也会挑衅梨梨哥哥（晃小鱼、装哭、戳戳、扔胡萝卜、耳朵拍拍、吓你一跳）。10 分钟内被挑衅超过 3 次，哥哥就直接投降。右键千千猫猫或梨梨兔兔可以马上「挑衅哥哥」
@@ -145,7 +145,7 @@ GIF 都在 `桌宠素材/` 里。每只宠物的文件夹要有 `待机`、`向�
 
 ## 联动 Claude Code 是怎么做的
 
-- 打开开关时，先把 `%USERPROFILE%\.claude\settings.json` 备份成 `settings.json.desk-pets-backup-时间`，再往里面**加**我们的 hooks（UserPromptSubmit、PreToolUse、PostToolUse、Stop、Notification、SessionEnd），已有的 hooks（比如 Clawd on Desk 加的）一条都不动；关掉时只删我们加的那几条。
+- 打开开关时，先把 `%USERPROFILE%\.claude\settings.json` 备份成 `settings.json.desk-pets-backup-时间`，再往里面**加**我们的 hooks（UserPromptSubmit、PreToolUse、PostToolUse、Stop、StopFailure、Notification、PermissionRequest、SessionEnd；PermissionRequest 只是看一眼，没有任何输出，不会替你允许或拒绝），已有的 hooks（比如 Clawd on Desk 加的）一条都不动；关掉时只删我们加的那几条。
 - 每条 hook 是一行在 Git Bash 和 PowerShell 里都能跑的命令：用 `curl.exe` 把 hook 收到的 JSON 转发到 `http://127.0.0.1:47291/desk-pets-claude/事件名`。`-s -o NUL` 保证没有任何输出（UserPromptSubmit 的输出会进 Claude 的上下文），连不上 1 秒就放弃、最多 2 秒，最后 `exit 0`，所以桌宠没开时不会报错，也不会拖慢 Claude Code。
 - 桌宠只在 `127.0.0.1`（只有本机能连）开这个小接口，收到就回 204 空内容，只看事件名和 session_id，不联网、不往外发任何数据。
 - 改完 hooks 后，新开的 Claude Code 会话才会生效。

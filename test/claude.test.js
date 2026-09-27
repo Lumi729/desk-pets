@@ -83,3 +83,35 @@ test('older installs get the new hooks added', () => {
   assert.ok(hasHooks(addHooks(old)));
   assert.strictEqual(addHooks(old).hooks.Stop.length, 1);
 });
+
+test('an API error ends the turn with a sweat; a permission prompt waits like a notification', () => {
+  const events = [];
+  const a = createClaudeActivity(e => events.push(e));
+  a.event('UserPromptSubmit', 's1', 0);
+  a.event('StopFailure', 's1', 3000);
+  assert.strictEqual(a.working, false);
+  assert.deepStrictEqual(events.at(-1), { type: 'fail', stillWorking: false });
+  a.event('PreToolUse', 's1', 4000);
+  const before = events.length;
+  a.event('PermissionRequest', 's1', 5000);
+  assert.strictEqual(a.working, false);
+  assert.ok(events.slice(before).some(e => e.type === 'notify'));
+});
+
+test('StopFailure and PermissionRequest hooks are added quietly, and never decide anything', () => {
+  const s = addHooks({});
+  for (const e of ['StopFailure', 'PermissionRequest']) {
+    const [group] = s.hooks[e];
+    assert.strictEqual(group.hooks[0].command, hookCommand(e));
+    assert.match(group.hooks[0].command, /-s .*-o NUL .* ; exit 0$/); // 没有输出，也就没有允许 / 拒绝
+  }
+  assert.strictEqual(s.hooks.PermissionRequest[0].matcher, '*');
+  assert.ok(!('matcher' in s.hooks.StopFailure[0]));
+  const old = addHooks({});
+  delete old.hooks.StopFailure;
+  delete old.hooks.PermissionRequest;
+  assert.ok(!hasHooks(old));
+  const upgraded = addHooks(old);
+  assert.ok(hasHooks(upgraded));
+  assert.strictEqual(upgraded.hooks.Stop.length, 1);
+});

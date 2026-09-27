@@ -3,6 +3,7 @@
 每次改完在最上面加一句，写清楚改了什么，方便下一个接手的 AI（Claude / ChatGPT）知道进度。
 
 ## 2026-09-27
+- 发布 1.0.22：联动 Claude Code 再补两种会卡住的情况：StopFailure（API 出错结束，狗狗停下冒冷汗）、PermissionRequest（弹出批准框，停下打招呼，只看不做决定）；老用户启动时自动补上。
 - 修联动 Claude Code 卡在敲代码：Claude Code 在等你（Notification）时也停下来，多收 PostToolUse，菜单加「让它停下来」和最近收到的事件；老版本加的 hooks 启动时自动补上新事件。已发布 1.0.21。
 - 发布 1.0.20：联动 Claude Code（托盘开关；本机 Claude Code 干活时哥哥狗狗敲代码、干完举牌、等回复时打招呼）。
 - 发布 1.0.19（包含上面这些新功能）。
