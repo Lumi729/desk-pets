@@ -2408,7 +2408,24 @@
     say(dog, text, ms + 1500);
     return true;
   }
-  function onBugfix() { if (!showcase) dogDoes('互动_修bug', '出了点小问题，我记下来了'); }
+  // 有新的错误日志：狗狗在就去修，不在就换一只冒气泡提醒
+  const errorTip = count => `有 ${count} 条新的错误日志～右键托盘「打开错误日志」看看吧`;
+  let errorBubble = null; // 上一个提醒气泡：来了新的就先收起旧的，不叠在一起
+  function clearErrorBubble() {
+    if (errorBubble && /错误日志/.test(errorBubble.bubble.textContent)) errorBubble.bubbleUntil = 0;
+    errorBubble = null;
+  }
+  function remindErrors(count, ms = 8000) {
+    clearErrorBubble();
+    const pet = pets.find(p => p.visible && !p.visitor && !['drag', 'hug', 'exit', 'enter'].includes(p.state)) || pets.find(p => p.visible);
+    if (pet) { errorBubble = pet.combo || pet; say(errorBubble, errorTip(count || 1), ms); }
+  }
+  function onBugfix(count) {
+    if (showcase) return;
+    clearErrorBubble();
+    if (dogDoes('互动_修bug', `出了点小问题，我记下来了～\n${errorTip(count || 1)}`, 5000)) errorBubble = byName(DOG);
+    else remindErrors(count);
+  }
   // 写日记：选好的那只来写；它没显示，就让屏幕上的另一只代写，并告诉主程序是谁写的
   function onDiaryWrite(writer) {
     const free = p => p && p.visible && !p.visitor && !p.combo && !p.inScene && !['drag', 'fall', 'jump', 'hug', 'exit', 'enter'].includes(p.state);
@@ -2851,6 +2868,7 @@
       if (on) for (const pet of pets) { pet.drag = null; pet.el.classList.remove('dragging'); }
     });
     api.onBugfix(onBugfix);
+    api.onBugfixRemind(count => { if (!showcase) remindErrors(count, 10_000); });
     api.onDiaryWrite(onDiaryWrite);
     api.onNickname(name => { nickname = name || '千千'; });
     api.onShowcase(command => { if (command === 'stop') stopShowcase(); else startShowcase(); });

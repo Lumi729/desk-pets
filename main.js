@@ -117,9 +117,12 @@ function setProfile({ nickname, diaryWriter } = {}) {
 }
 const validTime = text => /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(text || ''));
 
+let settingsLoaded = false;
 function loadSettings() {
+  settingsLoaded = true;
   try {
     const saved = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
+    if (Number.isInteger(saved.newErrors) && saved.newErrors > 0) settings.newErrors = saved.newErrors;
     renameOldPets(saved);
     if (saved.pets && typeof saved.pets === 'object') {
       for (const name of PETS) if (typeof saved.pets[name] === 'boolean') settings.pets[name] = saved.pets[name];
@@ -521,8 +524,20 @@ function reportError(where, error) {
   if (!settings.features.bugfix) return;
   try {
     if (!errorLog) errorLog = createErrorLog(errorLogFile(), app.getVersion());
-    if (errorLog.write(where, error)) send('bugfix');
+    if (errorLog.write(where, error)) {
+      settings.newErrors = (settings.newErrors || 0) + 1; // 还没看过的错误有几条
+      if (settingsLoaded) saveSettings(); // 设置还没读进来时别存，免得把设置冲掉
+      send('bugfix', settings.newErrors);
+      refreshTray();
+    }
   } catch {}
+}
+// 看过日志了 → 不再提醒
+function errorsSeen() {
+  if (!settings.newErrors) return;
+  settings.newErrors = 0;
+  saveSettings();
+  refreshTray();
 }
 process.on('uncaughtException', error => reportError('主程序', error));
 process.on('unhandledRejection', error => reportError('主程序', error));
@@ -536,10 +551,12 @@ function openErrorLog() {
   const file = errorLogFile();
   if (!fs.existsSync(file)) fs.writeFileSync(file, '还没有错误，一切正常 ♡\n');
   shell.openPath(file);
+  errorsSeen();
 }
 function copyLatestError() {
   if (!errorLog) errorLog = createErrorLog(errorLogFile(), app.getVersion());
   const text = errorLog.latest();
+  errorsSeen();
   if (text && !text.startsWith('还没有错误')) { clipboard.writeText(text); send('say', '最近的错误复制好啦，发给哥哥吧'); }
   else send('say', '还没有错误，一切正常 ♡');
 }
@@ -1166,6 +1183,7 @@ function restartToUpdate() {
       app.removeAllListeners('window-all-closed');
       for (const w of BrowserWindow.getAllWindows()) w.destroy();
       tray?.destroy();
+      tray = null;
       autoUpdater.quitAndInstall(true, true);
     } catch (error) {
       restarting = false;
@@ -1408,7 +1426,7 @@ function menuTemplate(petName = null, expression = null) {
       })),
     },
     { label: '桌宠卡住了？刷新一下', click: () => { win?.webContents.reload(); } },
-    { label: '打开错误日志', click: openErrorLog },
+    { label: settings.newErrors ? `打开错误日志（有 ${settings.newErrors} 条新的）` : '打开错误日志', click: openErrorLog },
     { label: '复制最近的错误', click: copyLatestError },
     { label: '开机自动启动', type: 'checkbox', checked: autoStartOn(), click: item => setAutoStart(item.checked) },
     { label: `检查更新（现在是 ${app.getVersion()}）`, click: () => runUpdateCheck(true) },
@@ -1447,7 +1465,7 @@ function createTray() {
 }
 
 function refreshTray() {
-  if (!tray) return;
+  if (!tray || tray.isDestroyed()) return;
   tray.setContextMenu(buildMenu());
   sendPanel();
   tray.setToolTip(`梨间雪桌宠\n${weatherTip()}${settings.features.anniversary ? `\n在一起第 ${togetherDays()} 天` : ''}`);
@@ -1456,7 +1474,7 @@ function refreshTray() {
 function setTrayIcon(label) {
   settings.trayIcon = label;
   saveSettings();
-  if (tray) tray.setImage(trayImage(label));
+  if (tray && !tray.isDestroyed()) tray.setImage(trayImage(label));
   refreshTray();
 }
 
@@ -1499,6 +1517,8 @@ if (!app.requestSingleInstanceLock()) {
     setInterval(runUpdateCheck, 3 * 60 * 60_000);
     // 第一次打开：等宠物出来以后弹出新手引导
     if (!settings.guideSeen) win.webContents.once('did-finish-load', () => setTimeout(openGuide, 1500));
+    // 上次（比如退出时）记了错误还没看 → 打开后冒个气泡提醒
+    win.webContents.once('did-finish-load', () => setTimeout(() => { if (settings.newErrors && settings.features.bugfix) send('bugfix-remind', settings.newErrors); }, 6000));
     screen.on('display-metrics-changed', fitToScreen);
     screen.on('display-added', fitToScreen);
     screen.on('display-removed', fitToScreen);
