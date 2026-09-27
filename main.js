@@ -1238,11 +1238,22 @@ function createWindow() {
   const typingTimer = setInterval(checkTyping, 300);
   const sitTimer = setInterval(checkSitting, 10_000);
   const cpuTimer = setInterval(checkCpu, 5_000);
-  win.on('closed', () => { clearInterval(cursorTimer); clearInterval(typingTimer); clearInterval(sitTimer); clearInterval(cpuTimer); win = null; });
+  // 页面每秒报一次「还在动」；超过 3 秒没报（窗口没藏起来）→ 让窗口整个重画一次，把它叫醒
+  lastAlive = Date.now();
+  const aliveTimer = setInterval(() => {
+    if (!win || win.isDestroyed() || !win.isVisible() || Date.now() - lastAlive < 3000) return;
+    lastAlive = Date.now();
+    win.webContents.invalidate();
+    win.setAlwaysOnTop(true, 'screen-saver');
+    send('resync');
+  }, 1000);
+  win.on('closed', () => { clearInterval(cursorTimer); clearInterval(typingTimer); clearInterval(sitTimer); clearInterval(cpuTimer); clearInterval(aliveTimer); win = null; });
 }
 
 ipcMain.handle('load', () => loadAssets());
 let mouseOnPet = false;
+let lastAlive = 0;
+ipcMain.on('alive', () => { lastAlive = Date.now(); });
 ipcMain.on('set-ignore', (_event, ignore) => { mouseOnPet = !ignore; win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }); });
 // petName：右键的是哪只宠物（托盘菜单没有）。千千猫猫和梨梨兔兔会多一个「挑衅哥哥」
 function buildMenu(petName = null, expression = null) {
@@ -1448,6 +1459,12 @@ function setTrayIcon(label) {
   if (tray) tray.setImage(trayImage(label));
   refreshTray();
 }
+
+// 别让 Chrome 以为桌宠窗口被挡住了就停下来不画（全屏透明窗口常被误判，宠物会卡住、点一下才动）
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();

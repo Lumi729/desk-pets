@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('petApi', {
   onPresence: fn => ipcRenderer.on('presence', (_event, online) => fn(online)),
   onRemote: fn => ipcRenderer.on('remote', (_event, message) => fn(message)),
   onScreens: fn => ipcRenderer.on('screens', (_event, screens) => fn(screens)),
+  alive: () => ipcRenderer.send('alive'),
   onResync: fn => ipcRenderer.on('resync', () => fn()),
   onUpdateReady: fn => ipcRenderer.on('update-ready', (_event, version) => fn(version)),
   restartUpdate: () => ipcRenderer.send('restart-update'),

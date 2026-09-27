@@ -2700,10 +2700,25 @@
 
   let lastWork = 0;
   const nextFrame = () => frame(performance.now()); // 用页面里的钟（全屏时会停）
+  // 排下一帧。Windows 有时会以为桌宠窗口被挡住了，就不再给它「下一帧」（requestAnimationFrame），
+  // 宠物就停住不动、要点一下才恢复。所以同时定一个备用闹钟：下一帧迟迟不来，就用闹钟接着动
+  let frameRaf = 0, frameTimer = 0, lastAlive = 0;
+  function schedule() {
+    if (frameRaf || frameTimer) return;
+    const run = () => {
+      cancelAnimationFrame(frameRaf); clearTimeout(frameTimer);
+      frameRaf = 0; frameTimer = 0;
+      nextFrame();
+    };
+    frameRaf = requestAnimationFrame(run);
+    frameTimer = setTimeout(run, 50);
+    const wall = Date.now();
+    if (wall - lastAlive > 1000) { lastAlive = wall; api.alive?.(); } // 告诉主程序「还在动」
+  }
   function frame(now) {
     // 你在打字的时候，桌宠每秒只动 20 次（平时 60 次），少占一点电脑，让你打字的窗口画得更顺
-    if (pausedSince) { requestAnimationFrame(nextFrame); return; } // 全屏躲起来时什么都不做
-    if (activity.typing && now - lastWork < 50) { requestAnimationFrame(nextFrame); return; }
+    if (pausedSince) { schedule(); return; } // 全屏躲起来时什么都不做
+    if (activity.typing && now - lastWork < 50) { schedule(); return; }
     lastWork = now;
     const dt = Math.min((now - lastTime) / 1000, 0.1);
     lastTime = now;
@@ -2729,7 +2744,7 @@
     for (const combo of combos) { placeBubble(combo, now, true); placeHeart(combo, true); }
     placeUpdateButton();
     if (cursor) updateMouseCatch();
-    requestAnimationFrame(nextFrame);
+    schedule();
   }
 
   // 平时自己发生的事（功能展示时都先停一停）
@@ -2852,7 +2867,7 @@
     // 鼠标在窗口上移动时的位置最准；主程序每 0.1 秒报的位置只在最近没收到移动时用（宠物自己走到鼠标下面）
     window.addEventListener('mousemove', event => { lastMouseMove = performance.now(); releaseStuckDrag(event); onCursor({ x: event.clientX, y: event.clientY }); });
     api.onResync(() => { for (const pet of pets) pet.drag = null; updateMouseCatch(true); });
-    requestAnimationFrame(nextFrame);
+    schedule();
   }
 
   start().catch(error => console.error('桌宠启动失败', error));
