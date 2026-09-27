@@ -16,6 +16,9 @@ const { weatherIdle, fetchWeather, WEATHER_IDLES } = require('./lib/weather');
 const { REGIONS, DEFAULT_LOCATION, normalizeLocation, locationLabel } = require('./lib/regions');
 const { createErrorLog } = require('./lib/errorlog');
 const Diary = require('./lib/diary');
+const http = require('node:http');
+const ClaudeHooks = require('./lib/claude-hooks');
+const { createClaudeActivity } = require('./lib/claude-activity');
 const { pixelTrayImage } = require('./lib/pixel-icon');
 const { autoUpdater } = require('electron-updater');
 const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
@@ -74,6 +77,7 @@ const settings = {
   birthdays: {},                  // 宠物名 → 「MM-DD」
   pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
   guideSeen: false,               // 新手引导看过 / 跳过了没有
+  claudeLink: false,              // 联动 Claude Code
   nest: null,                     // 小窝放在哪：{ si: 第几块屏幕, offset: 离屏幕左边多远 }
   diaryTime: '22:00',             // 每天几点写日记
   diaryWriter: '哥哥狗狗',         // 谁来写日记
@@ -123,6 +127,7 @@ function loadSettings() {
     if (saved.visitPets && typeof saved.visitPets === 'object') for (const name of PETS) if (typeof saved.visitPets[name] === 'boolean') settings.visitPets[name] = saved.visitPets[name];
     settings.location = normalizeLocation(saved.location);
     settings.guideSeen = saved.guideSeen === true;
+    settings.claudeLink = saved.claudeLink === true;
     if (Number.isFinite(saved.nest?.offset)) settings.nest = { si: Number.isInteger(saved.nest.si) ? saved.nest.si : 0, offset: saved.nest.offset };
     if (validTime(saved.diaryTime)) settings.diaryTime = saved.diaryTime;
     if (PETS.includes(saved.diaryWriter)) settings.diaryWriter = saved.diaryWriter;
@@ -184,7 +189,7 @@ function loadAssets() {
     combos[key][kind] = readGif(path.join(comboDir, file));
     comboFiles[key] = { ...comboFiles[key], [kind]: path.join(comboDir, file) };
   }
-  return { nest: settings.nest, nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
+  return { claudeWorking: claudeActivity.working, nest: settings.nest, nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -683,6 +688,72 @@ function copyExpression(expression) {
   }
 }
 
+// ---- 联动 Claude Code：这台电脑上的 Claude Code 干活时，哥哥狗狗跟着做动作 ----
+// Claude Code 的 hooks 用 curl.exe 把事件发到 127.0.0.1（只有本机能连），这里收下，不联网、不往外发任何东西。
+// 只对这台电脑上运行的 Claude Code 有效，云端会话不会触发。
+const claudeActivity = createClaudeActivity(change => {
+  if (change.type === 'working') send('claude-work', change.working);
+  else if (change.type === 'done') send('claude-done', { short: change.short, stillWorking: change.stillWorking });
+  else if (change.type === 'notify') send('claude-notify');
+});
+let claudeServer = null;
+let claudeSweep = null;
+function startClaudeServer() {
+  if (claudeServer) return;
+  claudeServer = http.createServer((req, res) => {
+    const match = /^\/desk-pets-claude\/(\w+)$/.exec(req.url || '');
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { body += chunk; if (body.length > 256 * 1024) req.destroy(); });
+    req.on('end', () => {
+      res.writeHead(204); // 什么都不回（UserPromptSubmit 的 hook 输出会进 Claude 的上下文）
+      res.end();
+      if (req.method !== 'POST' || !match || !settings.claudeLink) return;
+      let sessionId = '';
+      try { sessionId = JSON.parse(body).session_id || ''; } catch {}
+      claudeActivity.event(match[1], sessionId);
+    });
+    req.on('error', () => {});
+  });
+  claudeServer.on('error', error => { console.error('Claude Code 联动的端口打不开', error.message); claudeServer = null; });
+  claudeServer.listen(ClaudeHooks.PORT, '127.0.0.1');
+  claudeSweep = setInterval(() => claudeActivity.sweep(), 30_000);
+}
+function stopClaudeServer() {
+  claudeServer?.close();
+  claudeServer = null;
+  clearInterval(claudeSweep);
+  claudeActivity.clear();
+}
+const claudeSettingsFile = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'settings.json');
+// 改 Claude Code 的 settings.json：先备份，只加 / 只删我们自己的 hooks
+function editClaudeSettings(change) {
+  const file = claudeSettingsFile();
+  let current = {};
+  if (fs.existsSync(file)) {
+    const text = fs.readFileSync(file, 'utf8');
+    if (text.trim()) current = JSON.parse(text); // 读不懂就不动它（下面会报错）
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.copyFileSync(file, `${file}.desk-pets-backup-${stamp}`);
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(change(current), null, 2)}\n`);
+}
+function setClaudeLink(on) {
+  try {
+    editClaudeSettings(on ? ClaudeHooks.addHooks : ClaudeHooks.removeHooks);
+  } catch (error) {
+    send('say', on ? 'Claude Code 的设置文件打不开，没联动上…' : 'Claude Code 的设置文件打不开，没取消成…');
+    refreshTray();
+    return;
+  }
+  settings.claudeLink = on;
+  saveSettings();
+  if (on) startClaudeServer(); else { stopClaudeServer(); send('claude-work', false); }
+  send('say-pet', { name: '哥哥狗狗', text: on ? '联动好啦，Claude Code 干活时我陪着敲～（新开的会话才生效）' : '不联动 Claude Code 啦' });
+  refreshTray();
+}
+
 // ---- 「测试一下」：马上看到各种效果 ----
 const sendTest = (type, value) => send('test', { type, value });
 
@@ -1151,6 +1222,15 @@ function buildMenu(petName = null, expression = null) {
     { type: 'separator' },
     { label: '戳一下对方', enabled: online.peerOnline, click: pokePeer },
     {
+      label: '联动 Claude Code',
+      submenu: [
+        { label: '联动 Claude Code', type: 'checkbox', checked: settings.claudeLink, click: item => setClaudeLink(item.checked) },
+        { label: '只对这台电脑上运行的 Claude Code 有效，云端会话不会触发', enabled: false },
+        { label: '不联网，不往外发任何数据', enabled: false },
+        { label: 'Claude Code 干活时哥哥狗狗陪着敲代码，干完举牌，等你回复时打招呼', enabled: false },
+      ],
+    },
+    {
       label: '联网',
       submenu: [
         { label: onlineStatusLabel(), enabled: false },
@@ -1233,6 +1313,7 @@ if (!app.requestSingleInstanceLock()) {
     updateWatcher();
     createTray();
     startOnline();
+    if (settings.claudeLink) startClaudeServer();
     runWeather();
     setInterval(runWeather, 30 * 60_000);
     setInterval(() => { sendToday(); checkPomodoro(); updateWeatherIdle(); checkDiary(); }, 30_000);
@@ -1250,5 +1331,5 @@ if (!app.requestSingleInstanceLock()) {
     powerMonitor.on('suspend', () => { sitStart = null; });
   });
   app.on('window-all-closed', () => app.quit());
-  app.on('will-quit', () => { if (diaryDays) saveDiary(true); globalShortcut.unregisterAll(); if (stopWatcher) stopWatcher(); online.stop(); });
+  app.on('will-quit', () => { stopClaudeServer(); if (diaryDays) saveDiary(true); globalShortcut.unregisterAll(); if (stopWatcher) stopWatcher(); online.stop(); });
 }

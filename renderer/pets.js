@@ -92,6 +92,7 @@
   let typingRun = null;            // { start, lastEnd } 这一段连续打字
   let blanketNight = '';           // 今晚盖过被子了没有
   let nickname = '千千';            // 宠物们怎么称呼你（设置里能改）
+  let claudeWorking = false;       // 这台电脑上的 Claude Code 正在干活
   // g老师的书里夹没夹书签（批改作业结束后夹上，下次批改作业时用掉）；关了再开也记得
   let hasBookmark = false;
   try { hasBookmark = localStorage.getItem('g-bookmark') === '1'; } catch {}
@@ -2407,6 +2408,33 @@
     }
   }
 
+  // ---- 联动 Claude Code ----
+  const claudeDog = () => { const dog = byName(DOG); return dog && dog.visible && !showcase && !leaving ? dog : null; }; // 狗狗没放出来就什么都不做
+  function onClaudeWork(on) {
+    claudeWorking = on;
+    const dog = claudeDog();
+    if (!on && dog?.state === 'claude') goIdle(dog, performance.now());
+  }
+  // 干完一轮：举牌「测试通过」再开心蹦蹦；很短的一轮只蹦一下
+  function onClaudeDone({ short } = {}) {
+    const dog = claudeDog();
+    if (!dog || dog.combo || dog.inNest || ['drag', 'fall', 'jump', 'hug'].includes(dog.state)) return;
+    const now = performance.now();
+    dog.lastAttention = now;
+    if (short || !dog.clips['互动_举牌测试通过']) playNamed(dog, '开心蹦蹦', now, 0);
+    else playNamed(dog, '互动_举牌测试通过', now, 0, t => playNamed(dog, '开心蹦蹦', t, 0));
+  }
+  // 等你批准或回复：打招呼提醒
+  function onClaudeNotify() {
+    const dog = claudeDog();
+    if (!dog) return;
+    if (dog.combo || dog.inNest || ['drag', 'fall', 'jump', 'hug'].includes(dog.state)) return say(dog.combo || dog, `${nickname}，Claude Code 在等你哦`, 6000); // 忙着的时候冒个气泡
+    const now = performance.now();
+    dog.lastAttention = now;
+    playNamed(dog, '打招呼', now, 2500);
+    say(dog, `${nickname}，Claude Code 在等你哦`, 6000);
+  }
+
   // ---- 退出前道晚安：醒着的打招呼，睡着的接着睡，3 秒后慢慢变透明，再真正退出 ----
   let leaving = false;
   function goodnight() {
@@ -2434,6 +2462,14 @@
   const CAN_START_TYPING = ['idle', 'walk', 'sleep', 'action'];
 
   function think(pet, now, dt) {
+    // Claude Code 在干活：哥哥狗狗陪着敲代码（在发呆、走路、睡觉、打字的时候才换过去，不打断别的动作）
+    if (claudeWorking && pet.name === DOG && !pet.visitor && !showcase && !leaving && !pet.inScene && !pet.inNest && !pet.routine
+      && ['idle', 'walk', 'sleep', 'typing'].includes(pet.state) && pet.clips['敲代码']) {
+      pet.state = 'claude';
+      pet.tucked = false;
+      pet.looking = false;
+      setAnim(pet, '敲代码');
+    }
     if (CAN_START_TYPING.includes(pet.state) && !pet.inScene && !pet.tucked && !pet.routine && !showcase && isTypingLong(now)) {
       pet.state = 'typing';
       pet.then = null;
@@ -2538,6 +2574,10 @@
         break;
       case 'curious':
         pet.lastAttention = now; // 歪着头一直看，等鼠标动
+        break;
+      case 'claude':
+        pet.lastAttention = now;
+        if (!claudeWorking) goIdle(pet, now);
         break;
       case 'drowsy':
         pet.lastAttention = now; // 打完哈欠呆站着，等大家传完
@@ -2696,6 +2736,7 @@
     }
     size = data.size || 1;
     nickname = data.nickname || '千千';
+    claudeWorking = !!data.claudeWorking;
     peerOnline = !!data.peerOnline;
     for (const pet of pets) { pet.el.hidden = true; setAnim(pet, '待机'); }
     if (data.focusInfo?.on) onFocus(data.focusInfo);
@@ -2722,6 +2763,9 @@
     api.onPhoto(takePhoto);
     api.onTest(onTest);
     api.onGoodnight(goodnight);
+    api.onClaudeWork(onClaudeWork);
+    api.onClaudeDone(onClaudeDone);
+    api.onClaudeNotify(onClaudeNotify);
     api.onSayPet(({ name, text } = {}) => { const pet = pets.find(p => p.name === name && p.visible) || pets.find(p => p.visible); if (pet) say(pet.combo || pet, text, 4000); });
     api.onFullscreen(on => {
       pauseClock(on);

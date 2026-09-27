@@ -37,4 +37,5 @@
 - 宠物文件夹里的特殊动画（天气待机、专注、叼零食走路、节日、生日等）列在 `renderer/pets.js` 的 `CORE` 里，不会被点击随机抽到。新功能要在菜单「测试一下」里加一个马上触发的入口，方便千千看效果；也要加进「功能展示」（`renderer/pets.js` 的 `SHOWCASE_STEPS`），需要的话再改改「新手引导」（`renderer/guide.js`）。
 - 挑衅互动的规则在 `renderer/teases.js`（有测试）；「挑衅_」「回应_」「互动_」开头的动画只在专属互动里用，不进点击随机动作。灰鸮g老师只和一只宠物一起看书贴贴（`combos.js` 的 `SOLO`），不参加多人贴贴和叠叠乐。剧情用 `renderer/pets.js` 里的 `scenes` 一步一步演。
 - 小窝在 `renderer/pets.js` 的「小窝」一节（素材在 `桌宠素材/小窝/`），宠物在窝里时 `pet.inNest`，回窝 / 出窝的路上 `pet.routine` 为真（打字不会打断）。页面里的 `performance.now()` 是会在全屏躲起来时停住的钟。
+- 联动 Claude Code：`lib/claude-hooks.js`（往 Claude Code 的 settings.json 里加 / 删我们的 hooks，只认命令里带 `/desk-pets-claude/` 的）、`lib/claude-activity.js`（按 session_id 算在不在干活），主进程在 127.0.0.1:47291 收事件、回 204 空内容。hook 命令必须没有输出、失败也 `exit 0`。
 - 改了 `server/` 以后要提醒千千在 `server` 文件夹里运行 `npm run deploy` 重新部署。
