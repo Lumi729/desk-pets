@@ -941,6 +941,7 @@
       if (combo.kind === 'fight') endFight(combo, now);
       else if (combo.kind === 'makeup' && !fallAll && !quiet) endMakeup(combo, now);
       else if (combo.kind === 'blanket' && !fallAll && !quiet) endBlanket(combo, now);
+      else if (combo.kind === 'helpup') endHelpUp(combo, now, !fallAll && !quiet);
       else endHug(combo, now, combo.kind === 'row' && !fallAll && !quiet);
       if (fallAll) for (const pet of combo.members) if (pet.onLedge) dropFrom(pet);
     }
@@ -1052,25 +1053,53 @@
   }
 
   // ---- 哥哥狗狗 ----
-  // 有宠物摔趴趴了 → 哥哥狗狗跑过去扶起来
+  // 有宠物摔趴趴了 → 哥哥狗狗走过去，两只一起播「贴贴/XX-哥哥狗狗_扶起来.gif」
+  // （里面已经有扶起来、抖灰、道谢、摸摸头），播完两只各自慢慢走开
   function helpUp(fallen, now) {
     const dog = byName(DOG);
-    if (!dog || dog === fallen || fallen.visitor || !isFree(dog) || dog.si !== fallen.si || !onFloor(fallen) || !dog.clips['互动_扶起来']) return;
-    // 有人来扶：摔完先趴着别起来（一直播摔趴趴），等哥哥狗狗扶起来；也就不用自己假装没摔过了
+    if (!dog || dog === fallen || fallen.visitor || dog.si !== fallen.si || !onFloor(fallen)) return;
+    if (!dog.visible || dog.combo || dog.drag || dog.inScene || !onFloor(dog) || !['idle', 'walk', 'action'].includes(dog.state)) return;
+    const key = Combos.comboKey([fallen.name, DOG]);
+    if (!comboClips[key]?.helpup) return;
+    // 有人来扶：摔完先趴着别起来（一直播摔趴趴），等哥哥狗狗过来
     fallen.then = () => { fallen.state = 'idle'; setAnim(fallen, '摔趴趴'); };
     const cast = [dog, fallen];
     for (const pet of cast) pet.inScene = true;
     scenes.push({
       cast, i: -1, done: () => true,
-      giveUpAt: now + 10_000, // 哥哥狗狗 10 秒还没走到，就不等了，自己起来
-      onGiveUp: () => { if (fallen.name === G && fallen.clips['互动_假装没摔过']) afterSplat(fallen)?.(performance.now()); },
+      giveUpAt: now + 10_000, // 哥哥狗狗 10 秒还没走到，就不等了，自己起来（g老师这时才假装没摔过）
+      onGiveUp: () => afterSplat(fallen)?.(performance.now()),
       steps: [
         t => approach(dog, fallen),
         t => () => fallen.state !== 'action', // 等它摔完
-        t => play(dog, '互动_扶起来', t, 0),
-        // g老师被扶起来以后还是要假装没摔过
-        t => (fallen.name === G ? play(fallen, '互动_假装没摔过', t, 0) : () => true),
+        t => {
+          const pair = [fallen, dog].sort((a, b) => a.x - b.x);
+          const combo = makeCombo('helpup', pair, key, (fallen.x + dog.x) / 2, fallen.y, t, 0); // 播一遍
+          const s = screenOf(fallen);
+          combo.x = Math.min(Math.max(combo.x, s.x + combo.w / 2), s.x + s.w - combo.w / 2);
+          place(combo);
+          return () => !dog.combo;
+        },
       ],
+    });
+  }
+
+  // 扶起来播完：两只重新出现，各自朝两边慢慢走开，走到了再待机
+  function endHelpUp(combo, now, walkAway = true) {
+    removeCombo(combo, false);
+    for (const scene of scenes.filter(sc => sc.cast.some(pet => combo.members.includes(pet)))) {
+      scenes = scenes.filter(sc => sc !== scene);
+      for (const pet of scene.cast) pet.inScene = false;
+    }
+    const n = combo.members.length;
+    combo.members.forEach((pet, i) => {
+      pet.x = combo.x + (i - (n - 1) / 2) * pet.w * 0.55;
+      pet.si = combo.si;
+      pet.lastAttention = now;
+      pet.then = null;
+      const dir = i === 0 ? -1 : 1;
+      if (walkAway && pet.visible && !focusing) walkTo(pet, pet.x + dir * rand(150, 300));
+      else goIdle(pet, now);
     });
   }
 

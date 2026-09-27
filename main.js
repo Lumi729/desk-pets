@@ -672,6 +672,10 @@ function createWindow() {
     hasShadow: false,
     focusable: false,
     alwaysOnTop: true,
+    // Windows 上当成「工具窗口」：Chrome、VS Code 这类程序会算自己有没有被别的窗口挡住，挡住了就先不画；
+    // 桌宠窗口铺满整个屏幕，鼠标放在宠物上（窗口接住鼠标）时会被当成把它们全挡住了，
+    // 它们就停住不动，要点一下才恢复。工具窗口不算在里面，就不会这样
+    ...(process.platform === 'win32' ? { type: 'toolbar' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

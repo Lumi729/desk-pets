@@ -62,7 +62,7 @@ test('fight and make-up are follow-ups to an existing hug, not other hug version
   assert.ok(files.has('哥哥狗狗-梨梨哥哥_和好'));
   for (const name of files) {
     const { key, kind } = parseComboFile(name);
-    if (SPECIAL_KINDS.includes(kind)) assert.ok(files.has(key), `${name} 没有对应的贴贴`);
+    if (SPECIAL_KINDS.includes(kind) && kind !== 'helpup') assert.ok(files.has(key), `${name} 没有对应的贴贴`);
   }
 });
 
@@ -83,4 +83,16 @@ test('g老师 reads with every other pet one-on-one, never stacks', () => {
   }
   assert.strictEqual(canStack(['千千猫猫'], '灰鸮g老师', () => true), null);
   assert.strictEqual(canStack(['灰鸮g老师'], '千千猫猫', () => true), null);
+});
+
+test('扶起来 files are dog + one pet in the fixed order, and never a hug', () => {
+  assert.deepStrictEqual(parseComboFile('千千猫猫-哥哥狗狗_扶起来'), { key: '千千猫猫-哥哥狗狗', kind: 'helpup' });
+  const helps = [...files].map(parseComboFile).filter(c => c.kind === 'helpup');
+  assert.ok(helps.length >= 5);
+  for (const { key } of helps) {
+    const names = key.split('-');
+    assert.strictEqual(names.length, 2, key);
+    assert.ok(names.includes('哥哥狗狗'), key);
+    assert.strictEqual(comboKey(names), key);
+  }
 });
