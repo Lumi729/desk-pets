@@ -1853,7 +1853,7 @@
       await scWait(2000);
     }],
     ['天气待机', async () => {
-      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', G], 0.6);
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', '99狐狐', G], 0.62);
       tell(list[0], '会按天气换待机动画哦（每 30 分钟查一次）', 3000);
       await scWait(2500);
       for (const [anim, text] of WEATHER_DEMO) {
@@ -1865,7 +1865,7 @@
       weatherKind = showcase.saved.weather;
     }],
     ['节日', async () => {
-      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', G], 0.6);
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', '99狐狐', G], 0.62);
       for (const [name, text] of [['国庆', '🇨🇳 国庆节'], ['万圣节', '🎃 万圣节'], ['圣诞', '🎄 圣诞节'], ['春节', '🧧 春节']]) {
         for (const pet of list) scPlay(pet, name, 3000);
         tell(list[2], `${text}那天会一起过节哦`, 3000);
@@ -1895,7 +1895,7 @@
       await scWait(3400);
     }],
     ['跟着你一起', async () => {
-      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', G], 0.6);
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', '99狐狐', G], 0.62);
       for (const [anim, text, ms] of [
         ['敲代码', '⌨️ 你打字的时候，大家会陪你敲键盘', 3500],
         ['看视频', '📺 你看视频的时候，会一起看', 3500],
@@ -2004,7 +2004,7 @@
       scPlay(dog, '互动_写日记', 3500);
       tell(dog, `每天晚上会写今日小日记，写好给${nickname}看（设置里能选谁来写）`, 3800);
       await scWait(3800);
-      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', G], 0.6);
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', '99狐狐', G], 0.62);
       for (const pet of list) scPlay(pet, '纪念日', 4000);
       tell(list[2], `和${nickname}在一起第 7、30、100 天……大家会一起庆祝`, 4200);
       await scWait(4200);
@@ -2012,7 +2012,7 @@
       await scCombo('swap', [dog2, g], '哥哥狗狗和g老师偶尔会换眼镜戴', 4000);
     }],
     ['四季换装', async () => {
-      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', G], 0.6);
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', '99狐狐', G], 0.62);
       for (const [anim, text] of [['待机_春', '🌸 春天'], ['待机_夏', '🍉 夏天'], ['待机_秋', '🍂 秋天'], ['待机_冬', '⛄ 冬天']]) {
         for (const pet of list) setAnim(pet, anim);
         tell(list[2], `${text}会换上季节的衣服（节日和特别的天气优先）`, 2800);

@@ -28,7 +28,9 @@ const { checkRelay } = require('./lib/relay-check');
 
 const ASSETS = path.join(__dirname, '桌宠素材');
 // 五只宠物（名字就是「桌宠素材」里的文件夹名）
-const PETS = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '灰鸮g老师'];
+const PETS = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '99狐狐', '灰鸮g老师'];
+// 后来才加的宠物：已经在用的人更新后先不显示（自己去「选择宠物」里勾），新装的照常显示
+const NEW_PETS = ['99狐狐'];
 const FEATURES = [
   { key: 'time', label: '时间提醒（该睡觉 / 该吃饭）' },
   { key: 'sit', label: '久坐提醒（60 分钟）' },
@@ -121,6 +123,7 @@ function loadSettings() {
     renameOldPets(saved);
     if (saved.pets && typeof saved.pets === 'object') {
       for (const name of PETS) if (typeof saved.pets[name] === 'boolean') settings.pets[name] = saved.pets[name];
+        else if (NEW_PETS.includes(name)) settings.pets[name] = false;
     } else if (saved.show === 'cat' || saved.show === 'bunny') {
       // 以前只能选一只的设置：只保留当时选的那只
       for (const name of PETS) settings.pets[name] = name === (saved.show === 'cat' ? '千千猫猫' : '梨梨兔兔');

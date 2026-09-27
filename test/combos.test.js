@@ -78,7 +78,7 @@ test('every hug file has both versions and uses known pet names', () => {
 });
 
 test('g老师 reads with every other pet one-on-one, never stacks', () => {
-  for (const name of ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫']) {
+  for (const name of ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '99狐狐']) {
     assert.ok(files.has(comboKey([name, '灰鸮g老师'])), name);
   }
   assert.strictEqual(canStack(['千千猫猫'], '灰鸮g老师', () => true), null);
@@ -104,4 +104,15 @@ test('g老师 follow-ups are special kinds, never random hugs', () => {
   assert.deepStrictEqual(parseComboFile('煤球猫猫-灰鸮g老师_围观睡着'), { key: '煤球猫猫-灰鸮g老师', kind: 'watch' });
   assert.deepStrictEqual(parseComboFile('哥哥狗狗-灰鸮g老师_换眼镜'), { key: '哥哥狗狗-灰鸮g老师', kind: 'swap' });
   for (const kind of ['bookmark', 'catch', 'watch', 'swap']) assert.ok(SPECIAL_KINDS.includes(kind));
+});
+
+test('99狐狐 sits between 煤球猫猫 and 灰鸮g老师 and follows 煤球猫猫\'s rules', () => {
+  assert.deepStrictEqual(ORDER.slice(-3), ['煤球猫猫', '99狐狐', '灰鸮g老师']);
+  assert.strictEqual(comboKey(['灰鸮g老师', '99狐狐']), '99狐狐-灰鸮g老师');
+  assert.strictEqual(comboKey(['99狐狐', '煤球猫猫', '千千猫猫']), '千千猫猫-煤球猫猫-99狐狐');
+  assert.ok(isForbidden('99狐狐', '梨梨哥哥'));
+  assert.ok(!isForbidden('99狐狐', '煤球猫猫'));
+  assert.strictEqual(canStack(['梨梨哥哥'], '99狐狐', () => true), null);
+  // 和煤球一样有扶起来、接眼镜、围观睡着
+  for (const name of ['哥哥狗狗-99狐狐_扶起来', '99狐狐-灰鸮g老师_接眼镜', '99狐狐-灰鸮g老师_围观睡着', '99狐狐-灰鸮g老师']) assert.ok(files.has(name), name);
 });

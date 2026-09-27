@@ -39,7 +39,8 @@ test('days together and anniversaries', () => {
 test('every pet writes in its own voice, with the chosen nickname', () => {
   const day = { pets: 12, clicks: 0, pomodoros: 3, hugs: 1, stacks: 0, weathers: ['小雨'], festivals: [] };
   const texts = Object.keys(VOICES).map(writer => composeDiary(day, '梨梨', writer));
-  assert.strictEqual(new Set(texts).size, 6);
+  assert.strictEqual(new Set(texts).size, Object.keys(VOICES).length);
+  assert.ok(VOICES['99狐狐']);
   for (const text of texts) { assert.match(text, /梨梨摸了我们 12 次/); assert.ok(!text.includes('千千')); }
   assert.match(composeDiary(day, '梨梨', '灰鸮g老师'), /^【今日观察记录】\n1\. /);
   for (const writer of Object.keys(VOICES)) assert.ok(composeDiary(null, '梨梨', writer).includes('梨梨'), writer);
