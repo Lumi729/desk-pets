@@ -658,13 +658,20 @@
       stage.append(button);
       actionButtons.set(id, button);
     }
-    // 按下去就算点到（不等松手），这样鼠标稍微一动、或者窗口刚切到「接住点击」时也不会漏掉
-    button.onpointerdown = event => {
+    // 按下去就算点到（不等松手），这样鼠标稍微一动、或者窗口刚切到「接住点击」时也不会漏掉；
+    // 有的电脑上按下那一下没传过来，松手 / click 也算，一次点击只算一次
+    let last = 0;
+    const press = event => {
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
+      if (performance.now() - last < 800) return;
+      last = performance.now();
       onClick();
     };
+    button.onpointerdown = press;
+    button.onmouseup = press;
+    button.onclick = press;
     button.textContent = text;
   }
   function hideActionButton(id) {
@@ -682,7 +689,8 @@
     for (const button of actionButtons.values()) {
       if (button.hidden) continue;
       const r = button.getBoundingClientRect();
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+      const pad = 8; // 边上留一点，鼠标快到按钮时就先接住
+      if (x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) return true;
     }
     return false;
   }
