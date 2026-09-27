@@ -1060,6 +1060,8 @@
         t => approach(dog, fallen),
         t => () => fallen.state !== 'action', // 等它摔完
         t => play(dog, '互动_扶起来', t, 0),
+        // g老师被扶起来以后还是要假装没摔过
+        t => (fallen.name === G ? play(fallen, '互动_假装没摔过', t, 0) : () => true),
       ],
     });
   }
@@ -1442,11 +1444,13 @@
 
   // ---- 每一帧 ----
   // 在发呆（包括正在看鼠标）、走路、睡觉时一打字就陪你敲代码
-  const CAN_START_TYPING = ['idle', 'walk', 'sleep'];
+  // 做普通动作（点击动作、提醒、过节……）时也马上换成敲代码，打字时大家都安安静静地陪你敲
+  const CAN_START_TYPING = ['idle', 'walk', 'sleep', 'action'];
 
   function think(pet, now, dt) {
     if (CAN_START_TYPING.includes(pet.state) && !pet.inScene && !pet.tucked && isTypingLong(now)) {
       pet.state = 'typing';
+      pet.then = null;
       pet.lastAttention = now;
       setAnim(pet, '敲代码');
       return;
@@ -1592,7 +1596,11 @@
     sprite.el.style.transform = transform;
   }
 
+  let lastWork = 0;
   function frame(now) {
+    // 你在打字的时候，桌宠每秒只动 20 次（平时 60 次），少占一点电脑，让你打字的窗口画得更顺
+    if (activity.typing && now - lastWork < 50) { requestAnimationFrame(frame); return; }
+    lastWork = now;
     const dt = Math.min((now - lastTime) / 1000, 0.1);
     lastTime = now;
     if (now >= nextClockCheck) { nextClockCheck = now + 30_000; checkClock(now); checkBattery(now); if (!focusing) checkBlanket(now); }
