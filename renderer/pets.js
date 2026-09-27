@@ -185,6 +185,13 @@
 
   function goIdle(pet, now) {
     pet.looking = false;
+    // 正在演剧情（挑衅、扶起来……）的中间：一步做完马上接下一步，这时不换回待机动画，
+    // 免得每一步中间闪一下待机。只有走路停下来时才换成待机
+    if (pet.inScene) {
+      pet.state = 'idle';
+      if (!pet.anim || pet.anim.startsWith('向') || pet.anim.startsWith('叼')) setAnim(pet, idleAnim(pet));
+      return;
+    }
     // 专注的时候，做完别的事就回到专注，不乱跑
     if (focusing && pet.visible) { pet.state = 'focus'; setAnim(pet, pet.name === G && pet.clips['互动_看书'] ? '互动_看书' : '专注'); return; } // g老师专注时看书
     pet.state = 'idle';
