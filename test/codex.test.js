@@ -141,9 +141,13 @@ test('端口占用会明确失败，释放后可以再开', async t => {
   assert.equal(await second.start(port), port);
 });
 
-function runHook(event, port, input, timeout = 10000) {
+function runHook(event, port, input, { timeout = 10000, legacyEncoding = false } = {}) {
   return new Promise((resolve, reject) => {
-    const cmd = Hooks.hookCommand(event, port);
+    let cmd = Hooks.hookCommand(event, port);
+    if (legacyEncoding) {
+      const script = '[Console]::InputEncoding = [Text.Encoding]::GetEncoding(936)\n' + Hooks.hookScript(event, port);
+      cmd = cmd.replace(/ -EncodedCommand .+$/, ' -EncodedCommand ' + Buffer.from(script, 'utf16le').toString('base64'));
+    }
     // 和 Codex 一样经过外层 shell；直接运行内层进程会漏测启动耗时。
     const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { windowsHide: true, timeout });
     let stdout = '', stderr = '';
@@ -185,4 +189,20 @@ test('Windows 真正执行 hook：只转发状态，聊天和工具内容被丢�
   assert.deepEqual(await runHook('Stop', port, '{bad json'), silent);
   await new Promise(resolve => server.close(resolve));
   assert.deepEqual(await runHook('Stop', port, input), silent);
+});
+
+test('Windows 中文回复、引号、换行和表情不会吞掉收工信号（旧中文代码页）', { skip: process.platform !== 'win32', timeout: 30000 }, async t => {
+  const changes = [], events = [];
+  const link = createCodexLink({ onChange: e => changes.push(e), onEvent: e => events.push(e) });
+  t.after(() => link.stop());
+  const port = await link.start(0);
+  const info = { session_id: 'unicode-stop', turn_id: '1' };
+  const silent = { code: 0, stdout: '', stderr: '' };
+  assert.deepEqual(await runHook('PreToolUse', port, JSON.stringify(info), { legacyEncoding: true }), silent);
+  assert.equal(link.activity.working, true);
+  const reply = '**测试结束啦 🦉**\n\n中文"引号"和换行也要能收工，灰鸮可以休息了。';
+  assert.deepEqual(await runHook('Stop', port, JSON.stringify({ ...info, last_assistant_message: reply }), { legacyEncoding: true }), silent);
+  assert.equal(events.at(-1).event, 'Stop', '必须确实收到收工消息，不能只看脚本退出成功');
+  assert.equal(link.activity.working, false);
+  assert.equal(changes.at(-1).type, 'done');
 });
