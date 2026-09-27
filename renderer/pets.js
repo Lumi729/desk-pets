@@ -82,6 +82,7 @@
   const TYPING_GAP = 10_000;       // 停下来多久算写完了（中间停不到 10 秒还算连续）
   let typingRun = null;            // { start, lastEnd } 这一段连续打字
   let blanketNight = '';           // 今晚盖过被子了没有
+  let nickname = '千千';            // 宠物们怎么称呼你（设置里能改）
   // g老师的书里夹没夹书签（批改作业结束后夹上，下次批改作业时用掉）；关了再开也记得
   let hasBookmark = false;
   try { hasBookmark = localStorage.getItem('g-bookmark') === '1'; } catch {}
@@ -279,13 +280,13 @@
     const hour = date.getHours();
     const minutes = hour * 60 + date.getMinutes();
     if (hour < 5) {
-      if (now - lastNightNag >= NIGHT_EVERY) { lastNightNag = now; if (!focusing) remind('睡觉', '该睡觉啦', 6000); }
+      if (now - lastNightNag >= NIGHT_EVERY) { lastNightNag = now; if (!focusing) remind('睡觉', `${nickname}，该睡觉啦`, 6000); }
     } else {
       lastNightNag = -Infinity;
     }
     MEALS.forEach(([from, to], i) => {
       const key = `${date.toDateString()}-${i}`;
-      if (minutes >= from && minutes <= to && !mealsDone.has(key)) { mealsDone.add(key); if (!focusing) remind('吃饭', '该吃饭啦', 4000); }
+      if (minutes >= from && minutes <= to && !mealsDone.has(key)) { mealsDone.add(key); if (!focusing) remind('吃饭', `${nickname}，该吃饭啦`, 4000); }
     });
   }
 
@@ -1414,7 +1415,7 @@
     playNamed(pet, anim, now, 4000);
     if (anim === '生日' && now - lastBirthdayBubble > 60_000) {
       lastBirthdayBubble = now;
-      for (const p of pets) if (p.visible) say(p.combo || p, '生日快乐 🎂', 6000);
+      for (const p of pets) if (p.visible) say(p.combo || p, `${nickname}，今天是${pet.name}的生日 🎂`, 6000);
     }
   }
 
@@ -1724,7 +1725,7 @@
   const SHOWCASE_STEPS = [
     ['走路', async () => {
       const [cat, bunny] = scLineup(['千千猫猫', '梨梨兔兔'], 0.3);
-      tell(cat, '平时会自己走来走去哦');
+      tell(cat, `${nickname}，看好啦～平时我们会自己走来走去哦`);
       walkTo(cat, cat.x - 250);
       walkTo(bunny, bunny.x + 250);
       await scWait(3500);
@@ -1916,11 +1917,11 @@
       tell(dog, '桌宠出错时哥哥狗狗会去修，还会记进错误日志', 3800);
       await scWait(3800);
       scPlay(dog, '互动_写日记', 3500);
-      tell(dog, '每天晚上 10 点写今日小日记，写好会给你看', 3800);
+      tell(dog, `每天晚上会写今日小日记，写好给${nickname}看（设置里能选谁来写）`, 3800);
       await scWait(3800);
       const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', G], 0.6);
       for (const pet of list) scPlay(pet, '纪念日', 4000);
-      tell(list[2], '在一起第 7、30、100 天……大家会一起庆祝', 4200);
+      tell(list[2], `和${nickname}在一起第 7、30、100 天……大家会一起庆祝`, 4200);
       await scWait(4200);
       const [dog2, g] = scLineup([DOG, G], 0.12);
       await scCombo('swap', [dog2, g], '哥哥狗狗和g老师偶尔会换眼镜戴', 4000);
@@ -2058,15 +2059,24 @@
     return true;
   }
   function onBugfix() { if (!showcase) dogDoes('互动_修bug', '出了点小问题，我记下来了'); }
-  function onDiaryWrite() { dogDoes('互动_写日记', '今天的日记写好啦～', 3500); }
+  // 写日记：选好的那只来写；它没显示，就让屏幕上的另一只代写，并告诉主程序是谁写的
+  function onDiaryWrite(writer) {
+    const free = p => p && p.visible && !p.visitor && !p.combo && !p.inScene && !['drag', 'fall', 'jump', 'hug', 'exit', 'enter'].includes(p.state);
+    const chosen = byName(writer);
+    const pet = chosen?.visible ? chosen : pets.find(p => free(p)) || pets.find(p => p.visible && !p.visitor);
+    const now = performance.now();
+    if (pet && free(pet) && pet.clips['互动_写日记']) { pet.lastAttention = now; playNamed(pet, '互动_写日记', now, 3500); }
+    if (pet) say(pet.combo || pet, pet === chosen ? '今天的日记写好啦～' : `${writer}不在，我来代写～`, 5000);
+    api.diaryWriter(pet && !chosen?.visible ? pet.name : writer);
+  }
   let celebratedDays = 0;
   function celebrateTogether(days) {
     const now = performance.now();
     for (const pet of pets) {
       if (!pet.visible || pet.visitor) continue;
-      if (pet.combo) { say(pet.combo, `我们在一起第 ${days} 天啦`, 8000); continue; }
+      if (pet.combo) { say(pet.combo, `${nickname}，我们在一起第 ${days} 天啦`, 8000); continue; }
       if (!BUSY.includes(pet.state) && !pet.inScene) { pet.lastAttention = now; playNamed(pet, '纪念日', now, 4000); }
-      say(pet, `我们在一起第 ${days} 天啦`, 8000);
+      say(pet, `${nickname}，我们在一起第 ${days} 天啦`, 8000);
     }
   }
 
@@ -2332,6 +2342,7 @@
       for (const [kind, gif] of Object.entries(gifs)) comboClips[key][kind] = makeClip(gif); // row 贴贴 / stack 叠叠乐 / fight 打架
     }
     size = data.size || 1;
+    nickname = data.nickname || '千千';
     peerOnline = !!data.peerOnline;
     for (const pet of pets) { pet.el.hidden = true; setAnim(pet, '待机'); }
     if (data.focusInfo?.on) onFocus(data.focusInfo);
@@ -2341,7 +2352,7 @@
     api.onShow(applyShow);
     api.onFeatures(applyFeatures);
     api.onActivity(onActivity);
-    api.onSitReminder(() => { if (features.sit && !focusing) remind('开心蹦蹦', '起来活动一下吧', 4000); });
+    api.onSitReminder(() => { if (features.sit && !focusing) remind('开心蹦蹦', `${nickname}，起来活动一下吧`, 4000); });
     api.onCpuHot(onCpuHot);
     api.onPerch(onPerch);
     api.onScreens(onScreens);
@@ -2359,6 +2370,7 @@
     api.onGoodnight(goodnight);
     api.onBugfix(onBugfix);
     api.onDiaryWrite(onDiaryWrite);
+    api.onNickname(name => { nickname = name || '千千'; });
     api.onShowcase(command => { if (command === 'stop') stopShowcase(); else startShowcase(); });
     api.onGreet(() => { const now = performance.now(); for (const pet of pets) if (pet.visible && !pet.visitor && !BUSY.includes(pet.state)) { playNamed(pet, '打招呼', now, 3000); say(pet, '你好呀～', 4000); } });
     api.onTease(onTeaseRequest);

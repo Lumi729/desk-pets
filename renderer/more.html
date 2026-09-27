@@ -9,6 +9,8 @@
 <body>
   <form id="form">
     <h1>小设置 ♡</h1>
+    <label>怎么称呼你<input id="nickname" maxlength="20" required placeholder="千千"></label>
+    <small>宠物们的气泡、日记里都这样叫你；联网时朋友看到的也是这个名字。</small>
     <h2>宠物生日</h2>
     <small>写成「3-14」或「3月14日」，不写就不过生日。</small>
     <div id="birthdays"></div>
@@ -19,7 +21,9 @@
     </div>
     <h2>今日小日记</h2>
     <div class="row left">
-      <label class="inline">每天<input id="diaryTime" type="time" required>写日记</label>
+      <label class="inline">每天<input id="diaryTime" type="time" required>由</label>
+      <select id="diaryWriter"></select>
+      <span>写日记</span>
     </div>
     <p id="error" role="alert"></p>
     <div class="row">

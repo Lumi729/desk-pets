@@ -2,7 +2,7 @@ body { display: flex; flex-direction: column; gap: 10px; }
 .card { position: relative; padding: 16px 18px 14px; border-radius: 18px; border: 2px dashed #f0b6ca; background: #fff; box-shadow: 0 4px 14px #e58aad33; }
 .dog { display: block; height: 88px; margin: -4px auto 4px; image-rendering: pixelated; }
 .date { text-align: center; font-weight: 700; color: #b0677f; letter-spacing: 1px; }
-.text { margin: 8px 0 6px; font-size: 15px; line-height: 28px; min-height: 112px; background: repeating-linear-gradient(transparent, transparent 27px, #fbe3ec 27px, #fbe3ec 28px); }
+.text { white-space: pre-line; margin: 8px 0 6px; font-size: 15px; line-height: 28px; min-height: 112px; background: repeating-linear-gradient(transparent, transparent 27px, #fbe3ec 27px, #fbe3ec 28px); }
 .sign { text-align: right; color: #977184; font-size: 13px; }
 .past { margin-top: 0; }
 select { display: block; width: 100%; margin-top: 4px; padding: 6px 8px; border: 2px solid #f0b6ca; border-radius: 10px; background: #fff; color: inherit; font: inherit; }

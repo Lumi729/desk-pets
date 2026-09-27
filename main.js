@@ -68,6 +68,8 @@ const settings = {
   pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
   guideSeen: false,               // 新手引导看过 / 跳过了没有
   diaryTime: '22:00',             // 每天几点写日记
+  diaryWriter: '哥哥狗狗',         // 谁来写日记
+  nickname: '千千',                // 宠物们怎么称呼你（联网时也用这个名字）
   firstDay: '',                   // 第一次打开的日子（算在一起多少天）
 };
 
@@ -86,6 +88,16 @@ function renameOldPets(saved) {
   }
 }
 
+// 改称呼 / 写日记的宠物（小设置和新手引导都用）
+function setProfile({ nickname, diaryWriter } = {}) {
+  const name = cleanName(nickname);
+  if (name && name !== settings.nickname) {
+    settings.nickname = name;
+    settings.online.name = name; // 联网时对方看到的名字
+    send('nickname', name);
+  }
+  if (PETS.includes(diaryWriter)) settings.diaryWriter = diaryWriter;
+}
 const validTime = text => /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(text || ''));
 
 function loadSettings() {
@@ -104,6 +116,8 @@ function loadSettings() {
     settings.location = normalizeLocation(saved.location);
     settings.guideSeen = saved.guideSeen === true;
     if (validTime(saved.diaryTime)) settings.diaryTime = saved.diaryTime;
+    if (PETS.includes(saved.diaryWriter)) settings.diaryWriter = saved.diaryWriter;
+    settings.nickname = cleanName(saved.nickname) || cleanName(saved.online?.name) || '千千'; // 以前只有联网名字，就用它
     if (/^\d{4}-\d\d-\d\d$/.test(saved.firstDay || '')) settings.firstDay = saved.firstDay;
     else {
       // 以前的版本没记：用设置文件是哪天建的
@@ -159,7 +173,7 @@ function loadAssets() {
     combos[key] = combos[key] || {};
     combos[key][kind] = readGif(path.join(comboDir, file));
   }
-  return { focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
+  return { nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -368,7 +382,7 @@ let moreWindow = null;
 function openMoreSettings() {
   if (moreWindow) { moreWindow.show(); moreWindow.focus(); return; }
   moreWindow = new BrowserWindow({
-    width: 380, height: 740, useContentSize: true, resizable: false, minimizable: false, maximizable: false,
+    width: 380, height: Math.min(920, screen.getPrimaryDisplay().workAreaSize.height - 60), useContentSize: true, resizable: false, minimizable: false, maximizable: false,
     alwaysOnTop: true, autoHideMenuBar: true, title: '小设置', icon: trayImage(settings.trayIcon),
     webPreferences: { preload: path.join(__dirname, 'renderer', 'more-preload.js'), contextIsolation: true, sandbox: true },
   });
@@ -376,7 +390,7 @@ function openMoreSettings() {
   moreWindow.loadFile(path.join(__dirname, 'renderer', 'more.html'));
   moreWindow.on('closed', () => { moreWindow = null; });
 }
-ipcMain.handle('more-get', () => ({ pets: PETS, birthdays: settings.birthdays, pomodoro: settings.pomodoro, diaryTime: settings.diaryTime }));
+ipcMain.handle('more-get', () => ({ pets: PETS, birthdays: settings.birthdays, pomodoro: settings.pomodoro, diaryTime: settings.diaryTime, nickname: settings.nickname, diaryWriter: settings.diaryWriter }));
 ipcMain.handle('more-save', (_event, next) => {
   settings.birthdays = {};
   for (const name of PETS) { const md = normalizeBirthday(next?.birthdays?.[name]); if (md) settings.birthdays[name] = md; }
@@ -385,6 +399,7 @@ ipcMain.handle('more-save', (_event, next) => {
     if (n >= 1 && n <= 180) settings.pomodoro[key] = Math.round(n);
   }
   if (validTime(next?.diaryTime)) settings.diaryTime = next.diaryTime;
+  setProfile(next);
   saveSettings();
   sendToday(true);
   refreshTray();
@@ -425,12 +440,13 @@ function openGuide() {
   guideWindow.on('closed', () => { guideWindow = null; if (!settings.guideSeen) { settings.guideSeen = true; saveSettings(); } });
 }
 ipcMain.handle('guide-get', () => ({
-  pets: PETS, shown: settings.pets, size: settings.size, sizes: SIZES,
+  pets: PETS, shown: settings.pets, size: settings.size, sizes: SIZES, nickname: settings.nickname, diaryWriter: settings.diaryWriter,
   regions: REGIONS, location: settings.location || DEFAULT_LOCATION, place: placeName(),
   birthdays: settings.birthdays, pomodoro: settings.pomodoro,
   online: { enabled: settings.online.enabled, hasCode: settings.online.code.trim().length >= 4 },
 }));
 ipcMain.on('guide-show-pet', (_event, name, on) => { if (PETS.includes(name)) setPetShown(name, !!on); });
+ipcMain.handle('guide-profile', (_event, next) => { setProfile(next); saveSettings(); return { nickname: settings.nickname, diaryWriter: settings.diaryWriter }; });
 ipcMain.on('guide-size', (_event, size) => { if (SIZES.includes(size)) setSize(size); });
 ipcMain.handle('guide-place', (_event, place) => {
   const location = normalizeLocation(place);
@@ -524,11 +540,11 @@ function diaryRecord(event, value) {
   saveDiary();
 }
 ipcMain.on('diary-event', (_event, type) => { if (['pets', 'clicks', 'hugs', 'stacks'].includes(type)) diaryRecord(type); });
-const diaryName = () => settings.online.name || '千千';
+const diaryName = () => settings.nickname;
 function diaryText(key) {
   const day = diaryData()[key];
-  if (key === Diary.dayKey()) return Diary.composeDiary(day, diaryName()); // 今天的随时按最新的次数写
-  return day?.text || Diary.composeDiary(day, diaryName());
+  if (key === Diary.dayKey() && !day?.written) return Diary.composeDiary(day, diaryName(), settings.diaryWriter); // 还没写：按现在的次数先看看
+  return day?.text || Diary.composeDiary(day, diaryName(), settings.diaryWriter);
 }
 // 每天到点（默认晚上 10 点）哥哥狗狗写日记，写好弹出日记卡片
 function checkDiary() {
@@ -540,11 +556,26 @@ function checkDiary() {
   const day = diaryData()[key] || (diaryData()[key] = Diary.emptyDay());
   if (day.written) return;
   day.written = true;
-  day.text = Diary.composeDiary(day, diaryName());
+  day.text = Diary.composeDiary(day, diaryName(), settings.diaryWriter);
   saveDiary(true);
-  send('diary-write');
-  setTimeout(() => openDiary(key), 3500);
+  writeDiaryNow(key);
 }
+// 叫选好的宠物写日记；它没显示就让屏幕上的另一只代写（页面告诉我们是谁写的）
+let diaryReply = null;
+function writeDiaryNow(key, save = true) {
+  send('diary-write', settings.diaryWriter);
+  const done = writer => {
+    diaryReply = null;
+    if (save && writer && writer !== settings.diaryWriter) {
+      const day = diaryData()[key];
+      if (day) { day.text = Diary.composeDiary(day, diaryName(), writer, settings.diaryWriter); saveDiary(true); }
+    }
+    setTimeout(() => openDiary(key), 3500);
+  };
+  const timer = setTimeout(() => done(null), 1500);
+  diaryReply = writer => { clearTimeout(timer); done(writer); };
+}
+ipcMain.on('diary-writer', (_event, writer) => diaryReply?.(PETS.includes(writer) ? writer : null));
 let diaryWindow = null;
 let diaryShowKey = '';
 function openDiary(key = Diary.dayKey()) {
@@ -725,13 +756,13 @@ function openOnlineSettings() {
   onlineWindow.on('closed', () => { onlineWindow = null; });
 }
 
-ipcMain.handle('online-get', () => ({ ...settings.online, defaultServer: DEFAULT_SERVER }));
+ipcMain.handle('online-get', () => ({ ...settings.online, name: settings.nickname, defaultServer: DEFAULT_SERVER }));
 ipcMain.handle('online-random-code', () => randomPairCode());
 ipcMain.on('copy-text', (_event, text) => clipboard.writeText(String(text).slice(0, 200)));
 ipcMain.handle('online-save', (_event, next) => {
   settings.online = {
     enabled: true,
-    name: cleanName(next?.name) || '千千',
+    name: settings.nickname,
     code: String(next?.code ?? '').trim().slice(0, 64),
     server: String(next?.server ?? '').trim().slice(0, 300),
   };
@@ -747,14 +778,14 @@ ipcMain.on('pet-touched', () => {
   if (showcaseOn) return;
   const now = Date.now();
   if (now - lastPetSent < 2000) return;
-  if (online.send('pet', settings.online.name)) lastPetSent = now;
+  if (online.send('pet', settings.nickname)) lastPetSent = now;
 });
 
 // ---- 串门：只转发「串门开始 / 串门结束」和宠物名、自己的名字 ----
 let visitState = { away: [], visitors: [] };
 ipcMain.on('visit-send', (_event, { type, pet } = {}) => {
   if (showcaseOn) return;
-  if ((type === 'visit-start' || type === 'visit-end') && PETS.includes(pet)) online.send(type, settings.online.name, pet);
+  if ((type === 'visit-start' || type === 'visit-end') && PETS.includes(pet)) online.send(type, settings.nickname, pet);
 });
 ipcMain.on('visit-state', (_event, next) => {
   visitState = { away: (next?.away || []).filter(n => PETS.includes(n)), visitors: (next?.visitors || []).filter(n => PETS.includes(n)) };
@@ -773,7 +804,7 @@ async function runRelayCheck() {
 }
 
 function pokePeer() {
-  online.send('poke', settings.online.name);
+  online.send('poke', settings.nickname);
 }
 
 // ---- 自动更新（electron-updater，从 GitHub Releases 下载） ----
@@ -990,7 +1021,7 @@ function buildMenu(petName = null) {
         { label: '灰鸮g老师：旁边的宠物接住眼镜', click: () => sendTest('g-catch') },
         { label: '两个眼镜交换', click: () => sendTest('swap') },
         { label: '哥哥狗狗修 bug（不会真的记错误）', click: () => sendTest('bugfix') },
-        { label: '哥哥狗狗写日记', click: () => { send('diary-write'); setTimeout(() => openDiary(), 3500); } },
+        { label: '写日记（选好的宠物来写）', click: () => writeDiaryNow(Diary.dayKey(), false) },
         { label: '纪念日', click: () => sendTest('anniversary', togetherDays()) },
         { label: '灰鸮g老师：看书睡着被围观', click: () => sendTest('g-watch') },
         { label: '灰鸮g老师：批改作业（书里有书签就是书签版）', click: () => sendTest('g-grading') },

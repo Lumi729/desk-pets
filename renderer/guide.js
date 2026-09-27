@@ -31,12 +31,37 @@ function region(select, names, chosen) {
 }
 
 const STEPS = [
-  () => [
-    el('div', { className: 'big', textContent: '👋' }),
-    el('h1', { textContent: '欢迎来到梨间雪桌宠！' }),
-    el('p', { textContent: '这些小家伙以后就住在你的桌面上啦，先认识一下吧～' }),
-    el('div', { className: 'pets' }, ...data.pets.map(name => el('div', { className: 'pet-card' }, icon(name), el('b', { textContent: name }), el('span', { textContent: INTROS[name] || '' })))),
-  ],
+  () => {
+    const nameInput = el('input', { maxLength: 20, value: data.nickname, placeholder: '千千' });
+    const saved = el('span', { className: 'saved' });
+    const saveProfile = async next => {
+      const result = await window.guideApi.profile(next);
+      data.nickname = result.nickname;
+      data.diaryWriter = result.diaryWriter;
+    };
+    nameInput.addEventListener('change', async () => {
+      if (!nameInput.value.trim()) { nameInput.value = data.nickname; return; }
+      await saveProfile({ nickname: nameInput.value });
+      nameInput.value = data.nickname;
+      saved.textContent = `好哒，以后就叫你「${data.nickname}」啦 ♡`;
+    });
+    const cards = data.pets.map(name => {
+      const card = el('div', { className: `pet-card pick ${name === data.diaryWriter ? 'on' : ''}`, title: '点一下选它来写日记' }, icon(name), el('b', { textContent: name }), el('span', { textContent: INTROS[name] || '' }));
+      card.addEventListener('click', async () => {
+        await saveProfile({ diaryWriter: name });
+        for (const c of cards) c.classList.toggle('on', c === card);
+      });
+      return card;
+    });
+    return [
+      el('h1', { textContent: '👋 欢迎来到梨间雪桌宠！' }),
+      el('p', { textContent: '这些小家伙以后就住在你的桌面上啦～先告诉我们，该怎么称呼你呀？' }),
+      el('label', {}, '怎么称呼你', nameInput),
+      saved,
+      el('p', { textContent: '每天晚上会有一只写小日记给你看，选谁来写呢？（点一只）' }),
+      el('div', { className: 'pets' }, ...cards),
+    ];
+  },
   () => {
     const cards = data.pets.map(name => {
       const card = el('div', { className: `pet-card pick ${data.shown[name] ? 'on' : 'off'}`, title: '点一下显示 / 藏起来' }, icon(name), el('b', { textContent: name }));
@@ -102,8 +127,8 @@ const STEPS = [
     });
     return [
       demo('待机_雨天', '待机_下雪', '待机_炎热', '待机_降温', '待机_晴天'),
-      el('h1', { textContent: '你住在哪里呀？' }),
-      el('p', { textContent: '宠物们会看你那里的天气换装扮：下雨撑伞、下雪、好热、好冷……' }),
+      el('h1', { textContent: `${data.nickname}住在哪里呀？` }),
+      el('p', { textContent: `宠物们会看${data.nickname}那里的天气换装扮：下雨撑伞、下雪、好热、好冷……` }),
       el('div', { className: 'region' }, el('label', {}, '省', province), el('label', {}, '市', city), el('label', {}, '区县', county)),
       el('div', { className: 'row left' }, save),
       el('p', {}, '现在用的：', now),
@@ -135,8 +160,8 @@ const STEPS = [
     return [
       demo('专注', '开心蹦蹦'),
       el('h1', { textContent: '番茄钟专注模式' }),
-      el('p', { textContent: `右键 →「开始专注」，宠物们会安安静静陪你专注 ${data.pomodoro.focus} 分钟，g老师还会在旁边看书。` }),
-      el('p', { textContent: `时间到了大家会叫你休息 ${data.pomodoro.rest} 分钟，休息好了点一下就能接着专注～` }),
+      el('p', { textContent: `右键 →「开始专注」，宠物们会安安静静陪${data.nickname}专注 ${data.pomodoro.focus} 分钟，g老师还会在旁边看书。` }),
+      el('p', { textContent: `时间到了大家会叫${data.nickname}休息 ${data.pomodoro.rest} 分钟，休息好了点一下就能接着专注～` }),
       el('div', { className: 'row left' }, more),
     ];
   },
@@ -147,9 +172,10 @@ const STEPS = [
       demo('打招呼', '爱心眼'),
       el('h1', { textContent: '和朋友连在一起' }),
       el('ol', {},
-        el('li', { textContent: '右键 →「联网」→「联网设置」，写上你的名字' }),
+        el('li', { textContent: '右键 →「联网」→「联网设置」' }),
         el('li', { textContent: '点「随机生成配对码」，再点「复制」发给朋友' }),
         el('li', { textContent: '朋友填上同一个配对码，两边都点「保存并连接」就好啦' })),
+      el('p', { textContent: `朋友那边看到的名字就是「${data.nickname}」。` }),
       el('p', { textContent: '连上以后，摸摸自己的宠物朋友那边会收到，还能戳一戳对方，宠物偶尔会跑去对方家串门哦～' }),
       el('div', { className: 'row left' }, open),
       el('div', { className: 'tip', textContent: data.online.enabled ? '你已经连上啦 ♡' : '不想联网也完全没问题，所有东西都只在你电脑上。' }),
@@ -168,7 +194,7 @@ const STEPS = [
       demo('跳舞', '打招呼', '爱心眼'),
       el('h1', { textContent: '准备好啦！' }),
       el('p', { textContent: '想再看一遍，可以点托盘里的「新手引导」；' }),
-      el('p', { textContent: '想看所有效果，可以点「功能展示」，宠物们会挨个表演给你看～' }),
+      el('p', { textContent: `想看所有效果，可以点「功能展示」，宠物们会挨个表演给${data.nickname}看～` }),
       el('div', { className: 'row left' }, show),
     ];
   },

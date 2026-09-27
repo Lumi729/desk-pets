@@ -11,6 +11,9 @@ window.moreApi.get().then(settings => {
   field('focus').value = settings.pomodoro.focus;
   field('rest').value = settings.pomodoro.rest;
   field('diaryTime').value = settings.diaryTime;
+  field('nickname').value = settings.nickname;
+  field('diaryWriter').replaceChildren(...settings.pets.map(name => new Option(name, name)));
+  field('diaryWriter').value = settings.diaryWriter;
   for (const name of pets) {
     const row = document.createElement('label');
     row.className = 'birthday';
@@ -38,5 +41,7 @@ field('form').addEventListener('submit', event => {
     birthdays,
     pomodoro: { focus: Number(field('focus').value), rest: Number(field('rest').value) },
     diaryTime: field('diaryTime').value,
+    nickname: field('nickname').value.trim(),
+    diaryWriter: field('diaryWriter').value,
   });
 });
