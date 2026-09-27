@@ -8,7 +8,8 @@ const { createTypingDetector } = require('./lib/typing');
 const { parseComboFile } = require('./renderer/combos');
 const Teases = require('./renderer/teases');
 const { festivalOn, birthdaysOn, normalizeBirthday } = require('./lib/calendar');
-const { weatherIdle, searchPlaces, fetchWeather, WEATHER_IDLES } = require('./lib/weather');
+const { weatherIdle, fetchWeather, WEATHER_IDLES } = require('./lib/weather');
+const { REGIONS, DEFAULT_LOCATION, normalizeLocation, locationLabel } = require('./lib/regions');
 const { pixelTrayImage } = require('./lib/pixel-icon');
 const { autoUpdater } = require('electron-updater');
 const { OnlineLink, cleanName, randomPairCode, DEFAULT_SERVER } = require('./lib/online');
@@ -52,8 +53,7 @@ const settings = {
   trayIcon: '千千猫猫',
   features: Object.fromEntries(FEATURES.map(f => [f.key, !f.off])),
   online: { enabled: false, name: '千千', code: '', server: '' },
-  city: '长沙',                   // 还没选过地点时，用这个名字搜第一个结果
-  location: null,                 // 选好的天气地点 { name, label, latitude, longitude }，只存在本机
+  location: null,                 // 选好的天气地点（区县或手动经纬度），只存在本机；null = 湖南省长沙市
   visitPets: Object.fromEntries(PETS.map(name => [name, true])), // 哪几只可以去串门
   birthdays: {},                  // 宠物名 → 「MM-DD」
   pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
@@ -71,7 +71,6 @@ function loadSettings() {
     if (TRAY_ICONS.includes(saved.trayIcon)) settings.trayIcon = saved.trayIcon;
     if (SIZES.includes(saved.size)) settings.size = saved.size;
     if (saved.visitPets && typeof saved.visitPets === 'object') for (const name of PETS) if (typeof saved.visitPets[name] === 'boolean') settings.visitPets[name] = saved.visitPets[name];
-    if (typeof saved.city === 'string' && saved.city.trim()) settings.city = saved.city.trim().slice(0, 40);
     settings.location = normalizeLocation(saved.location);
     if (saved.birthdays && typeof saved.birthdays === 'object') {
       for (const name of PETS) { const md = normalizeBirthday(saved.birthdays[name]); if (md) settings.birthdays[name] = md; }
@@ -176,14 +175,6 @@ function setFeature(key, on) {
 // ---- 天气（Open-Meteo，每 30 分钟查一次） ----
 // 地点的经纬度只存在本机设置里，只用来查天气，不发给联网服务器，也不发给朋友
 let weather = { data: null, error: '', idle: null };
-function normalizeLocation(place) {
-  if (!place || typeof place !== 'object') return null;
-  const latitude = Number(place.latitude), longitude = Number(place.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
-  const name = String(place.name || '').trim().slice(0, 40) || '选好的地点';
-  const label = String(place.label || name).trim().slice(0, 80);
-  return { name, label, latitude, longitude };
-}
 function setWeatherIdle(idle) {
   if (weather.idle === idle) return;
   weather.idle = idle;
@@ -196,14 +187,7 @@ function updateWeatherIdle() {
 async function runWeather() {
   if (!settings.features.weather) return;
   try {
-    if (!settings.location) {
-      // 以前只存了城市名：搜一下，用第一个结果
-      const [first] = await searchPlaces(settings.city);
-      if (!first) throw new Error('找不到地点');
-      settings.location = normalizeLocation(first);
-      saveSettings();
-    }
-    weather.data = await fetchWeather(settings.location);
+    weather.data = await fetchWeather(settings.location || DEFAULT_LOCATION);
     weather.error = '';
   } catch (error) {
     weather.data = null;
@@ -213,7 +197,7 @@ async function runWeather() {
   refreshTray();
 }
 function placeName() {
-  return settings.location?.name || settings.city;
+  return locationLabel(settings.location);
 }
 function weatherLabel() {
   return `天气地点：${placeName()}…`;
@@ -232,7 +216,7 @@ let placeWindow = null;
 function openPlaceWindow() {
   if (placeWindow) { placeWindow.show(); placeWindow.focus(); return; }
   placeWindow = new BrowserWindow({
-    width: 420, height: 480, resizable: false, minimizable: false, maximizable: false,
+    width: 420, height: 560, resizable: false, minimizable: false, maximizable: false,
     alwaysOnTop: true, autoHideMenuBar: true, title: '天气地点', icon: trayImage(settings.trayIcon),
     webPreferences: { preload: path.join(__dirname, 'renderer', 'place-preload.js'), contextIsolation: true, sandbox: true },
   });
@@ -240,17 +224,11 @@ function openPlaceWindow() {
   placeWindow.loadFile(path.join(__dirname, 'renderer', 'place.html'));
   placeWindow.on('closed', () => { placeWindow = null; });
 }
-ipcMain.handle('place-get', () => ({ current: settings.location?.label || settings.city }));
-ipcMain.handle('place-search', async (_event, text) => {
-  const query = String(text || '').trim().slice(0, 40);
-  if (!query) return [];
-  return searchPlaces(query);
-});
+ipcMain.handle('place-get', () => ({ regions: REGIONS, current: settings.location || DEFAULT_LOCATION, label: placeName() }));
 ipcMain.handle('place-choose', (_event, place) => {
   const location = normalizeLocation(place);
   if (!location) return false;
   settings.location = location;
-  settings.city = location.name;
   saveSettings();
   weather.data = null;
   weather.error = '';

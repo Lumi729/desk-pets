@@ -10,15 +10,24 @@
   <form id="form">
     <h1>天气地点 ♡</h1>
     <small>现在用的：<span id="current"></span></small>
-    <label>地址<input id="query" maxlength="40" required placeholder="比如 长沙市岳麓区"></label>
-    <small>可以精确到区县。地点只存在这台电脑上，只用来查天气，不会发给朋友。</small>
+    <label>省<select id="province"></select></label>
+    <label>市<select id="city"></select></label>
+    <label>区县<select id="county"></select></label>
+    <details id="manual">
+      <summary>手动输入经纬度</summary>
+      <div class="row left">
+        <label class="inline">纬度<input id="lat" type="number" step="any" min="-90" max="90" placeholder="28.23"></label>
+        <label class="inline">经度<input id="lon" type="number" step="any" min="-180" max="180" placeholder="112.93"></label>
+      </div>
+      <small>打开这里、填好经纬度再保存，就用这个位置查天气。</small>
+    </details>
+    <small>地点只存在这台电脑上，只用来查天气，不会发给朋友。</small>
+    <p id="error" role="alert"></p>
     <div class="row">
       <button type="button" id="cancel">取消</button>
-      <button type="submit" id="search">搜索</button>
+      <button type="submit">保存</button>
     </div>
   </form>
-  <p id="error" role="alert"></p>
-  <div id="results"></div>
   <script src="place.js"></script>
 </body>
 </html>

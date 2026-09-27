@@ -22,6 +22,6 @@ label.inline input { width: 70px; margin: 0; }
 .birthday { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-weight: 600; }
 .birthday span { width: 72px; }
 .birthday input { margin: 0; }
-#results { display: flex; flex-direction: column; gap: 6px; }
-button.place { text-align: left; }
-button.place:hover { border-color: #e58aad; background: #fff0f6; }
+select { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border: 2px solid #f0b6ca; border-radius: 10px; background: #fff; color: inherit; font: inherit; }
+select:focus { outline: none; border-color: #e58aad; }
+label.inline input[type=number] { width: 110px; }

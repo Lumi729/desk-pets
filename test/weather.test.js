@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { weatherIdle, isRain, queriesFor, searchPlaces, fetchWeather } = require('../lib/weather');
+const { weatherIdle, isRain, fetchWeather } = require('../lib/weather');
 
 const idle = (code, temperature = 20, hour = 12) => weatherIdle({ code, temperature }, hour);
 
@@ -38,33 +38,6 @@ test('unknown weather uses the normal idle', () => {
   assert.strictEqual(weatherIdle(null, 12), null);
   assert.strictEqual(weatherIdle({ code: null, temperature: 5 }, 12), null);
   assert.strictEqual(idle(42), null);
-});
-
-test('splits a full address into shorter searches', () => {
-  assert.deepStrictEqual(queriesFor('长沙市岳麓区'), ['长沙市岳麓区', '岳麓区', '岳麓', '长沙']);
-  assert.deepStrictEqual(queriesFor('湖南省长沙市'), ['湖南省长沙市', '长沙市', '长沙', '湖南']);
-  assert.deepStrictEqual(queriesFor('广州市天河区'), ['广州市天河区', '天河区', '天河', '广州']);
-  assert.deepStrictEqual(queriesFor('长沙'), ['长沙']);
-});
-
-test('lists candidate places, the ones matching the rest of the address first', async () => {
-  const urls = [];
-  const fake = async url => {
-    urls.push(decodeURIComponent(url));
-    const name = decodeURIComponent(url.match(/name=([^&]*)/)[1]);
-    const results = {
-      岳麓区: [{ id: 1, name: '岳麓区', admin2: '长沙市', admin1: '湖南省', country: '中国', latitude: 28.23, longitude: 112.93 }],
-      岳麓: [
-        { id: 2, name: '岳麓', admin1: '某省', country: '中国', latitude: 30, longitude: 110 },
-        { id: 1, name: '岳麓区', admin2: '长沙市', admin1: '湖南省', country: '中国', latitude: 28.23, longitude: 112.93 },
-      ],
-    }[name];
-    return { json: async () => (results ? { results } : {}) };
-  };
-  const places = await searchPlaces('长沙市岳麓区', fake);
-  assert.deepStrictEqual(places.map(p => p.name), ['岳麓区', '岳麓']);
-  assert.deepStrictEqual(places[0], { name: '岳麓区', label: '岳麓区 · 长沙市 · 湖南省 · 中国', latitude: 28.23, longitude: 112.93 });
-  assert.match(urls[0], /name=长沙市岳麓区/);
 });
 
 test('asks for the weather at the saved coordinates', async () => {
