@@ -141,7 +141,8 @@ test('端口占用会明确失败，释放后可以再开', async t => {
   assert.equal(await second.start(port), port);
 });
 
-function runHook(event, port, input, { timeout = 10000, legacyEncoding = false } = {}) {
+// 打包机上第一次启动 PowerShell 有时要十几秒，给足时间，免得还没跑完就被掐掉
+function runHook(event, port, input, { timeout = 30000, legacyEncoding = false } = {}) {
   return new Promise((resolve, reject) => {
     let cmd = Hooks.hookCommand(event, port);
     if (legacyEncoding) {
@@ -158,7 +159,7 @@ function runHook(event, port, input, { timeout = 10000, legacyEncoding = false }
     child.stdin.end(input);
   });
 }
-test('Windows 真正执行 hook：只转发状态，聊天和工具内容被丢弃；桌宠没开也静默成功', { skip: process.platform !== 'win32', timeout: 40000 }, async t => {
+test('Windows 真正执行 hook：只转发状态，聊天和工具内容被丢弃；桌宠没开也静默成功', { skip: process.platform !== 'win32', timeout: 120000 }, async t => {
   const received = [];
   const activity = createCodexActivity(() => {});
   const server = http.createServer((req, res) => {
@@ -191,7 +192,7 @@ test('Windows 真正执行 hook：只转发状态，聊天和工具内容被丢�
   assert.deepEqual(await runHook('Stop', port, input), silent);
 });
 
-test('Windows 中文回复、引号、换行和表情不会吞掉收工信号（旧中文代码页）', { skip: process.platform !== 'win32', timeout: 30000 }, async t => {
+test('Windows 中文回复、引号、换行和表情不会吞掉收工信号（旧中文代码页）', { skip: process.platform !== 'win32', timeout: 90000 }, async t => {
   const changes = [], events = [];
   const link = createCodexLink({ onChange: e => changes.push(e), onEvent: e => events.push(e) });
   t.after(() => link.stop());
