@@ -82,6 +82,7 @@ const settings = {
   pomodoro: { focus: 25, rest: 5 }, // 番茄钟：专注几分钟、休息几分钟
   guideSeen: false,               // 新手引导看过 / 跳过了没有
   codexLink: false,               // 联动 Codex（灰鸮g老师）
+  codexPet: '灰鸮g老师',           // 谁陪 Codex 干活
   claudeLink: false,              // 联动 Claude Code
   claudePet: '哥哥狗狗',           // 谁陪 Claude Code 干活
   nest: null,                     // 小窝放在哪：{ si: 第几块屏幕, offset: 离屏幕左边多远 }
@@ -140,6 +141,7 @@ function loadSettings() {
     settings.claudeLink = saved.claudeLink === true;
     if (PETS.includes(saved.claudePet)) settings.claudePet = saved.claudePet;
     settings.codexLink = saved.codexLink === true;
+    if (PETS.includes(saved.codexPet)) settings.codexPet = saved.codexPet;
     if (Number.isFinite(saved.nest?.offset)) settings.nest = { si: Number.isInteger(saved.nest.si) ? saved.nest.si : 0, offset: saved.nest.offset };
     if (validTime(saved.diaryTime)) settings.diaryTime = saved.diaryTime;
     if (PETS.includes(saved.diaryWriter)) settings.diaryWriter = saved.diaryWriter;
@@ -201,7 +203,7 @@ function loadAssets() {
     combos[key][kind] = readGif(path.join(comboDir, file));
     comboFiles[key] = { ...comboFiles[key], [kind]: path.join(comboDir, file) };
   }
-  return { claudePet: settings.claudePet, claudeWorking: claudeActivity.working, codexWorking: codexLink.activity.working, nest: settings.nest, nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
+  return { codexPet: settings.codexPet, claudePet: settings.claudePet, claudeWorking: claudeActivity.working, codexWorking: codexLink.activity.working, nest: settings.nest, nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -819,9 +821,16 @@ function editCodexSettings(change) {
   try { fs.writeFileSync(temp, JSON.stringify(next, null, 2) + '\n'); fs.renameSync(temp, file); }
   finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
 }
+function setCodexPet(name) {
+  if (!PETS.includes(name)) return;
+  settings.codexPet = name;
+  saveSettings();
+  send('codex-pet', name);
+  refreshTray();
+}
 async function codexHelp() {
   const result = await dialog.showMessageBox({
-    type: 'info', title: '让灰鸮跟着 g老师开工',
+    type: 'info', title: '让宠物跟着 g老师开工',
     message: '打开联动后，还要在 Codex 里审核并信任「灰鸮桌宠联动」hooks。',
     detail: '命令只把开工、等待、收工等状态送给这台电脑上的桌宠，不发送聊天内容。\n\n可在 Codex 命令行输入 /hooks，找到「灰鸮桌宠联动」并审核启用；之后在 Codex 新开本地聊天。看到菜单「最近收到的」有记录，就接上了。\n\n若当前 Codex 版本没有 hooks 管理入口，请先更新到支持 hooks 的版本。普通 ChatGPT 网页和云端任务不会触发。',
     buttons: ['知道啦', '查看官方说明'], defaultId: 0,
@@ -845,7 +854,7 @@ async function setCodexLink(on, startup = false) {
     settings.codexLink = on;
     saveSettings();
     if (!startup) {
-      send('say-pet', { name: '灰鸮g老师', text: on ? '准备好啦，去 Codex 审核启用联动后，我就陪着敲～' : '不联动 Codex 啦' });
+      send('say-pet', { name: settings.codexPet, text: on ? '准备好啦，去 Codex 审核启用联动后，我就陪着敲～' : '不联动 Codex 啦' });
     }
     // 更新过命令后旧的信任不再适用，启动升级时也要告诉用户去审核。
     if (on && (!startup || hooksUpdated)) void codexHelp();
@@ -1359,7 +1368,7 @@ function menuTemplate(petName = null, expression = null) {
         { label: '哥哥狗狗：扶起摔倒的宠物', click: () => sendTest('dog-help') },
         { label: '哥哥狗狗：举牌测试通过', click: () => sendTest('dog-sign') },
         { label: '哥哥狗狗：给千千猫猫盖被子', click: () => sendTest('dog-blanket') },
-        { label: '灰鸮g老师：联动 Codex', submenu: [['working', '开工敲键盘'], ['waiting', '等你回应'], ['done', '收工啦']].map(([value, label]) => ({ label, click: () => sendTest('codex', value) })) },
+        { label: `${settings.codexPet}：联动 Codex`, submenu: [['working', '开工敲键盘'], ['waiting', '等你回应'], ['done', '收工啦']].map(([value, label]) => ({ label, click: () => sendTest('codex', value) })) },
         { label: '灰鸮g老师：看书（拖别的宠物过去一起看）', click: () => sendTest('g-read') },
         { label: '灰鸮g老师：看书打瞌睡', click: () => sendTest('g-doze') },
         { label: '灰鸮g老师：摔一跤', click: () => sendTest('g-fall') },
@@ -1387,13 +1396,18 @@ function menuTemplate(petName = null, expression = null) {
     {
       label: '联动 Codex（g老师）',
       submenu: [
-        { label: '让灰鸮跟着 g老师开工', type: 'checkbox', checked: settings.codexLink, enabled: !changingCodexLink, click: item => setCodexLink(item.checked) },
+        { label: `让${settings.codexPet}跟着 g老师开工`, type: 'checkbox', checked: settings.codexLink, enabled: !changingCodexLink, click: item => setCodexLink(item.checked) },
+        {
+          label: `谁陪着干活：${settings.codexPet}`,
+          submenu: PETS.map(name => ({ label: name, type: 'radio', checked: settings.codexPet === name, click: () => setCodexPet(name) })),
+        },
+        { label: '选好的那只需要在「选择宠物」里放出来', enabled: false },
         { label: '第一次怎么接上？', click: codexHelp },
         { label: '仅本机 Codex；需要审核启用 hooks', enabled: false },
         ...(settings.codexLink ? [
           { type: 'separator' },
           { label: codexLink.activity.working ? '现在：g老师在干活' : codexRecent.length ? '现在：歇一歇，或等你回应' : '准备好了，等待 Codex 发来第一个状态', enabled: false },
-          { label: '灰鸮卡住了？让它停下来', click: () => { codexLink.activity.clear(); send('codex-work', false); refreshTray(); } },
+          { label: `${settings.codexPet}卡住了？让它停下来`, click: () => { codexLink.activity.clear(); send('codex-work', false); refreshTray(); } },
           { label: '最近收到的：', enabled: false },
           ...(codexRecent.length ? codexRecent.map(r => ({ label: '　' + r.at.toTimeString().slice(0, 8) + '  ' + r.event, enabled: false })) : [{ label: '　（还没有，请先在 Codex 审核启用 hooks）', enabled: false }]),
         ] : []),

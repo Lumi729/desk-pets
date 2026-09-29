@@ -93,6 +93,7 @@
   let blanketNight = '';           // 今晚盖过被子了没有
   let nickname = '千千';            // 宠物们怎么称呼你（设置里能改）
   let claudePetName = '哥哥狗狗'; // 谁陪 Claude Code 干活（右键菜单里选）
+  let codexPetName = '灰鸮g老师'; // 谁陪 Codex 干活（右键菜单里选）
   let claudeWorking = false;       // 这台电脑上的 Claude Code 正在干活
   let codexWorking = false;        // 这台电脑上的 Codex 正在干活
   // g老师的书里夹没夹书签（批改作业结束后夹上，下次批改作业时用掉）；关了再开也记得
@@ -1625,9 +1626,9 @@
       setAnim(cat, '睡觉');
       if (!checkBlanket(now, true)) hint('盖被子没成功，再试一次吧');
     } else if (type === 'codex') {
-      const g = byName(G);
-      if (!g || !freeForTest(g, now)) return hint('要先在「选择宠物」里勾上灰鸮g老师哦');
-      const anim = { working: '敲代码', waiting: '互动_扶眼镜1', done: '开心蹦蹦' }[value];
+      const g = byName(codexPetName);
+      if (!g || !freeForTest(g, now)) return hint(`先把${codexPetName}放出来，等它忙完再试哦`);
+      const anim = { working: '敲代码', waiting: codexWaitingAnim(g), done: '开心蹦蹦' }[value];
       if (anim) { playNamed(g, anim, now, 3000); say(g, { working: 'g老师开工，我也开工～（这是测试）', waiting: '千千，g老师在等你回应哦（这是测试）', done: '收工啦～（这是测试）' }[value], 4000); }
     } else if (type === 'g-read' || type === 'g-doze' || type === 'g-fall') {
       const g = byName(G);
@@ -1801,12 +1802,12 @@
   }
 
   const SHOWCASE_STEPS = [
-    ['灰鸮跟着 Codex 开工', async () => {
-      const [g] = scLineup([G]);
-      tell(g, '托盘打开「联动 Codex」，审核启用后，g老师干活我也敲键盘～', 7000);
+    ['选一只宠物陪 Codex 开工', async () => {
+      const [g] = scLineup([codexPetName]);
+      tell(g, '「联动 Codex」里可以选谁陪着干活，默认是灰鸮g老师～', 7000);
       scPlay(g, '敲代码', 3000); await scWait(3000);
-      tell(g, '等你回应时扶扶眼镜，收工就开心蹦一下', 5000);
-      scPlay(g, '互动_扶眼镜1', 1800); await scWait(1800);
+      tell(g, '等你回应时提醒一下，收工就开心蹦一下', 5000);
+      scPlay(g, codexWaitingAnim(g), 1800); await scWait(1800);
       scPlay(g, '开心蹦蹦', 1800); await scWait(1800);
     }],
     ['走路', async () => {
@@ -2449,42 +2450,62 @@
   }
 
   // ---- 联动 Codex：有一场聊天仍在开工就接着敲，不打断贴贴、摔倒、小窝和剧情 ----
-  const codexOwl = () => { const g = byName(G); return g && g.visible && !g.visitor && !showcase && !leaving ? g : null; };
+  // 两边可以选同一只；其中一边还在工作时，不让另一边的收工/等待抢走键盘。
+  const companionWorkState = pet => pet && !pet.visitor && (
+    codexWorking && pet.name === codexPetName ? 'codex' :
+    claudeWorking && pet.name === claudePetName ? 'claude' : null);
+  function releaseCompanion(pet, state) {
+    if (pet?.state !== state) return;
+    const next = companionWorkState(pet);
+    if (next) pet.state = next;
+    else goIdle(pet, performance.now());
+  }
+  const codexCompanion = () => { const g = byName(codexPetName); return g && g.visible && !g.visitor && !showcase && !leaving ? g : null; };
+  const codexWaitingAnim = pet => pet.clips['互动_扶眼镜1'] ? '互动_扶眼镜1' : '打招呼';
   const codexFree = g => g && !g.combo && !g.inScene && !g.inNest && !g.routine && !g.tucked && ['idle', 'walk', 'sleep', 'typing', 'reading', 'curious', 'codex'].includes(g.state);
+  function onCodexPet(name) {
+    const chosen = byName(name);
+    if (!chosen || chosen.visitor || name === codexPetName) return;
+    const old = byName(codexPetName);
+    codexPetName = name;
+    releaseCompanion(old, 'codex');
+  }
   function onCodexWork(on) {
     codexWorking = on;
-    const g = codexOwl();
-    if (!on && g?.state === 'codex') goIdle(g, performance.now());
+    if (!on) releaseCompanion(codexCompanion(), 'codex');
   }
   function onCodexDone() {
-    const g = codexOwl();
-    if (codexWorking || !codexFree(g)) return;
+    const g = codexCompanion();
+    if (companionWorkState(g) || !codexFree(g)) return;
     g.lastAttention = performance.now();
     playNamed(g, '开心蹦蹦', g.lastAttention, 0);
   }
   function onCodexWaiting({ stillWorking } = {}) {
-    const g = codexOwl();
+    const g = codexCompanion();
     if (!g) return;
-    if (!stillWorking && !codexWorking && codexFree(g)) { g.lastAttention = performance.now(); playNamed(g, '互动_扶眼镜1', g.lastAttention, 2000); }
+    if (!stillWorking && !companionWorkState(g) && codexFree(g)) { g.lastAttention = performance.now(); playNamed(g, codexWaitingAnim(g), g.lastAttention, 2000); }
     say(g.combo || g, nickname + '，g老师在等你回应哦', 6000);
   }
 
   // ---- 联动 Claude Code ----
   // 陪着干活的那只（默认哥哥狗狗，可以换）；没放出来就什么都不做
-  const claudeDog = () => { const dog = byName(claudePetName); return dog && dog.visible && !showcase && !leaving ? dog : null; };
+  const claudeDog = () => { const dog = byName(claudePetName); return dog && dog.visible && !dog.visitor && !showcase && !leaving ? dog : null; };
   function onClaudePet(name) {
+    const chosen = byName(name);
+    if (!chosen || chosen.visitor || name === claudePetName) return;
     const old = byName(claudePetName);
     claudePetName = name;
-    if (old && old.name !== name && old.state === 'claude') goIdle(old, performance.now());
+    releaseCompanion(old, 'claude');
   }
   function onClaudeWork(on) {
     claudeWorking = on;
     const dog = claudeDog();
-    if (!on && dog?.state === 'claude') goIdle(dog, performance.now());
+    if (!on) releaseCompanion(dog, 'claude');
   }
   // 干完一轮：举牌「测试通过」再开心蹦蹦；很短的一轮只蹦一下
   function onClaudeDone({ short } = {}) {
     const dog = claudeDog();
+    if (companionWorkState(dog)) return;
     if (!dog || dog.combo || dog.inNest || ['drag', 'fall', 'jump', 'hug'].includes(dog.state)) return;
     const now = performance.now();
     dog.lastAttention = now;
@@ -2494,6 +2515,7 @@
   // 这一轮因为 API 出错结束了（限流、额度用完……）：冒冷汗
   function onClaudeFail() {
     const dog = claudeDog();
+    if (companionWorkState(dog)) return;
     if (!dog || dog.combo || dog.inNest || ['drag', 'fall', 'jump', 'hug'].includes(dog.state)) return;
     const now = performance.now();
     dog.lastAttention = now;
@@ -2503,6 +2525,7 @@
   function onClaudeNotify() {
     const dog = claudeDog();
     if (!dog) return;
+    if (companionWorkState(dog)) return say(dog, `${nickname}，Claude Code 在等你哦`, 6000);
     if (dog.combo || dog.inNest || ['drag', 'fall', 'jump', 'hug'].includes(dog.state)) return say(dog.combo || dog, `${nickname}，Claude Code 在等你哦`, 6000); // 忙着的时候冒个气泡
     const now = performance.now();
     dog.lastAttention = now;
@@ -2545,7 +2568,7 @@
       pet.looking = false;
       setAnim(pet, '敲代码');
     }
-    if (codexWorking && pet.name === G && !pet.visitor && !showcase && !leaving && codexFree(pet) && pet.state !== 'codex' && pet.clips['敲代码']) {
+    if (codexWorking && pet.name === codexPetName && !pet.visitor && !showcase && !leaving && codexFree(pet) && pet.state !== 'codex' && pet.clips['敲代码']) {
       pet.state = 'codex'; pet.then = null; pet.looking = false;
       setAnim(pet, '敲代码');
     }
@@ -2656,11 +2679,11 @@
         break;
       case 'codex':
         pet.lastAttention = now;
-        if (!codexWorking) goIdle(pet, now);
+        if (!codexWorking || pet.name !== codexPetName) releaseCompanion(pet, 'codex');
         break;
       case 'claude':
         pet.lastAttention = now;
-        if (!claudeWorking) goIdle(pet, now);
+        if (!claudeWorking || pet.name !== claudePetName) releaseCompanion(pet, 'claude');
         break;
       case 'drowsy':
         pet.lastAttention = now; // 打完哈欠呆站着，等大家传完
@@ -2837,6 +2860,7 @@
     claudeWorking = !!data.claudeWorking;
     if (data.claudePet) claudePetName = data.claudePet;
     codexWorking = !!data.codexWorking;
+    if (byName(data.codexPet)) codexPetName = data.codexPet;
     peerOnline = !!data.peerOnline;
     for (const pet of pets) { pet.el.hidden = true; setAnim(pet, '待机'); }
     if (data.focusInfo?.on) onFocus(data.focusInfo);
@@ -2864,6 +2888,7 @@
     api.onTest(onTest);
     api.onGoodnight(goodnight);
     api.onCodexWork(onCodexWork);
+    api.onCodexPet(onCodexPet);
     api.onCodexDone(onCodexDone);
     api.onCodexWaiting(onCodexWaiting);
     api.onClaudeWork(onClaudeWork);

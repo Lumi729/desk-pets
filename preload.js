@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('petApi', {
   onGreet: fn => ipcRenderer.on('greet', () => fn()),
   onGoodnight: fn => ipcRenderer.on('goodnight', () => fn()),
   onCodexWork: fn => ipcRenderer.on('codex-work', (_event, on) => fn(!!on)),
+  onCodexPet: fn => ipcRenderer.on('codex-pet', (_event, name) => fn(name)),
   onCodexDone: fn => ipcRenderer.on('codex-done', (_event, info) => fn(info)),
   onCodexWaiting: fn => ipcRenderer.on('codex-waiting', (_event, info) => fn(info)),
   onClaudeWork: fn => ipcRenderer.on('claude-work', (_event, on) => fn(!!on)),
