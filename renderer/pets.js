@@ -130,8 +130,8 @@
 
   const rand = (a, b) => a + Math.random() * (b - a);
   const pick = list => list[Math.floor(Math.random() * list.length)];
-  const W = () => window.innerWidth;
-  const H = () => window.innerHeight;
+  const W = () => api.mirrorHost ? Math.max(...screens.map(s => s.x + s.w)) : window.innerWidth;
+  const H = () => api.mirrorHost ? Math.max(...screens.map(s => s.y + s.h)) : window.innerHeight;
 
   function makeClip(gif) {
     return { blob: new Blob([gif.bytes], { type: 'image/gif' }), gw: gif.width, gh: gif.height, duration: gif.duration };
@@ -322,7 +322,7 @@
     if (event.button !== 0) return;
     if (pet.state === 'hug' && !pet.combo) { pet.el.hidden = !pet.visible; goIdle(pet, performance.now()); } // 万一卡在贴贴里，点一下就恢复
     event.preventDefault();
-    pet.el.setPointerCapture(event.pointerId);
+    if (event.isTrusted) pet.el.setPointerCapture(event.pointerId);
     const rect = pet.el.getBoundingClientRect();
     pet.drag = { startX: event.clientX, startY: event.clientY, dx: event.clientX - (rect.left + rect.width / 2), dy: rect.bottom - event.clientY, moved: false };
     wake(pet, performance.now());
@@ -1592,7 +1592,16 @@
     if (showcase) return;
     const now = performance.now();
     const hint = text => { const pet = pets.find(p => p.visible); if (pet) say(pet.combo || pet, text, 5000); };
-    if (type === 'festival') {
+    if (type === 'screens') {
+      const list = pets.filter(p => p.visible && !p.visitor && !p.inScene && !p.inNest && !p.routine && freeForTest(p, now));
+      list.forEach((pet, i) => {
+        pet.si = i % screens.length;
+        const s = screens[pet.si];
+        pet.x = s.x + s.w * (0.25 + 0.5 * (Math.floor(i / screens.length) + 1) / (Math.ceil(list.length / screens.length) + 1));
+        pet.y = floorOf(pet); goIdle(pet, now);
+        say(pet, screens.length > 1 ? '我在这块屏幕啦，按住还能拖去另一块～' : '现在只有一块屏幕，接上外屏再试哦', 6000);
+      });
+    } else if (type === 'festival') {
       let any = false;
       for (const pet of pets) if (pet.clips[value] && freeForTest(pet, now)) { playNamed(pet, value, now, 4000); any = true; }
       if (!any) hint('要先让宠物显示出来哦');
@@ -1802,6 +1811,17 @@
   }
 
   const SHOWCASE_STEPS = [
+    ['窗口互动和多屏', async () => {
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, G]);
+      list.forEach((pet, i) => {
+        pet.si = i % screens.length; const s = screens[pet.si];
+        pet.x = s.x + s.w * (0.25 + i * 0.12); pet.y = floorOf(pet);
+        tell(pet, screens.length > 1 ? '可以分别住在不同屏幕，按住我就能跨屏拖动～' : '接上外屏后，可以把不同宠物拖去不同屏幕～', 6000);
+      });
+      await scWait(6000);
+      tell(list[0], 'Mac 的窗口互动需要你允许辅助功能权限；标题只在本机分类，不保存', 6000);
+      await scWait(6000);
+    }],
     ['选一只宠物陪 Codex 开工', async () => {
       const [g] = scLineup([codexPetName]);
       tell(g, '「联动 Codex」里可以选谁陪着干活，默认是灰鸮g老师～', 7000);
@@ -2230,7 +2250,7 @@
   // 拖动小窝（眼镜架跟着走）
   function onNestDown(event) {
     if (event.button !== 0) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    if (event.isTrusted) event.currentTarget.setPointerCapture(event.pointerId);
     nestDrag = { dx: event.clientX - nestX() };
   }
   function onNestMove(event) {

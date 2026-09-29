@@ -44,6 +44,7 @@
 
 ## macOS 适配
 - Mac 测试版：`npm run dist:mac` 生成 arm64 / x64 DMG，图标在 `build/mac-icon.png`；只有临时签名，未做 Developer ID 签名与公证，禁用自动安装更新，菜单打开发布页手动下载。不要声称已经公证或已经在两种芯片实机验证。
-- Mac 暂只用主屏，窗口检测相关开关禁用；菜单栏可打开控制面板与显示 / 隐藏。
+- Mac 由 `native/mac-foreground.swift` 只读辅助功能接口取前台窗口，授权只能由用户完成；`npm run build:mac-helper` 编译通用架构组件。只在活动分类开启时取标题，不能截屏、读按键、保存或上传标题。
+- Mac 多屏：`lib/mac-displays.js` 创建每屏显示窗口，隐藏透明主窗口唯一运行宠物逻辑；`renderer/mirror-host.js` 发送安全的场景节点与图片，各 `mirror.js` 只显示和回传坐标，禁止重复运行宠物 AI / 日记 / 联网。原生组件与真实双屏拖动仍需实机验证。
 - Codex 的 macOS hook 在 `lib/codex-posix.js`，只发白名单状态，使用应用自带 Electron 的 Node 模式；不得改用户审批和信任。Claude 使用系统 curl，安静退出。Windows 命令保留。
 - `.github/workflows/mac-build.yml` 在 Mac 上测试、启动真实窗口、构建两种 DMG，供发布流程复用；版本不变只留下 Actions 测试附件。下次新版本发布要等两种 DMG 和 Windows 安装包都成功才公开。

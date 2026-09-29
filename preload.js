@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('petApi', {
+  mirrorHost: process.platform === 'darwin',
+  mirrorFrame: frame => ipcRenderer.send('mirror-frame', frame),
+  onMirrorInput: fn => ipcRenderer.on('mirror-input', (_event, event) => fn(event)),
   load: () => ipcRenderer.invoke('load'),
   setIgnoreMouse: ignore => ipcRenderer.send('set-ignore', ignore),
   showMenu: (petName, expression) => ipcRenderer.send('menu', petName, expression),

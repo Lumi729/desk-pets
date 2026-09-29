@@ -1,7 +1,7 @@
 const { app, BrowserWindow, Menu, Notification, Tray, clipboard, dialog, globalShortcut, ipcMain, nativeImage, powerMonitor, screen, shell } = require('electron');
 const fs = require('node:fs');
 const IS_MAC = process.platform === 'darwin';
-const WINDOWS_FEATURES = ['activity', 'perch', 'fullscreen'];
+let macDisplays = null;
 const { spawn } = require('node:child_process');
 const os = require('node:os');
 const path = require('node:path');
@@ -253,7 +253,7 @@ function setAutoStart(on) {
 }
 
 function setFeature(key, on) {
-  if (IS_MAC && (WINDOWS_FEATURES.includes(key) || key === "update")) return;
+  if (IS_MAC && key === "update") return;
   settings.features[key] = on;
   saveSettings();
   send('features', settings.features);
@@ -943,7 +943,9 @@ const PERCH_STATUS = {
   high: '窗口：太靠屏幕顶上了（最大化了？），站不上去',
   none: '窗口：现在没有能站的窗口',
   failed: '窗口：读不到窗口位置（可能被安全软件拦了）',
-  unsupported: '窗口：只有 Windows 能用',
+  unsupported: '窗口：当前系统暂不支持',
+  permission: '窗口：请先允许辅助功能权限',
+  missing: '窗口：缺少 Mac 窗口组件，请重新安装',
 };
 function setPerchStatus(status) {
   if (status === perchStatus) return;
@@ -981,23 +983,22 @@ function setFullscreenHide(full, force = false) {
 }
 
 function onForeground(info) {
-  setFullscreenHide(isFullscreenRect(info.rect));
+  setFullscreenHide(info.fullscreen === true || isFullscreenRect(info.rect));
   if (watcherMode === 'full' && info.kind !== activity.kind) { activity.kind = info.kind; send('activity', activity); }
   if (!settings.features.perch || !info.rect || !win) { setPerchStatus('none'); return sendLedge(null); }
   const dip = process.platform === 'win32' ? screen.screenToDipRect(null, info.rect) : info.rect;
-  const b = win.getBounds();
+  const b = IS_MAC ? allScreensBounds() : win.getBounds();
   const petHeight = 250 * 0.7 * settings.size;
   setPerchStatus(dip.y - b.y >= petHeight ? 'ok' : 'high');
   sendLedge({ id: info.handle, x: Math.round(dip.x - b.x), y: Math.round(dip.y - b.y), w: Math.round(dip.width) });
 }
 
 function updateWatcher() {
-  if (IS_MAC) { setPerchStatus("unsupported"); return; }
   const mode = settings.features.activity ? 'full' : settings.features.perch || settings.features.fullscreen ? 'rect' : null;
   if (mode === watcherMode) return;
   if (stopWatcher) stopWatcher();
   perchStatus = 'waiting';
-  stopWatcher = mode ? watchForeground(onForeground, { full: mode === 'full', onFail: reason => setPerchStatus(reason === 'unsupported' ? 'unsupported' : 'failed') }) : null;
+  stopWatcher = mode ? watchForeground(onForeground, { full: mode === 'full', onFail: reason => setPerchStatus(['unsupported', 'permission', 'missing'].includes(reason) ? reason : 'failed') }) : null;
   watcherMode = mode;
   if (mode !== 'full' && activity.kind) { activity.kind = null; send('activity', activity); }
   if (!settings.features.perch) sendLedge(null);
@@ -1247,8 +1248,7 @@ function restartToUpdate() {
 
 // ---- 多个显示器：一个透明窗口盖住所有屏幕，每块屏幕的底部都是地面 ----
 function petDisplays() {
-  // macOS 独立 Spaces 会裁切跨屏窗口；首版固定在主屏，避免宠物跑到看不到的区域。
-  return IS_MAC ? [screen.getPrimaryDisplay()] : screen.getAllDisplays();
+  return screen.getAllDisplays();
 }
 function allScreensBounds() {
   const areas = petDisplays().map(d => d.workArea);
@@ -1258,7 +1258,7 @@ function allScreensBounds() {
 }
 
 function screensForPage() {
-  const b = win ? win.getBounds() : allScreensBounds();
+  const b = IS_MAC || !win ? allScreensBounds() : win.getBounds();
   const primary = screen.getPrimaryDisplay().id;
   return petDisplays().map(d => ({
     x: d.workArea.x - b.x, y: d.workArea.y - b.y, w: d.workArea.width, h: d.workArea.height, primary: d.id === primary,
@@ -1267,13 +1267,15 @@ function screensForPage() {
 
 function fitToScreen() {
   if (!win) return;
-  win.setBounds(allScreensBounds());
+  win.setBounds(IS_MAC ? screen.getPrimaryDisplay().workArea : allScreensBounds());
+  macDisplays?.reconcile();
   send('screens', screensForPage());
 }
 
 function createWindow() {
   win = new BrowserWindow({
-    ...allScreensBounds(),
+    ...(IS_MAC ? screen.getPrimaryDisplay().workArea : allScreensBounds()),
+    ...(IS_MAC ? { opacity: 0 } : {}),
     transparent: true,
     backgroundColor: '#00000000',
     frame: false,
@@ -1301,13 +1303,15 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
   // Clicks go through to the desktop, except while the mouse is on a pet (the page tells us).
   win.setIgnoreMouseEvents(true, { forward: true });
+  if (IS_MAC) macDisplays = require('./lib/mac-displays').createMacDisplays({ BrowserWindow, ipcMain, screen, host: win, bounds: allScreensBounds, root: __dirname });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   // The page can't see the mouse outside the window, so tell it where the cursor is.
   const cursorTimer = setInterval(() => {
     if (!win || win.isDestroyed()) return;
     const p = screen.getCursorScreenPoint();
-    const b = win.getBounds();
+    const b = IS_MAC ? allScreensBounds() : win.getBounds();
+    macDisplays?.setIgnore(!mouseOnPet);
     win.webContents.send('cursor', { x: p.x - b.x, y: p.y - b.y });
   }, 100);
   const typingTimer = setInterval(checkTyping, 300);
@@ -1322,14 +1326,14 @@ function createWindow() {
     win.setAlwaysOnTop(true, 'screen-saver');
     send('resync');
   }, 1000);
-  win.on('closed', () => { clearInterval(cursorTimer); clearInterval(typingTimer); clearInterval(sitTimer); clearInterval(cpuTimer); clearInterval(aliveTimer); win = null; });
+  win.on('closed', () => { clearInterval(cursorTimer); clearInterval(typingTimer); clearInterval(sitTimer); clearInterval(cpuTimer); clearInterval(aliveTimer); macDisplays?.destroy(); macDisplays = null; win = null; });
 }
 
 ipcMain.handle('load', () => loadAssets());
 let mouseOnPet = false;
 let lastAlive = 0;
 ipcMain.on('alive', () => { lastAlive = Date.now(); });
-ipcMain.on('set-ignore', (_event, ignore) => { mouseOnPet = !ignore; win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }); });
+ipcMain.on('set-ignore', (_event, ignore) => { mouseOnPet = !ignore; if (macDisplays) macDisplays.setIgnore(Boolean(ignore)); else win?.setIgnoreMouseEvents(Boolean(ignore), { forward: true }); });
 // petName：右键的是哪只宠物（托盘菜单没有）。千千猫猫和梨梨兔兔会多一个「挑衅哥哥」
 function buildMenu(petName = null, expression = null) {
   return Menu.buildFromTemplate(menuTemplate(petName, expression));
@@ -1372,8 +1376,8 @@ function menuTemplate(petName = null, expression = null) {
     {
       label: '功能开关',
       submenu: FEATURES.flatMap(feature => [{
-        label: IS_MAC && WINDOWS_FEATURES.includes(feature.key) ? `${feature.label}（暂仅 Windows）` : IS_MAC && feature.key === "update" ? "自动更新（Mac 测试版请手动下载）" : feature.label,
-        enabled: !(IS_MAC && (WINDOWS_FEATURES.includes(feature.key) || feature.key === "update")),
+        label: IS_MAC && feature.key === "update" ? "自动更新（Mac 测试版请手动下载）" : feature.label,
+        enabled: !(IS_MAC && feature.key === "update"),
         type: 'checkbox',
         checked: settings.features[feature.key],
         click: item => setFeature(feature.key, item.checked),
@@ -1396,6 +1400,7 @@ function menuTemplate(petName = null, expression = null) {
     {
       label: '测试一下',
       submenu: [
+        { label: '把宠物分到不同屏幕', click: () => sendTest('screens') },
         { label: '过节', submenu: ['国庆', '万圣节', '圣诞', '春节'].map(name => ({ label: name, click: () => sendTest('festival', name) })) },
         { label: '生日', submenu: PETS.map(name => ({ label: name, click: () => sendTest('birthday', name) })) },
         { label: '天气', submenu: [...WEATHER_IDLES.map(name => [name, name.replace('待机_', '')]), [null, '普通']].map(([idle, label]) => ({ label, click: () => send('weather', idle) })) },
@@ -1492,6 +1497,11 @@ function menuTemplate(petName = null, expression = null) {
         click: () => setTrayIcon(name),
       })),
     },
+    ...(IS_MAC ? [{ label: `Mac 窗口互动：${PERCH_STATUS[perchStatus]}`, submenu: [
+      { label: '允许窗口互动（辅助功能权限）', click: () => { require('./lib/mac-activity').requestPermission(); void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'); } },
+      { label: '重新检查窗口', click: () => { if (stopWatcher) stopWatcher(); watcherMode = null; updateWatcher(); } },
+      { label: '权限由你决定；只读取窗口位置，活动分类开启时才读取标题', enabled: false },
+    ] }] : []),
     { label: '打开控制面板', click: openPanel },
     { label: '显示 / 隐藏桌宠', click: togglePets },
     { label: '桌宠卡住了？刷新一下', click: () => { win?.webContents.reload(); } },
@@ -1504,7 +1514,7 @@ function menuTemplate(petName = null, expression = null) {
   ];
 }
 
-ipcMain.on('menu', (_event, petName, expression) => buildMenu(typeof petName === 'string' ? petName : null, expression && typeof expression === 'object' ? expression : null).popup({ window: win }));
+ipcMain.on('menu', (_event, petName, expression) => buildMenu(typeof petName === 'string' ? petName : null, expression && typeof expression === 'object' ? expression : null).popup({ window: macDisplays?.cursorWindow() || win }));
 
 // ---- 托盘 ----
 let tray = null;
@@ -1562,7 +1572,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     loadSettings();
     if (IS_MAC) {
-      for (const key of [...WINDOWS_FEATURES, "update"]) settings.features[key] = false;
+      settings.features.update = false;
       app.dock?.hide();
     }
     if (!settings.firstDay) { settings.firstDay = Diary.dayKey(); saveSettings(); } // 第一次打开的日子

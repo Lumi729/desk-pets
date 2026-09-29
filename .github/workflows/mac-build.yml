@@ -14,6 +14,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run build:mac-helper
       - run: npm test
       - name: 启动真实桌宠窗口
         run: npx electron scripts/mac-smoke.cjs

@@ -8,7 +8,7 @@ name: 打包发布
 on:
   push:
     branches: [main]
-    paths: ['**.js', '**.cjs', 'package*.json', '.github/workflows/**', 'build/**']
+    paths: ['**.js', '**.cjs', '**.swift', '**.html', '**.css', 'package*.json', '.github/workflows/**', 'build/**']
     tags: ['v*']
 
 permissions:

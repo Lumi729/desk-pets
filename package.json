@@ -10,7 +10,8 @@
     "start": "electron .",
     "test": "node --test",
     "dist": "electron-builder --win nsis --publish never",
-    "dist:mac": "electron-builder --mac dmg --x64 --arm64 --publish never"
+    "dist:mac": "npm run build:mac-helper && electron-builder --mac dmg --x64 --arm64 --publish never",
+    "build:mac-helper": "node scripts/build-mac-helper.cjs"
   },
   "build": {
     "appId": "com.lumi729.deskpets",
@@ -20,7 +21,8 @@
       "preload.js",
       "lib/**",
       "renderer/**",
-      "桌宠素材/**"
+      "桌宠素材/**",
+      "mirror-preload.js"
     ],
     "win": {
       "target": "nsis",
@@ -60,7 +62,13 @@
       "icon": "build/mac-icon.png",
       "identity": "-",
       "hardenedRuntime": false,
-      "artifactName": "desk-pets-${version}-mac-${arch}.${ext}"
+      "artifactName": "desk-pets-${version}-mac-${arch}.${ext}",
+      "extraResources": [
+        {
+          "from": "build/native/desk-pets-foreground",
+          "to": "native/desk-pets-foreground"
+        }
+      ]
     }
   },
   "devDependencies": {
