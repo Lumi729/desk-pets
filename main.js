@@ -1146,7 +1146,16 @@ function pokePeer() {
 let updateReady = null;      // 已经下载好的新版本号
 let manualCheck = false;
 
+// 网断了、换了网络、连接被重置这种下载失败不算桌宠的错：不记进错误日志，下次检查会自己再下
+const isNetworkError = args => /net::ERR_|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ENETUNREACH|socket hang up|Cannot download differentially/i
+  .test(args.map(a => (a instanceof Error ? `${a.message}\n${a.stack || ''}` : String(a))).join(' '));
+const updaterLogger = {
+  info() {}, warn() {}, debug() {},
+  error: (...args) => { if (!isNetworkError(args)) console.error(...args); },
+};
+
 function setupAutoUpdate() {
+  autoUpdater.logger = updaterLogger;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;   // 就算不点重启，下次退出时也会装好
   autoUpdater.on('update-available', info => { if (manualCheck) send('say', `发现新版本 ${info.version}，正在悄悄下载…`); manualCheck = false; });
