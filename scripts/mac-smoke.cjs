@@ -6,7 +6,7 @@ const path = require('node:path');
 app.commandLine.appendSwitch('user-data-dir');
 app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'desk-pets-smoke-')));
 const timeout = setTimeout(() => { console.error('Desktop window did not load'); app.exit(1); }, 45000);
-app.on('browser-window-created', (_event, win) => {
+app.once('browser-window-created', (_event, win) => {
   win.webContents.on('render-process-gone', () => app.exit(1));
   win.webContents.once('did-fail-load', () => app.exit(1));
   win.webContents.once('did-finish-load', async () => {
