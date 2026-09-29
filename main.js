@@ -711,11 +711,24 @@ function copyExpression(expression) {
       // 再用 PowerShell 放成「复制了一个文件」，QQ、微信都认
       const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Set-Clipboard -LiteralPath '${dest.replace(/'/g, "''")}'`], { windowsHide: true, stdio: 'ignore' });
       ps.on('error', () => {});
+    } else if (IS_MAC) {
+      // Mac：用系统自带的 osascript 把 GIF 当成「复制了一个文件」，微信、QQ 里直接粘贴；不行就在 Finder 里显示让你拖
+      const script = `set the clipboard to (POSIX file "${dest.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
+      const osa = spawn('/usr/bin/osascript', ['-e', script], { stdio: 'ignore' });
+      let done = false;
+      const finish = ok => {
+        if (done) return;
+        done = true;
+        if (!ok) shell.showItemInFolder(dest);
+        send('say-pet', { name: who, text: ok ? '已复制，去斗图吧～' : '已在 Finder 打开表情，拖进聊天就可以啦～' });
+      };
+      osa.on('error', () => finish(false));
+      osa.on('exit', code => finish(code === 0));
+      return;
     } else {
-      // Mac 先在 Finder 显示 GIF，避免把文件路径当成已复制的动画。
       shell.showItemInFolder(dest);
     }
-    send('say-pet', { name: who, text: IS_MAC ? '已在 Finder 打开表情，拖进聊天就可以啦～' : '已复制，去斗图吧～' });
+    send('say-pet', { name: who, text: '已复制，去斗图吧～' });
   } catch {
     send('say-pet', { name: who, text: '这个表情复制不了…' });
   }
@@ -1325,7 +1338,7 @@ function buildMenu(petName = null, expression = null) {
 function menuTemplate(petName = null, expression = null) {
   const visitor = petName?.startsWith('visitor:') ? petName.slice(8) : null;
   return [
-    ...(expression && settings.features.copyface ? [{ label: IS_MAC ? '📁 在 Finder 打开这个表情' : '📋 复制这个表情', click: () => copyExpression(expression) }, { type: 'separator' }] : []),
+    ...(expression && settings.features.copyface ? [{ label: '📋 复制这个表情', click: () => copyExpression(expression) }, { type: 'separator' }] : []),
     ...(visitor ? [{ label: `🏠 送${visitor}回家`, click: () => send('send-home', visitor) }, { type: 'separator' }] : []),
     ...visitState.away.map(name => ({ label: `🏠 叫${name}回家（在对方家串门）`, click: () => send('call-home', name) })),
     ...(visitState.away.length ? [{ type: 'separator' }] : []),
