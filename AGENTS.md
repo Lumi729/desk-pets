@@ -41,3 +41,9 @@
 - 右键菜单的内容在 `main.js` 的 `menuTemplate()`；控制面板（`renderer/panel.*`，双击托盘图标打开）直接用这一份生成，所以改菜单就会自动改控制面板，不用另外改。
 - 改了 `server/` 以后要提醒千千在 `server` 文件夹里运行 `npm run deploy` 重新部署。
 - 联动 Codex：`lib/codex-hooks.js` 管理用户目录 `.codex/hooks.json`（尊重 `CODEX_HOME`），`lib/codex-link.js` 在 127.0.0.1:47292 收本机状态，`lib/codex-activity.js` 按 session_id / turn_id 记工作。只转发会话、轮次、时间、是否等回应，不转发聊天或工具内容；不动信任、审批设置。首次或命令变更后须由用户在 Codex 审核信任 hooks；开关开启不等于已接上，菜单收到真实事件才算。收工 / 中断 / 等待不能打断另一场仍在工作的聊天，也不能抢贴贴、摔倒、小窝或剧情。
+
+## macOS 适配
+- Mac 测试版：`npm run dist:mac` 生成 arm64 / x64 DMG，图标在 `build/mac-icon.png`；只有临时签名，未做 Developer ID 签名与公证，禁用自动安装更新，菜单打开发布页手动下载。不要声称已经公证或已经在两种芯片实机验证。
+- Mac 暂只用主屏，窗口检测相关开关禁用；菜单栏可打开控制面板与显示 / 隐藏。
+- Codex 的 macOS hook 在 `lib/codex-posix.js`，只发白名单状态，使用应用自带 Electron 的 Node 模式；不得改用户审批和信任。Claude 使用系统 curl，安静退出。Windows 命令保留。
+- `.github/workflows/mac-build.yml` 在 Mac 上测试、启动真实窗口、构建两种 DMG，供发布流程复用；版本不变只留下 Actions 测试附件。下次新版本发布要等两种 DMG 和 Windows 安装包都成功才公开。

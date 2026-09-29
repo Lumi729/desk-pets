@@ -1,5 +1,7 @@
 const { app, BrowserWindow, Menu, Notification, Tray, clipboard, dialog, globalShortcut, ipcMain, nativeImage, powerMonitor, screen, shell } = require('electron');
 const fs = require('node:fs');
+const IS_MAC = process.platform === 'darwin';
+const WINDOWS_FEATURES = ['activity', 'perch', 'fullscreen'];
 const { spawn } = require('node:child_process');
 const os = require('node:os');
 const path = require('node:path');
@@ -231,6 +233,7 @@ function togglePets() {
 
 // ---- 开机自动启动 ----
 function autoStartOptions() {
+  if (IS_MAC) return {};
   // 便携版 exe 运行时会先解压到临时文件夹，要登记的是原来那个 exe
   if (process.env.PORTABLE_EXECUTABLE_FILE) return { path: process.env.PORTABLE_EXECUTABLE_FILE, args: [] };
   if (!app.isPackaged) return { path: process.execPath, args: [app.getAppPath()] };
@@ -239,7 +242,7 @@ function autoStartOptions() {
 const autoStartOn = () => app.getLoginItemSettings(autoStartOptions()).openAtLogin;
 // 改名以后程序文件名变了：以前开了开机自动启动的，登记的还是旧文件，换成现在的
 function fixAutoStartPath() {
-  if (!app.isPackaged || process.env.PORTABLE_EXECUTABLE_FILE) return;
+  if (IS_MAC || !app.isPackaged || process.env.PORTABLE_EXECUTABLE_FILE) return;
   const { launchItems = [] } = app.getLoginItemSettings(autoStartOptions());
   const now = process.execPath.toLowerCase();
   if (launchItems.some(item => item.enabled && item.path && item.path.toLowerCase() !== now)) setAutoStart(true);
@@ -250,6 +253,7 @@ function setAutoStart(on) {
 }
 
 function setFeature(key, on) {
+  if (IS_MAC && (WINDOWS_FEATURES.includes(key) || key === "update")) return;
   settings.features[key] = on;
   saveSettings();
   send('features', settings.features);
@@ -708,9 +712,10 @@ function copyExpression(expression) {
       const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Set-Clipboard -LiteralPath '${dest.replace(/'/g, "''")}'`], { windowsHide: true, stdio: 'ignore' });
       ps.on('error', () => {});
     } else {
-      clipboard.writeText(dest);
+      // Mac 先在 Finder 显示 GIF，避免把文件路径当成已复制的动画。
+      shell.showItemInFolder(dest);
     }
-    send('say-pet', { name: who, text: '已复制，去斗图吧～' });
+    send('say-pet', { name: who, text: IS_MAC ? '已在 Finder 打开表情，拖进聊天就可以啦～' : '已复制，去斗图吧～' });
   } catch {
     send('say-pet', { name: who, text: '这个表情复制不了…' });
   }
@@ -974,6 +979,7 @@ function onForeground(info) {
 }
 
 function updateWatcher() {
+  if (IS_MAC) { setPerchStatus("unsupported"); return; }
   const mode = settings.features.activity ? 'full' : settings.features.perch || settings.features.fullscreen ? 'rect' : null;
   if (mode === watcherMode) return;
   if (stopWatcher) stopWatcher();
@@ -1155,6 +1161,7 @@ const updaterLogger = {
 };
 
 function setupAutoUpdate() {
+  if (IS_MAC) return; // 未公证的 Mac 测试版使用手动下载安装。
   autoUpdater.logger = updaterLogger;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;   // 就算不点重启，下次退出时也会装好
@@ -1170,6 +1177,10 @@ function setupAutoUpdate() {
 }
 
 function runUpdateCheck(manual = false) {
+  if (IS_MAC) {
+    if (manual) void shell.openExternal("https://github.com/Lumi729/desk-pets/releases/latest");
+    return;
+  }
   if (!manual && !settings.features.update) return;
   if (!app.isPackaged) { if (manual) send('say', '现在是开发模式，装好的版本才会自动更新'); return; }
   if (updateReady) { if (manual) send('say', '新版本已经下载好啦，重启就能用'); return; }
@@ -1222,8 +1233,12 @@ function restartToUpdate() {
 }
 
 // ---- 多个显示器：一个透明窗口盖住所有屏幕，每块屏幕的底部都是地面 ----
+function petDisplays() {
+  // macOS 独立 Spaces 会裁切跨屏窗口；首版固定在主屏，避免宠物跑到看不到的区域。
+  return IS_MAC ? [screen.getPrimaryDisplay()] : screen.getAllDisplays();
+}
 function allScreensBounds() {
-  const areas = screen.getAllDisplays().map(d => d.workArea);
+  const areas = petDisplays().map(d => d.workArea);
   const x = Math.min(...areas.map(a => a.x)), y = Math.min(...areas.map(a => a.y));
   const right = Math.max(...areas.map(a => a.x + a.width)), bottom = Math.max(...areas.map(a => a.y + a.height));
   return { x, y, width: right - x, height: bottom - y };
@@ -1232,7 +1247,7 @@ function allScreensBounds() {
 function screensForPage() {
   const b = win ? win.getBounds() : allScreensBounds();
   const primary = screen.getPrimaryDisplay().id;
-  return screen.getAllDisplays().map(d => ({
+  return petDisplays().map(d => ({
     x: d.workArea.x - b.x, y: d.workArea.y - b.y, w: d.workArea.width, h: d.workArea.height, primary: d.id === primary,
   }));
 }
@@ -1270,7 +1285,7 @@ function createWindow() {
     },
   });
   win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true);
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
   // Clicks go through to the desktop, except while the mouse is on a pet (the page tells us).
   win.setIgnoreMouseEvents(true, { forward: true });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -1310,7 +1325,7 @@ function buildMenu(petName = null, expression = null) {
 function menuTemplate(petName = null, expression = null) {
   const visitor = petName?.startsWith('visitor:') ? petName.slice(8) : null;
   return [
-    ...(expression && settings.features.copyface ? [{ label: '📋 复制这个表情', click: () => copyExpression(expression) }, { type: 'separator' }] : []),
+    ...(expression && settings.features.copyface ? [{ label: IS_MAC ? '📁 在 Finder 打开这个表情' : '📋 复制这个表情', click: () => copyExpression(expression) }, { type: 'separator' }] : []),
     ...(visitor ? [{ label: `🏠 送${visitor}回家`, click: () => send('send-home', visitor) }, { type: 'separator' }] : []),
     ...visitState.away.map(name => ({ label: `🏠 叫${name}回家（在对方家串门）`, click: () => send('call-home', name) })),
     ...(visitState.away.length ? [{ type: 'separator' }] : []),
@@ -1344,7 +1359,8 @@ function menuTemplate(petName = null, expression = null) {
     {
       label: '功能开关',
       submenu: FEATURES.flatMap(feature => [{
-        label: feature.label,
+        label: IS_MAC && WINDOWS_FEATURES.includes(feature.key) ? `${feature.label}（暂仅 Windows）` : IS_MAC && feature.key === "update" ? "自动更新（Mac 测试版请手动下载）" : feature.label,
+        enabled: !(IS_MAC && (WINDOWS_FEATURES.includes(feature.key) || feature.key === "update")),
         type: 'checkbox',
         checked: settings.features[feature.key],
         click: item => setFeature(feature.key, item.checked),
@@ -1463,11 +1479,13 @@ function menuTemplate(petName = null, expression = null) {
         click: () => setTrayIcon(name),
       })),
     },
+    { label: '打开控制面板', click: openPanel },
+    { label: '显示 / 隐藏桌宠', click: togglePets },
     { label: '桌宠卡住了？刷新一下', click: () => { win?.webContents.reload(); } },
     { label: settings.newErrors ? `打开错误日志（有 ${settings.newErrors} 条新的）` : '打开错误日志', click: openErrorLog },
     { label: '复制最近的错误', click: copyLatestError },
     { label: '开机自动启动', type: 'checkbox', checked: autoStartOn(), click: item => setAutoStart(item.checked) },
-    { label: `检查更新（现在是 ${app.getVersion()}）`, click: () => runUpdateCheck(true) },
+    { label: `${IS_MAC ? "打开新版下载页" : "检查更新"}（现在是 ${app.getVersion()}）`, click: () => runUpdateCheck(true) },
     { type: 'separator' },
     { label: '退出', click: goodnightQuit },
   ];
@@ -1494,7 +1512,7 @@ function createTray() {
     tray.setToolTip('梨间雪桌宠');
     // 左键：显示 / 隐藏桌宠（等一小会儿，看是不是双击）；双击：打开控制面板；右键：设置菜单
     let clickTimer = null;
-    tray.on('click', () => { clearTimeout(clickTimer); clickTimer = setTimeout(togglePets, 320); });
+    if (!IS_MAC) tray.on('click', () => { clearTimeout(clickTimer); clickTimer = setTimeout(togglePets, 320); });
     tray.on('double-click', () => { clearTimeout(clickTimer); openPanel(); });
     refreshTray();
   } catch (error) {
@@ -1525,11 +1543,15 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.setAppUserModelId('com.lumi729.deskpets'); // Windows 通知要用
+  if (process.platform === 'win32') app.setAppUserModelId('com.lumi729.deskpets'); // Windows 通知要用
   // 兼容模式：不用显卡画透明窗口。有的电脑上透明窗口会让屏幕卡住，关掉显卡加速通常就好了（会多用一点 CPU）
   try { if (JSON.parse(fs.readFileSync(settingsFile(), 'utf8')).features?.compat === true) app.disableHardwareAcceleration(); } catch {}
   app.whenReady().then(() => {
     loadSettings();
+    if (IS_MAC) {
+      for (const key of [...WINDOWS_FEATURES, "update"]) settings.features[key] = false;
+      app.dock?.hide();
+    }
     if (!settings.firstDay) { settings.firstDay = Diary.dayKey(); saveSettings(); } // 第一次打开的日子
     createWindow();
     updateWatcher();

@@ -1,7 +1,7 @@
 {
   "name": "desk-pets",
   "version": "1.0.30",
-  "description": "千千猫猫和梨梨兔兔的 Windows 桌宠",
+  "description": "千千猫猫和梨梨兔兔的桌宠（Windows / macOS）",
   "main": "main.js",
   "author": "千千",
   "license": "UNLICENSED",
@@ -9,7 +9,8 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
-    "dist": "electron-builder --win nsis --publish never"
+    "dist": "electron-builder --win nsis --publish never",
+    "dist:mac": "electron-builder --mac dmg --x64 --arm64 --publish never"
   },
   "build": {
     "appId": "com.lumi729.deskpets",
@@ -44,7 +45,23 @@
         "repo": "desk-pets",
         "releaseType": "draft"
       }
-    ]
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.entertainment",
+      "icon": "build/mac-icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "artifactName": "desk-pets-${version}-mac-${arch}.${ext}"
+    }
   },
   "devDependencies": {
     "electron": "^44.4.5",

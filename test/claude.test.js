@@ -31,7 +31,7 @@ test('removes only our hooks', () => {
 });
 
 test('hook command is quiet, short, never fails, works in bash and PowerShell', () => {
-  const cmd = hookCommand('Stop');
+  const cmd = hookCommand('Stop', undefined, 'win32');
   assert.match(cmd, /^curl\.exe -s /);
   assert.match(cmd, /-o NUL/);
   assert.match(cmd, /--connect-timeout 1 -m 2/);
@@ -103,7 +103,7 @@ test('StopFailure and PermissionRequest hooks are added quietly, and never decid
   for (const e of ['StopFailure', 'PermissionRequest']) {
     const [group] = s.hooks[e];
     assert.strictEqual(group.hooks[0].command, hookCommand(e));
-    assert.match(group.hooks[0].command, /-s .*-o NUL .* ; exit 0$/); // 没有输出，也就没有允许 / 拒绝
+    assert.match(group.hooks[0].command, /-s .*-o (NUL|\/dev\/null) .*; exit 0$/); // 没有输出，也就没有允许 / 拒绝
   }
   assert.strictEqual(s.hooks.PermissionRequest[0].matcher, '*');
   assert.ok(!('matcher' in s.hooks.StopFailure[0]));
