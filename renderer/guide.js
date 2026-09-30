@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
-const icon = name => el('img', { src: `../桌宠素材/托盘图标/${name}-256.png`, alt: '' });
+// 百变猫猫有五只小猫，图标用蓝猫那张
+const icon = name => el('img', { src: `../桌宠素材/托盘图标/${name === '百变猫猫' ? '百变猫猫_蓝猫' : name}-256.png`, alt: '' });
 
 const INTROS = {
   千千猫猫: '爱捣蛋，最喜欢挑衅哥哥狗狗',
@@ -8,7 +9,9 @@ const INTROS = {
   哥哥狗狗: '靠谱的哥哥，谁摔倒了都会去扶',
   梨梨哥哥: '和哥哥狗狗见面先贴贴……然后打一架',
   煤球猫猫: '黑乎乎一团，突然就冲过去追着玩',
+  百变猫猫: '五只小猫轮流出场，双击就换一只，偶尔五只一起玩',
   '99狐狐': '粉粉的小狐狸，温柔又有点小得意',
+  沙漠狐: '大耳朵挂着孔雀毛耳坠，爱漂亮、有点小臭美',
   灰鸮g老师: '戴眼镜的猫头鹰老师，最爱看书',
 };
 

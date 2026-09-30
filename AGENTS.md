@@ -41,6 +41,8 @@
 - 右键菜单的内容在 `main.js` 的 `menuTemplate()`；控制面板（`renderer/panel.*`，双击托盘图标打开）直接用这一份生成，所以改菜单就会自动改控制面板，不用另外改。
 - 改了 `server/` 以后要提醒千千在 `server` 文件夹里运行 `npm run deploy` 重新部署。
 - 联动 Codex：`lib/codex-hooks.js` 管理用户目录 `.codex/hooks.json`（尊重 `CODEX_HOME`），`lib/codex-link.js` 在 127.0.0.1:47292 收本机状态，`lib/codex-activity.js` 按 session_id / turn_id 记工作。只转发会话、轮次、时间、是否等回应，不转发聊天或工具内容；不动信任、审批设置。首次或命令变更后须由用户在 Codex 审核信任 hooks；开关开启不等于已接上，菜单收到真实事件才算。收工 / 中断 / 等待不能打断另一场仍在工作的聊天，也不能抢贴贴、摔倒、小窝或剧情。
+- 百变猫猫（`main.js` 的 `CAT` / `CATS`，`renderer/pets.js` 的「百变猫猫」一节）：一只宠物带五套动作 `pet.skins`，`wearSkin()` 换一套，同时把 `comboClips` 里带「百变猫猫」的组合换成 `贴贴/百变猫猫_猫名/` 里那只的；一起玩的动画在 `百变猫猫/互动/`（`pet.groupClips`）。变身、一起玩期间 `pet.catBusy` 为真，点击和打字不打断。现在是哪只通过 `cat-skin` 告诉主程序（托盘图标、提示、菜单），锁定存在 `settings.catLock`。
+- 沙漠狐：小爱好在 `FENNEC_HOBBIES`，和 99狐狐 的 `_比尾巴`（tails）/ `_尾巴被子`（tailquilt）在 `tryFoxStory()`。
 
 ## macOS 适配
 - Mac 测试版：`npm run dist:mac` 生成 arm64 / x64 DMG，图标在 `build/mac-icon.png`；只有临时签名，未做 Developer ID 签名与公证，禁用自动安装更新，菜单打开发布页手动下载。不要声称已经公证或已经在两种芯片实机验证。

@@ -23,7 +23,7 @@
     for (const [key, el] of elements) if (!ids.has(key)) { el.remove(); elements.delete(key); }
     for (const [key, url] of images) if (!used.has(key)) { URL.revokeObjectURL(url); images.delete(key); }
   });
-  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'contextmenu', 'click']) {
+  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'contextmenu', 'click', 'dblclick']) {
     window.addEventListener(type, event => {
       const target = captured || event.target.closest?.('[data-key]');
       if (!target) return;

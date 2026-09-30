@@ -1,11 +1,12 @@
 // 贴贴 / 叠叠乐的规则（页面和测试都会用到）
 (function (root) {
   // 文件名里宠物的顺序
-  const ORDER = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '99狐狐', '灰鸮g老师'];
+  const ORDER = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '百变猫猫', '99狐狐', '沙漠狐', '灰鸮g老师'];
   // 只和一只宠物一起「看书贴贴」，不参加多人贴贴和叠叠乐
   const SOLO = ['灰鸮g老师'];
   // 这几对不贴贴也不叠叠乐（不能直接挨着、也不能直接叠在对方头上）
-  const FORBIDDEN = [['梨梨哥哥', '千千猫猫'], ['梨梨兔兔', '哥哥狗狗'], ['梨梨哥哥', '煤球猫猫'], ['梨梨哥哥', '99狐狐']];
+  const FORBIDDEN = [['梨梨哥哥', '千千猫猫'], ['梨梨兔兔', '哥哥狗狗'], ['梨梨哥哥', '煤球猫猫'], ['梨梨哥哥', '99狐狐'],
+    ['梨梨哥哥', '百变猫猫'], ['梨梨哥哥', '沙漠狐']];
 
   const isForbidden = (a, b) => FORBIDDEN.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
 
@@ -58,14 +59,14 @@
   // 「组合名_盖被子.gif」哥哥狗狗给睡着的千千猫猫盖被子，「组合名_批改作业.gif」g老师看书时哥哥狗狗凑过来，
   // 「组合名_扶起来.gif」哥哥狗狗扶起摔趴趴的宠物，「组合名_批改作业_书签.gif」有书签时的批改作业，
   // 「组合名_接眼镜.gif」g老师摔倒时旁边的宠物接住眼镜，「组合名_围观睡着.gif」g老师看书睡着时旁边的宠物围观，
-  // 「组合名_换眼镜.gif」哥哥狗狗和g老师交换眼镜
+  // 「组合名_换眼镜.gif」哥哥狗狗和g老师交换眼镜，「组合名_比尾巴.gif」「组合名_尾巴被子.gif」99狐狐和沙漠狐的小故事
   // （这些都不算贴贴，不会被随机选到）
   const SUFFIX_KINDS = {
     _2: 'stack', _打架: 'fight', _和好: 'makeup', _盖被子: 'blanket', _批改作业_书签: 'bookmark', _批改作业: 'grading',
-    _扶起来: 'helpup', _接眼镜: 'catch', _围观睡着: 'watch', _换眼镜: 'swap',
+    _扶起来: 'helpup', _接眼镜: 'catch', _围观睡着: 'watch', _换眼镜: 'swap', _比尾巴: 'tails', _尾巴被子: 'tailquilt',
   };
   // 这些是特别剧情，不是随机的贴贴版本
-  const SPECIAL_KINDS = ['fight', 'makeup', 'blanket', 'grading', 'bookmark', 'helpup', 'catch', 'watch', 'swap'];
+  const SPECIAL_KINDS = ['fight', 'makeup', 'blanket', 'grading', 'bookmark', 'helpup', 'catch', 'watch', 'swap', 'tails', 'tailquilt'];
   function parseComboFile(base) {
     for (const [suffix, kind] of Object.entries(SUFFIX_KINDS)) {
       if (base.endsWith(suffix)) return { key: base.slice(0, -suffix.length), kind };

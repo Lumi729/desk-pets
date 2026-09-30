@@ -5,7 +5,7 @@ const path = require('node:path');
 const { comboKey, isForbidden, touchingRows, pickHug, canStack, parseComboFile, ORDER, SPECIAL_KINDS } = require('../renderer/combos');
 
 const dir = path.join(__dirname, '..', '桌宠素材', '贴贴');
-const files = new Set(fs.readdirSync(dir).map(f => f.replace(/\.gif$/, '')));
+const files = new Set(fs.readdirSync(dir).filter(f => f.endsWith('.gif')).map(f => f.replace(/\.gif$/, '')));
 const hasRow = key => files.has(key);
 const hasStack = key => files.has(`${key}_2`);
 
@@ -72,7 +72,9 @@ test('every hug file has both versions and uses known pet names', () => {
     if (SPECIAL_KINDS.includes(kind)) continue;
     if (base.includes('灰鸮g老师')) { assert.strictEqual(kind, 'row', name); continue; } // g老师只有一起看书的贴贴
     assert.ok(files.has(base) && files.has(`${base}_2`), base);
-    assert.strictEqual(comboKey(base.split('-')), base);
+    // 一般按固定顺序写；也可以另外放一份「站位反过来」的（比如 沙漠狐-99狐狐），但固定顺序的那份也要有
+    const canon = comboKey(base.split('-'));
+    assert.ok(canon === base || files.has(canon), base);
     for (const pet of base.split('-')) assert.ok(ORDER.includes(pet), pet);
   }
 });
@@ -107,7 +109,7 @@ test('g老师 follow-ups are special kinds, never random hugs', () => {
 });
 
 test('99狐狐 sits between 煤球猫猫 and 灰鸮g老师 and follows 煤球猫猫\'s rules', () => {
-  assert.deepStrictEqual(ORDER.slice(-3), ['煤球猫猫', '99狐狐', '灰鸮g老师']);
+  assert.ok(ORDER.indexOf('煤球猫猫') < ORDER.indexOf('99狐狐') && ORDER.indexOf('99狐狐') < ORDER.indexOf('灰鸮g老师'));
   assert.strictEqual(comboKey(['灰鸮g老师', '99狐狐']), '99狐狐-灰鸮g老师');
   assert.strictEqual(comboKey(['99狐狐', '煤球猫猫', '千千猫猫']), '千千猫猫-煤球猫猫-99狐狐');
   assert.ok(isForbidden('99狐狐', '梨梨哥哥'));
@@ -115,4 +117,55 @@ test('99狐狐 sits between 煤球猫猫 and 灰鸮g老师 and follows 煤球猫
   assert.strictEqual(canStack(['梨梨哥哥'], '99狐狐', () => true), null);
   // 和煤球一样有扶起来、接眼镜、围观睡着
   for (const name of ['哥哥狗狗-99狐狐_扶起来', '99狐狐-灰鸮g老师_接眼镜', '99狐狐-灰鸮g老师_围观睡着', '99狐狐-灰鸮g老师']) assert.ok(files.has(name), name);
+});
+
+const CATS = ['蓝猫', '橘狸花', '黑狸花', '橘白狸花', '白猫'];
+const assets = path.join(__dirname, '..', '桌宠素材');
+const gifsIn = sub => fs.readdirSync(path.join(assets, sub)).filter(f => f.endsWith('.gif')).map(f => f.slice(0, -4));
+
+test('百变猫猫 comes after 煤球猫猫, 沙漠狐 after 99狐狐, and neither hugs 梨梨哥哥', () => {
+  assert.deepStrictEqual(ORDER, ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '百变猫猫', '99狐狐', '沙漠狐', '灰鸮g老师']);
+  for (const name of ['百变猫猫', '沙漠狐']) {
+    assert.ok(isForbidden(name, '梨梨哥哥'), name);
+    assert.strictEqual(canStack(['梨梨哥哥'], name, () => true), null);
+    assert.strictEqual(canStack([name], '梨梨哥哥', () => true), null);
+  }
+  assert.strictEqual(comboKey(['沙漠狐', '99狐狐']), '99狐狐-沙漠狐');
+});
+
+test('99狐狐 and 沙漠狐 have their own stories that are never random hugs', () => {
+  assert.deepStrictEqual(parseComboFile('99狐狐-沙漠狐_比尾巴'), { key: '99狐狐-沙漠狐', kind: 'tails' });
+  assert.deepStrictEqual(parseComboFile('99狐狐-沙漠狐_尾巴被子'), { key: '99狐狐-沙漠狐', kind: 'tailquilt' });
+  for (const kind of ['tails', 'tailquilt']) assert.ok(SPECIAL_KINDS.includes(kind));
+  for (const name of ['99狐狐-沙漠狐_比尾巴', '99狐狐-沙漠狐_尾巴被子', '哥哥狗狗-沙漠狐_扶起来', '沙漠狐-灰鸮g老师_接眼镜', '沙漠狐-灰鸮g老师_围观睡着']) assert.ok(files.has(name), name);
+});
+
+test('every 百变猫猫 cat has the same moves as 煤球猫猫 plus 变身_出 and 变身_进', () => {
+  const coal = new Set(gifsIn('煤球猫猫'));
+  for (const cat of CATS) {
+    const moves = new Set(gifsIn(path.join('百变猫猫', cat)));
+    for (const move of ['待机', '向左走', '向右走', '睡觉', '掉落', '摔趴趴', '敲代码', '打招呼', '开心蹦蹦', '变身_出', '变身_进']) assert.ok(moves.has(move), `${cat} 缺 ${move}`);
+    for (const move of coal) if (!move.startsWith('叼') && !move.startsWith('吃')) assert.ok(moves.has(move) || !coal.has(move), `${cat} 缺 ${move}`);
+  }
+  const group = new Set(gifsIn(path.join('百变猫猫', '互动')));
+  for (const name of ['叠猫猫塔_搭', '叠猫猫塔_晃', '叠猫猫塔_倒', '排排坐点名', '小猫火车_向右', '小猫火车_向左', '一起睡觉', '一起吃饭', '一起跳舞', '抢出场']) assert.ok(group.has(name), name);
+  // 两只一起的：只用这五只的名字
+  for (const name of group) {
+    const m = /^猫猫贴贴_(.+)_(.+)$/.exec(name) || /^猫猫叠叠乐_(.+)在(.+)上面$/.exec(name);
+    if (m) for (const cat of [m[1], m[2]]) assert.ok(CATS.includes(cat), name);
+  }
+});
+
+test('each 百变猫猫 cat hugs with its own files, named like everyone else\'s', () => {
+  for (const cat of CATS) {
+    const own = new Set(gifsIn(path.join('贴贴', `百变猫猫_${cat}`)));
+    assert.ok(own.size >= 20, cat);
+    for (const name of own) {
+      const { key, kind } = parseComboFile(name);
+      assert.ok(key.split('-').includes('百变猫猫'), name);
+      assert.strictEqual(comboKey(key.split('-')), key, name);
+      for (const pet of key.split('-')) assert.ok(ORDER.includes(pet), name);
+      if (!SPECIAL_KINDS.includes(kind) && !key.includes('灰鸮g老师')) assert.ok(own.has(key) && own.has(`${key}_2`), name);
+    }
+  }
 });

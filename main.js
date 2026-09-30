@@ -30,9 +30,12 @@ const { checkRelay } = require('./lib/relay-check');
 
 const ASSETS = path.join(__dirname, '桌宠素材');
 // 五只宠物（名字就是「桌宠素材」里的文件夹名）
-const PETS = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '99狐狐', '灰鸮g老师'];
+const PETS = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '百变猫猫', '99狐狐', '沙漠狐', '灰鸮g老师'];
+// 百变猫猫：一个宠物位置，五只小猫轮流出场（素材在「百变猫猫/猫名/」，一起的互动在「百变猫猫/互动/」）
+const CAT = '百变猫猫';
+const CATS = ['蓝猫', '橘狸花', '黑狸花', '橘白狸花', '白猫'];
 // 后来才加的宠物：已经在用的人更新后先不显示（自己去「选择宠物」里勾），新装的照常显示
-const NEW_PETS = ['99狐狐'];
+const NEW_PETS = ['99狐狐', '百变猫猫', '沙漠狐'];
 const FEATURES = [
   { key: 'time', label: '时间提醒（该睡觉 / 该吃饭）' },
   { key: 'sit', label: '久坐提醒（60 分钟）' },
@@ -92,6 +95,7 @@ const settings = {
   diaryWriter: '哥哥狗狗',         // 谁来写日记
   nickname: '千千',                // 宠物们怎么称呼你（联网时也用这个名字）
   firstDay: '',                   // 第一次打开的日子（算在一起多少天）
+  catLock: null,                  // 百变猫猫锁定哪一只（null = 自动轮换）
 };
 
 // 改过名字的宠物：旧设置里的名字换成新名字
@@ -147,6 +151,7 @@ function loadSettings() {
     if (Number.isFinite(saved.nest?.offset)) settings.nest = { si: Number.isInteger(saved.nest.si) ? saved.nest.si : 0, offset: saved.nest.offset };
     if (validTime(saved.diaryTime)) settings.diaryTime = saved.diaryTime;
     if (PETS.includes(saved.diaryWriter)) settings.diaryWriter = saved.diaryWriter;
+    if (CATS.includes(saved.catLock)) settings.catLock = catSkin = saved.catLock;
     settings.nickname = cleanName(saved.nickname) || cleanName(saved.online?.name) || '千千'; // 以前只有联网名字，就用它
     if (/^\d{4}-\d\d-\d\d$/.test(saved.firstDay || '')) settings.firstDay = saved.firstDay;
     else {
@@ -187,14 +192,22 @@ function readGif(file) {
 
 const comboFiles = {}; // 组合名 → 种类 → 文件（复制表情用）
 function loadAssets() {
-  const pets = {};
-  for (const name of PETS) {
-    const dir = path.join(ASSETS, name);
+  const readDir = dir => {
     const anims = {};
     for (const file of fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.gif')).sort()) {
       anims[path.basename(file, path.extname(file))] = readGif(path.join(dir, file));
     }
-    pets[name] = { name, anims };
+    return anims;
+  };
+  const pets = {};
+  for (const name of PETS) {
+    const dir = path.join(ASSETS, name);
+    if (name === CAT) {
+      // 五只小猫各一套动作，外加一起的互动；先用锁定的那只（或第一只）
+      const skins = Object.fromEntries(CATS.map(cat => [cat, readDir(path.join(dir, cat))]));
+      const group = readDir(path.join(dir, '互动'));
+      pets[name] = { name, anims: skins[settings.catLock || CATS[0]], skins, group, lock: settings.catLock };
+    } else pets[name] = { name, anims: readDir(dir) };
   }
   // 贴贴/：「组合名.gif」贴贴，「组合名_2.gif」叠叠乐，「组合名_打架.gif」贴贴完接着打架
   const combos = {};
@@ -205,7 +218,19 @@ function loadAssets() {
     combos[key][kind] = readGif(path.join(comboDir, file));
     comboFiles[key] = { ...comboFiles[key], [kind]: path.join(comboDir, file) };
   }
-  return { codexPet: settings.codexPet, claudePet: settings.claudePet, claudeWorking: claudeActivity.working, codexWorking: codexLink.activity.working, nest: settings.nest, nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos };
+  // 百变猫猫和别的宠物贴贴：每只小猫一套，在「贴贴/百变猫猫_猫名/」，文件名照常写「百变猫猫」
+  const catCombos = {};
+  for (const cat of CATS) {
+    const dir = path.join(comboDir, `${CAT}_${cat}`);
+    catCombos[cat] = {};
+    for (const file of fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.gif')) : []) {
+      const { key, kind } = parseComboFile(path.basename(file, path.extname(file)));
+      catCombos[cat][key] = catCombos[cat][key] || {};
+      catCombos[cat][key][kind] = readGif(path.join(dir, file));
+      comboFiles[`${key}@${cat}`] = { ...comboFiles[`${key}@${cat}`], [kind]: path.join(dir, file) };
+    }
+  }
+  return { codexPet: settings.codexPet, claudePet: settings.claudePet, claudeWorking: claudeActivity.working, codexWorking: codexLink.activity.working, nest: settings.nest, nickname: settings.nickname, focusInfo: focusInfo(), visitPets: settings.visitPets, today: computeToday(), weather: weather.idle, focus: pomodoro.mode === 'focus', screens: screensForPage(), show: settings.pets, size: settings.size, features: settings.features, activity, peerOnline: online.peerOnline, updateReady, pets, combos, catCombos };
 }
 
 const send = (channel, value) => { if (win && !win.isDestroyed()) win.webContents.send(channel, value); };
@@ -691,8 +716,16 @@ ipcMain.handle('diary-image', async (_event, key, rect) => {
 // ---- 复制表情：把宠物正在播的 GIF 当成文件放进剪贴板，粘贴到 QQ、微信里是会动的 ----
 function expressionFile(expression) {
   if (expression?.combo) return comboFiles[expression.combo]?.[expression.kind] || null;
-  const { pet, anim } = expression || {};
+  const { pet, anim, skin } = expression || {};
   if (!PETS.includes(pet) || typeof anim !== 'string' || !anim || /[\\/:]|\.\./.test(anim)) return null;
+  if (pet === CAT) {
+    // 百变猫猫：先找这只小猫自己的，再找五只一起的互动
+    for (const dir of [CATS.includes(skin) ? skin : null, '互动'].filter(Boolean)) {
+      const file = path.join(ASSETS, pet, dir, `${anim}.gif`);
+      if (fs.existsSync(file)) return file;
+    }
+    return null;
+  }
   const file = path.join(ASSETS, pet, `${anim}.gif`);
   return fs.existsSync(file) ? file : null;
 }
@@ -1346,6 +1379,7 @@ function menuTemplate(petName = null, expression = null) {
     ...(visitor ? [{ label: `🏠 送${visitor}回家`, click: () => send('send-home', visitor) }, { type: 'separator' }] : []),
     ...visitState.away.map(name => ({ label: `🏠 叫${name}回家（在对方家串门）`, click: () => send('call-home', name) })),
     ...(visitState.away.length ? [{ type: 'separator' }] : []),
+    ...(petName === CAT ? [{ label: '🔄 换一只', click: () => send('cat-command', { type: 'next' }) }, { label: '五只一起玩', submenu: catShowItems() }, { type: 'separator' }] : []),
     ...(Teases.PAIRS[petName] ? [{ label: `😈 挑衅哥哥（${Teases.PAIRS[petName].target}）`, click: () => send('tease', petName) }, { type: 'separator' }] : []),
     ...(updateReady ? [{ label: `🎉 立即重启更新（${updateReady}）`, click: restartToUpdate }, { type: 'separator' }] : []),
     { label: '🎛 控制面板（双击托盘图标也能打开）', click: openPanel },
@@ -1363,6 +1397,7 @@ function menuTemplate(petName = null, expression = null) {
         click: item => setPetShown(name, item.checked),
       })),
     },
+    ...(settings.pets[CAT] ? [catMenu()] : []),
     {
       label: '大小',
       submenu: SIZES.map(size => ({
@@ -1410,6 +1445,10 @@ function menuTemplate(petName = null, expression = null) {
         { label: '两个哥哥和好', click: () => sendTest('makeup') },
         { label: '哥哥狗狗：扶起摔倒的宠物', click: () => sendTest('dog-help') },
         { label: '哥哥狗狗：举牌测试通过', click: () => sendTest('dog-sign') },
+        { label: '沙漠狐：玩一个小爱好', click: () => sendTest('fennec-hobby') },
+        { label: '99狐狐和沙漠狐：比尾巴', click: () => sendTest('fox-tails') },
+        { label: '99狐狐和沙漠狐：尾巴当被子', click: () => sendTest('fox-quilt') },
+        { label: '百变猫猫：换一只', click: () => send('cat-command', { type: 'next' }) },
         { label: '哥哥狗狗：给千千猫猫盖被子', click: () => sendTest('dog-blanket') },
         { label: `${settings.codexPet}：联动 Codex`, submenu: [['working', '开工敲键盘'], ['waiting', '等你回应'], ['done', '收工啦']].map(([value, label]) => ({ label, click: () => sendTest('codex', value) })) },
         { label: '灰鸮g老师：看书（拖别的宠物过去一起看）', click: () => sendTest('g-read') },
@@ -1514,13 +1553,46 @@ function menuTemplate(petName = null, expression = null) {
   ];
 }
 
+// ---- 百变猫猫：页面告诉主程序现在是哪只，托盘跟着换；菜单里可以锁定某一只、换一只、叫五只一起玩 ----
+let catSkin = CATS[0];
+ipcMain.on('cat-skin', (_event, cat) => {
+  if (!CATS.includes(cat) || cat === catSkin) return;
+  catSkin = cat;
+  if (settings.trayIcon === CAT && tray && !tray.isDestroyed()) tray.setImage(trayImage(CAT));
+  refreshTray();
+});
+ipcMain.on('cat-lock-set', (_event, cat) => { if (CATS.includes(cat)) { settings.catLock = cat; saveSettings(); refreshTray(); } });
+function setCatLock(cat) {
+  settings.catLock = CATS.includes(cat) ? cat : null;
+  saveSettings();
+  send('cat-lock', settings.catLock);
+  refreshTray();
+}
+const CAT_SHOWS = [['tower', '🐱 叠猫猫塔'], ['rollcall', '📋 排排坐点名'], ['train', '🚂 小猫火车'], ['sleep', '💤 一起睡觉'], ['eat', '🍚 一起吃饭'], ['dance', '💃 一起跳舞']];
+const catShowItems = () => CAT_SHOWS.map(([type, label]) => ({ label, click: () => send('cat-command', { type: 'show', value: type }) }));
+function catMenu() {
+  return {
+    label: `${CAT}（现在是${catSkin}）`,
+    submenu: [
+      { label: '🔄 换一只（双击百变猫猫也可以）', click: () => send('cat-command', { type: 'next' }) },
+      { type: 'separator' },
+      { label: '自动轮换（每 2～4 分钟换一只）', type: 'radio', checked: !settings.catLock, click: () => setCatLock(null) },
+      ...CATS.map(cat => ({ label: `锁定${cat}`, type: 'radio', checked: settings.catLock === cat, click: () => setCatLock(cat) })),
+      { type: 'separator' },
+      { label: '五只一起玩：', enabled: false },
+      ...catShowItems(),
+    ],
+  };
+}
+
 ipcMain.on('menu', (_event, petName, expression) => buildMenu(typeof petName === 'string' ? petName : null, expression && typeof expression === 'object' ? expression : null).popup({ window: macDisplays?.cursorWindow() || win }));
 
 // ---- 托盘 ----
 let tray = null;
 
 function trayImage(label) {
-  const name = TRAY_ICONS.includes(label) ? label : TRAY_ICONS[0];
+  let name = TRAY_ICONS.includes(label) ? label : TRAY_ICONS[0];
+  if (name === CAT) name = `${CAT}_${catSkin}`; // 百变猫猫的托盘图标跟着现在出场的那只换
   // 用 256 像素的原图按「最近邻」缩小，托盘里的小图标才不会糊
   const png = path.join(ASSETS, '托盘图标', `${name}-256.png`);
   if (fs.existsSync(png)) return pixelTrayImage(nativeImage, png);
@@ -1547,7 +1619,7 @@ function refreshTray() {
   if (!tray || tray.isDestroyed()) return;
   tray.setContextMenu(buildMenu());
   sendPanel();
-  tray.setToolTip(`梨间雪桌宠\n${weatherTip()}${settings.features.anniversary ? `\n在一起第 ${togetherDays()} 天` : ''}`);
+  tray.setToolTip(`梨间雪桌宠\n${weatherTip()}${settings.pets[CAT] ? `\n${CAT}：现在是${catSkin}${settings.catLock ? '（锁定）' : ''}` : ''}${settings.features.anniversary ? `\n在一起第 ${togetherDays()} 天` : ''}`);
 }
 
 function setTrayIcon(label) {

@@ -8,9 +8,11 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../renderer/pets.js'), 'utf8');
 const handlers = source.slice(source.indexOf('  const companionWorkState ='), source.indexOf('  // ---- 退出前道晚安'));
 const think = source.slice(source.indexOf('  const CAN_START_TYPING ='), source.indexOf('  function place(sprite)'));
-const names = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '灰鸮g老师', '99狐狐'];
+const names = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '百变猫猫', '灰鸮g老师', '99狐狐', '沙漠狐'];
 function makePet(name, extra = {}) {
-  const clips = Object.fromEntries(fs.readdirSync(path.join(__dirname, '../桌宠素材', name))
+  // 百变猫猫的动作分五套放在各自的文件夹里，这里用蓝猫那一套
+  const dir = name === '百变猫猫' ? path.join(name, '蓝猫') : name;
+  const clips = Object.fromEntries(fs.readdirSync(path.join(__dirname, '../桌宠素材', dir))
     .filter(f => f.endsWith('.gif')).map(f => [f.slice(0, -4), true]));
   return { name, visible: true, state: 'idle', anim: '待机', lastAttention: 0, nextThink: Infinity, until: Infinity, y: 200, vy: 0, clips, ...extra };
 }
@@ -25,6 +27,7 @@ function renderer(extra = {}) {
     playNamed: (p, a) => { assert.ok(p.clips[a], `${p.name} 缺少动画 ${a}`); p.state = 'action'; p.anim = a; },
     say: (p, text) => { p.bubble = text; },
     isTypingLong: () => false, maybeCelebrate: () => false, maybeSweat: () => false, maybeDoActivity: () => false,
+    maybeHobby: () => false, catIsBusy: p => !!p.catBusy, runCatTrain: () => {},
     floorOf: () => 0, SLEEP_AFTER: 60000, GRAVITY: 2600,
   });
   vm.runInContext(handlers + think, context);
@@ -40,7 +43,7 @@ test('实际每帧状态机：开工切到持续敲键盘，收工停下并蹦�
   assert.equal(g.anim, '开心蹦蹦');
 });
 
-test('七只宠物都能被选中开工、等待、收工，其他宠物保持原样', () => {
+test('九只宠物都能被选中开工、等待、收工，其他宠物保持原样', () => {
   for (const name of names) {
     const { pets, run } = renderer();
     const chosen = pets.find(p => p.name === name);

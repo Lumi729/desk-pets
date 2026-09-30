@@ -42,7 +42,7 @@
   // 这些是特定时候才播的，点宠物时不会随机抽到
   const CORE = ['纪念日', '打哈欠', '犯困向左走', '犯困向右走', '睡觉_没戴眼镜', '待机', '向左走', '向右走', '睡觉', '向左看', '向右看', '掉落', '摔趴趴', '冒冷汗',
     '专注', '叼胡萝卜向左走', '叼胡萝卜向右走', '叼小鱼向左走', '叼小鱼向右走',
-    '国庆', '万圣节', '圣诞', '春节', '生日'];
+    '国庆', '万圣节', '圣诞', '春节', '生日', '变身_出', '变身_进'];
   const CHASE_SPEED = 3;           // 煤球猫猫冲过去的速度（平时的几倍）
   const FLEE_SPEED = 2.2;          // 被追的跑开的速度
   const SNACK_SPEED = 1.2;         // 叼着零食走的速度
@@ -87,6 +87,10 @@
   const TEASE_NEAR = 600;          // 离得多近才会挑衅（像素）
   const G = '灰鸮g老师';
   const DOG = '哥哥狗狗';
+  const CAT = '百变猫猫';          // 一个宠物位置，五只小猫轮流出场
+  const CATS = ['蓝猫', '橘狸花', '黑狸花', '橘白狸花', '白猫'];
+  const FENNEC = '沙漠狐';
+  const FOX = '99狐狐';
   const LONG_TYPING = 5 * 60_000;  // 连续打字多久算「写了好久」
   const TYPING_GAP = 10_000;       // 停下来多久算写完了（中间停不到 10 秒还算连续）
   let typingRun = null;            // { start, lastEnd } 这一段连续打字
@@ -172,13 +176,15 @@
     return { el, img, url: '', w: 0, h: 0, clip: null, bubble, bubbleUntil: 0, heart };
   }
 
+  const clipsOf = anims => Object.fromEntries(Object.entries(anims || {}).map(([name, gif]) => [name, makeClip(gif)]));
+  const actionsOf = clips => Object.keys(clips).filter(name => !CORE.includes(name) && !name.startsWith('待机_') && !Teases.isTeaseAnim(name)); // 天气待机、挑衅_ / 回应_ 只在特定时候用
+
   function createPet(id, data, startX) {
-    const clips = {};
-    for (const [name, gif] of Object.entries(data.anims)) clips[name] = makeClip(gif);
+    const clips = clipsOf(data.anims);
     const now = performance.now();
     const pet = {
       id, name: data.name, clips,
-      actions: Object.keys(clips).filter(name => !CORE.includes(name) && !name.startsWith('待机_') && !Teases.isTeaseAnim(name)), // 天气待机、挑衅_ / 回应_ 只在特定时候用
+      actions: actionsOf(clips),
       ...makeSprite('pet'),
       x: startX, y: 0, vy: 0,
       state: 'idle', anim: '', until: 0, nextThink: now + rand(1500, 4000), nextActivity: now + rand(3000, 8000), nextSweat: 0,
@@ -189,6 +195,14 @@
     pet.el.addEventListener('pointermove', event => onPointerMove(pet, event));
     pet.el.addEventListener('pointerup', event => onPointerUp(pet, event));
     pet.el.addEventListener('pointercancel', event => onPointerUp(pet, event));
+    if (data.skins) {
+      // 百变猫猫：五套小猫的动作 + 五只一起的互动，换猫就是换一套动作
+      pet.skins = Object.fromEntries(Object.entries(data.skins).map(([cat, anims]) => [cat, clipsOf(anims)]));
+      pet.groupClips = clipsOf(data.group);
+      const first = CATS.includes(data.lock) ? data.lock : id.startsWith('visitor:') ? pick(CATS) : CATS[0];
+      wearSkin(pet, first);
+      pet.el.addEventListener('dblclick', () => onCatDoubleClick(pet));
+    }
     return pet;
   }
 
@@ -224,6 +238,7 @@
 
   function goIdle(pet, now) {
     pet.looking = false;
+    pet.catBusy = false;
     if (pet.inNest) { pet.inNest = false; pet.tucked = false; pet.el.classList.remove('in-nest'); }
     pet.goingToNest = false;
     pet.goal = null;
@@ -341,6 +356,7 @@
       if (pet.inNest) { pet.inNest = false; pet.tucked = false; pet.el.classList.remove('in-nest'); }
       pet.goingToNest = false;
       pet.routine = false;
+      pet.catBusy = false;
       pet.goal = null;
       pet.shake = null;
       pet.el.classList.add('dragging');
@@ -365,7 +381,10 @@
       if (pet.y < floorOf(pet)) pet.y = floorOf(pet);
       if (pet.y > floorOf(pet)) dropFrom(pet); else goIdle(pet, now);
     } else if (event.type === 'pointerup') {
-      if (pet.name === G && !pet.visitor && pet.clips[GLASSES[0]]) clickGlasses(pet, now); else playRandomAction(pet, now);
+      if (pet.catBusy) { /* 正在变身 / 五只一起玩，点一下不打断 */ }
+      else if (pet.name === G && !pet.visitor && pet.clips[GLASSES[0]]) clickGlasses(pet, now);
+      else if (pet.cat === '白猫' && Math.random() < 0.35) { playNamed(pet, Math.random() < 0.5 ? '向左看' : '向右看', now, 1500); say(pet, pick(['哼，才不是想让你摸呢', '……就摸一下哦', '本小姐很忙的']), 3000); } // 傲娇
+      else playRandomAction(pet, now);
       if (!pet.visitor) api.diary('clicks');
       api.touched();
     }
@@ -374,7 +393,7 @@
   // 右键哪只宠物，菜单里就可能多出这只的专属选项（比如「挑衅哥哥」）
   window.addEventListener('contextmenu', event => { event.preventDefault(); const pet = petUnder(event.clientX, event.clientY) || petBoxUnder(event.clientX, event.clientY); api.showMenu(pet ? (pet.visitor ? `visitor:${pet.name}` : pet.name) : null, pet ? expressionOf(pet) : null); });
   // 这只现在在播哪个 GIF（复制表情用）
-  const expressionOf = pet => (pet.combo ? { combo: pet.combo.key, kind: pet.combo.kind, members: pet.combo.members.map(p => p.name) } : { pet: pet.name, anim: pet.anim || '待机' });
+  const expressionOf = pet => (pet.combo ? { combo: pet.combo.fileKey || pet.combo.key, kind: pet.combo.kind, members: pet.combo.members.map(p => p.name) } : { pet: pet.name, anim: pet.anim || '待机', skin: pet.cat });
 
   // 鼠标在宠物身上（不透明的地方）时才接住点击，其他地方点击会穿透到桌面。
   function petBoxUnder(x, y) {
@@ -871,9 +890,12 @@
     return pet.visible && !pet.visitor && !pet.combo && !pet.inScene && !Combos.SOLO.includes(pet.name) && (pet.restUntil || 0) <= performance.now() && (pet.state === 'idle' || pet.state === 'walk') && (onFloor(pet) || pet.onLedge);
   }
 
-  function makeCombo(kind, members, key, x, y, now, playFor) {
-    const clip = comboClips[key][kind];
+  // clipKey：左右 / 上下顺序和固定顺序不一样、又正好有这个顺序的文件时（比如「沙漠狐-99狐狐」）用它
+  function makeCombo(kind, members, key, x, y, now, playFor, clipKey = key) {
+    const clip = comboClips[clipKey]?.[kind] || comboClips[key][kind];
+    const cat = members.find(p => p.name === CAT);
     const combo = { ...makeSprite(`pet hug ${kind}`), kind, members, key, x, y, si: members[0].si, onLedge: !!members[0].onLedge, visible: true };
+    combo.fileKey = cat ? `${clipKey}@${cat.cat}` : clipKey; // 复制表情时找文件用（百变猫猫的在自己的文件夹里）
     playClip(combo, clip);
     combo.until = now + clip.duration * Math.max(1, Math.ceil(playFor / clip.duration));
     for (const pet of members) {
@@ -907,7 +929,8 @@
       else needsMakeup.delete(key);
     }
     const mid = group.reduce((sum, p) => sum + p.x, 0) / group.length;
-    const combo = makeCombo(kind, group, key, mid, group[0].y, now, kind === 'row' ? HUG_TIME : 0);
+    const inOrder = group.map(p => p.name).join('-');
+    const combo = makeCombo(kind, group, key, mid, group[0].y, now, kind === 'row' ? HUG_TIME : 0, comboClips[inOrder]?.[kind] ? inOrder : key);
     if (!showcase) api.diary('hugs');
     const s = screenOf(group[0]);
     combo.x = Math.min(Math.max(mid, s.x + combo.w / 2), s.x + s.w - combo.w / 2);
@@ -981,7 +1004,8 @@
     if (base.kind === 'stack') removeCombo(base, false); // 已经叠着的一摞继续往上叠
     for (const p of members) p.si = si;
     members[0].onLedge = !!onLedge;
-    const combo = makeCombo('stack', members, key, x, y, now, STACK_TIME);
+    const inOrder = members.map(p => p.name).join('-'); // 从下到上
+    const combo = makeCombo('stack', members, key, x, y, now, STACK_TIME, comboClips[inOrder]?.stack ? inOrder : key);
     combo.onLedge = !!onLedge;
     place(combo);
     return true;
@@ -1024,7 +1048,7 @@
     else {
       if (combo.kind === 'fight') endFight(combo, now);
       else if (combo.kind === 'makeup' && !fallAll && !quiet) endMakeup(combo, now);
-      else if (combo.kind === 'blanket' && !fallAll && !quiet) endBlanket(combo, now);
+      else if ((combo.kind === 'blanket' || combo.kind === 'tailquilt') && !fallAll && !quiet) endBlanket(combo, now);
       else if (combo.kind === 'helpup') endHelpUp(combo, now, !fallAll && !quiet);
       else if (combo.kind === 'watch' && !fallAll && !quiet) endWatch(combo, now);
       else if ((combo.kind === 'grading' || combo.kind === 'bookmark') && !fallAll && !quiet) endGrading(combo, now);
@@ -1624,6 +1648,17 @@
       fallen.si = dog.si;
       fallen.y = floorOf(fallen) + 300;
       dropFrom(fallen);
+    } else if (type === 'fennec-hobby') {
+      const f = byName(FENNEC);
+      if (!f || !freeForTest(f, now)) return hint('要先显示沙漠狐哦');
+      f.nextHobby = 0;
+      for (let i = 0; i < 20 && !maybeHobby(f, now); i++) f.nextHobby = 0;
+    } else if (type === 'fox-tails' || type === 'fox-quilt') {
+      const fox = byName(FOX), f = byName(FENNEC);
+      if (!fox || !f || !freeForTest(fox, now) || !freeForTest(f, now)) return hint('要同时显示 99狐狐 和沙漠狐哦');
+      f.si = fox.si; f.x = fox.x + fox.w * 0.8;
+      if (type === 'fox-quilt') for (const p of [fox, f]) { p.state = 'sleep'; setAnim(p, '睡觉'); }
+      if (!tryFoxStory(now, type === 'fox-tails' ? 'tails' : 'tailquilt')) hint('现在演不了，等一下再试哦');
     } else if (type === 'dog-sign') {
       const dog = byName(DOG);
       if (!dog || !freeForTest(dog, now) || !holdUpSign(now)) hint('要先显示哥哥狗狗哦');
@@ -1875,7 +1910,7 @@
       await scWait(2000);
     }],
     ['天气待机', async () => {
-      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', '99狐狐', G], 0.62);
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', CAT, '99狐狐', FENNEC, G], 0.7);
       tell(list[0], '会按天气换待机动画哦（每 30 分钟查一次）', 3000);
       await scWait(2500);
       for (const [anim, text] of WEATHER_DEMO) {
@@ -1887,7 +1922,7 @@
       weatherKind = showcase.saved.weather;
     }],
     ['节日', async () => {
-      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', '99狐狐', G], 0.62);
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', CAT, '99狐狐', FENNEC, G], 0.7);
       for (const [name, text] of [['国庆', '🇨🇳 国庆节'], ['万圣节', '🎃 万圣节'], ['圣诞', '🎄 圣诞节'], ['春节', '🧧 春节']]) {
         for (const pet of list) scPlay(pet, name, 3000);
         tell(list[2], `${text}那天会一起过节哦`, 3000);
@@ -1917,7 +1952,7 @@
       await scWait(3400);
     }],
     ['跟着你一起', async () => {
-      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', '99狐狐', G], 0.62);
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', CAT, '99狐狐', FENNEC, G], 0.7);
       for (const [anim, text, ms] of [
         ['敲代码', '⌨️ 你打字的时候，大家会陪你敲键盘', 3500],
         ['看视频', '📺 你看视频的时候，会一起看', 3500],
@@ -2026,7 +2061,7 @@
       scPlay(dog, '互动_写日记', 3500);
       tell(dog, `每天晚上会写今日小日记，写好给${nickname}看（设置里能选谁来写）`, 3800);
       await scWait(3800);
-      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', '99狐狐', G], 0.62);
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', CAT, '99狐狐', FENNEC, G], 0.7);
       for (const pet of list) scPlay(pet, '纪念日', 4000);
       tell(list[2], `和${nickname}在一起第 7、30、100 天……大家会一起庆祝`, 4200);
       await scWait(4200);
@@ -2034,7 +2069,7 @@
       await scCombo('swap', [dog2, g], '哥哥狗狗和g老师偶尔会换眼镜戴', 4000);
     }],
     ['四季换装', async () => {
-      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', '99狐狐', G], 0.62);
+      const list = scLineup(['千千猫猫', '梨梨兔兔', DOG, '梨梨哥哥', '煤球猫猫', CAT, '99狐狐', FENNEC, G], 0.7);
       for (const [anim, text] of [['待机_春', '🌸 春天'], ['待机_夏', '🍉 夏天'], ['待机_秋', '🍂 秋天'], ['待机_冬', '⛄ 冬天']]) {
         for (const pet of list) setAnim(pet, anim);
         tell(list[2], `${text}会换上季节的衣服（节日和特别的天气优先）`, 2800);
@@ -2080,6 +2115,30 @@
         const reading = members.some(p => p.name === G);
         await scCombo('row', members, `${reading ? '一起看书' : '挨在一起就会贴贴'}（${i + 1} / ${keys.length}）`, 2200);
       }
+    }],
+    ['百变猫猫', async () => {
+      const [cat] = scLineup([CAT]);
+      if (!cat) return;
+      tell(cat, '五只小猫轮流出场，每 2～4 分钟换一只，双击也能换', 6000);
+      for (const next of CATS.filter(c => c !== cat.cat).concat(cat.cat)) {
+        scPlay(cat, '变身_出', 0); await scWait(cat.clip.duration);
+        wearSkin(cat, next); cat.anim = '';
+        scPlay(cat, '变身_进', 0); tell(cat, next, 1800); await scWait(Math.max(cat.clip.duration, 1200));
+      }
+      for (const [anim, text] of [['叠猫猫塔_搭', '偶尔五只一起玩：叠猫猫塔'], ['排排坐点名', '排排坐点名'], ['一起跳舞', '一起跳舞']]) {
+        if (!scPlay(cat, anim, 2500)) continue;
+        tell(cat, text, 2500); await scWait(Math.max(cat.clip.duration, 2500));
+      }
+      scCalm(cat);
+    }],
+    ['沙漠狐', async () => {
+      const [fennec] = scLineup([FENNEC]);
+      if (!fennec) return;
+      tell(fennec, '沙漠狐爱漂亮，闲下来会玩自己的小爱好', 5000);
+      for (const anim of FENNEC_HOBBIES) { if (scPlay(fennec, anim, 2500)) await scWait(Math.max(fennec.clip.duration, 2500)); }
+      scCalm(fennec);
+      const pair = scLineup([FOX, FENNEC], 0.15);
+      if (pair.length === 2) await scCombo('tails', pair, '和 99狐狐 比比谁的尾巴更蓬松', 3000);
     }],
     ['叠叠乐', async () => {
       const keys = Object.keys(comboClips).filter(key => comboClips[key].stack);
@@ -2421,6 +2480,269 @@
     return true;
   }
 
+  // ---- 百变猫猫：五只小猫轮流出场 ----
+  // 每 2～4 分钟换下一只（五只都轮到之前不重复）：先播这只的「变身_出」，再播下一只的「变身_进」；
+  // 偶尔中间插「抢出场」，或者新旧两只一起贴贴 / 叠叠乐一下再变回一只；偶尔五只一起玩。
+  // 性格：蓝猫爱睡觉，橘狸花爱贴贴，黑狸花爱捣蛋、爱打闹，橘白狸花贪吃，白猫傲娇
+  const CAT_SWITCH = [120_000, 240_000];
+  const CAT_SHOW_CHANCE = 0.25;    // 到换猫的时候，有多大可能改成五只一起玩
+  let catComboClips = {};          // 小猫名 → 组合名 → { row, stack, ... }（和别的宠物贴贴用这只自己的文件）
+  let catLock = null;              // 锁定的那只（null = 自动轮换）
+  let catBag = [];                 // 这一轮还没轮到的小猫
+  let nextCatSwitch = performance.now() + rand(...CAT_SWITCH);
+  const catOf = () => byName(CAT);
+  const tip = text => { const pet = pets.find(p => p.visible); if (pet) say(pet.combo || pet, text, 5000); };
+  const isMealTime = (date = new Date()) => { const m = date.getHours() * 60 + date.getMinutes(); return MEALS.some(([from, to]) => m >= from - 20 && m <= to); };
+
+  // 换上某只小猫的一套动作（贴贴、叠叠乐也跟着换成这只的文件）
+  function wearSkin(pet, cat) {
+    if (!pet.skins?.[cat]) return;
+    pet.cat = cat;
+    pet.clips = { ...pet.groupClips, ...pet.skins[cat] };
+    pet.actions = actionsOf(pet.skins[cat]);
+    const guest = pet.visitor || String(pet.id).startsWith('visitor:'); // 来串门的客人只换自己的样子
+    if (!guest) pet.el.title = `${CAT}（${cat}）`;
+    if (guest) return;
+    for (const key of Object.keys(comboClips)) if (key.split('-').includes(CAT)) delete comboClips[key];
+    Object.assign(comboClips, catComboClips[cat] || {});
+    catBag = catBag.filter(c => c !== cat);
+    api.catSkin?.(cat);
+  }
+
+  // 下一只：这一轮还没轮到的里面挑；饭点橘白狸花更容易轮到，晚上蓝猫更容易轮到
+  function nextCat(pet) {
+    if (!catBag.length) catBag = CATS.filter(c => c !== pet.cat);
+    const weight = c => (c === '橘白狸花' && isMealTime() ? 5 : 1) * (c === '蓝猫' && isNight() ? 3 : 1);
+    let r = Math.random() * catBag.reduce((sum, c) => sum + weight(c), 0);
+    for (const c of catBag) { r -= weight(c); if (r <= 0) return c; }
+    return catBag[catBag.length - 1];
+  }
+
+  const catIsBusy = pet => !!pet.catBusy && ['action', 'cattrain'].includes(pet.state);
+  const catFree = (pet, sleepOk = false) => pet && pet.visible && !pet.visitor && !pet.combo && !pet.inScene && !pet.drag && !pet.inNest && !pet.goingToNest
+    && !pet.routine && !catIsBusy(pet) && onFloor(pet) && (['idle', 'walk'].includes(pet.state) || (sleepOk && pet.state === 'sleep'));
+
+  // 一步一步播：steps 是 [动画名, 至少播多久]，播完一步接下一步，最后 done
+  function catSteps(pet, steps, now, done) {
+    const run = (i, t) => {
+      if (i >= steps.length) return done(t);
+      const [anim, ms] = steps[i];
+      if (typeof anim === 'function') { anim(t); return run(i + 1, t); }
+      if (!pet.clips[anim]) return run(i + 1, t);
+      pet.catBusy = true;
+      playNamed(pet, anim, t, ms, t2 => run(i + 1, t2));
+    };
+    run(0, now);
+  }
+
+  // 变回一只：换上 cat 的一套，播它的「变身_进」
+  function catArrive(pet, cat, now) {
+    wearSkin(pet, cat);
+    catSteps(pet, [['变身_进', 0]], now, t => { pet.catBusy = false; pet.lastAttention = t; goIdle(pet, t); });
+  }
+
+  // 两只一起的贴贴 / 叠叠乐（文件名里两只的顺序不一定，都找一下）
+  function catDuet(a, b, groupClips) {
+    const names = [`猫猫贴贴_${a}_${b}`, `猫猫贴贴_${b}_${a}`, `猫猫叠叠乐_${a}在${b}上面`, `猫猫叠叠乐_${b}在${a}上面`];
+    const found = names.filter(n => groupClips[n]);
+    return found.length ? pick(found) : null;
+  }
+
+  // 换下一只（force：菜单或双击叫的，不管锁定、忙不忙）
+  function switchCat(pet, now, to = null, force = false) {
+    if (!pet || (!force && !catFree(pet))) return false;
+    const next = to && to !== pet.cat ? to : nextCat(pet);
+    if (!next || next === pet.cat) return false;
+    pet.lastAttention = now;
+    pet.looking = false;
+    const from = pet.cat;
+    const duet = catDuet(from, next, pet.groupClips);
+    const loves = c => c === from || c === next;
+    // 橘狸花爱贴贴：换猫时更容易和另一只贴一下；黑狸花爱捣蛋：更容易来抢出场
+    const duetChance = (loves('橘狸花') ? 0.45 : 0.2);
+    const grabChance = (loves('黑狸花') ? 0.35 : 0.12);
+    if (duet && Math.random() < duetChance) {
+      catSteps(pet, [[duet, 3000]], now, t => catArrive(pet, next, t));
+      api.diary('ep:cats');
+    } else if (pet.clips['抢出场'] && Math.random() < grabChance) {
+      catSteps(pet, [['变身_出', 0], ['抢出场', 0]], now, t => catArrive(pet, next, t));
+    } else {
+      catSteps(pet, [['变身_出', 0]], now, t => catArrive(pet, next, t));
+    }
+    return true;
+  }
+
+  // 五只一起玩：结束以后用下一只（锁定时还是这只）的「变身_进」变回一只
+  const CAT_SHOW_TYPES = ['tower', 'rollcall', 'train', 'sleep', 'eat', 'dance'];
+  function pickCatShow(pet, now) {
+    const idleLong = now - pet.lastAttention > 5 * 60_000;
+    const weights = {
+      tower: pet.cat === '黑狸花' ? 1.5 : 1,
+      rollcall: pet.cat === '白猫' ? 1.3 : 1,
+      train: pet.cat === '黑狸花' ? 1.5 : 1,
+      sleep: (isNight() || idleLong ? 4 : 0.5) * (pet.cat === '蓝猫' ? 2 : 1),
+      eat: isMealTime() ? (pet.cat === '橘白狸花' ? 6 : 4) : 0.3,
+      dance: 1,
+    };
+    let r = Math.random() * Object.values(weights).reduce((a, b) => a + b, 0);
+    for (const [type, w] of Object.entries(weights)) { r -= w; if (r <= 0) return type; }
+    return 'dance';
+  }
+
+  function startCatShow(pet, type, now, force = false) {
+    if (!pet || (!force && !catFree(pet, type === 'sleep'))) return false;
+    const g = pet.groupClips;
+    const need = { tower: '叠猫猫塔_搭', rollcall: '排排坐点名', train: '小猫火车_向右', sleep: '一起睡觉', eat: '一起吃饭', dance: '一起跳舞' }[type];
+    if (!need || !g[need]) return false;
+    if (force && (pet.drag || pet.combo)) return false;
+    if (pet.inNest) { pet.inNest = false; pet.tucked = false; pet.el.classList.remove('in-nest'); }
+    pet.inScene = false;
+    pet.tucked = false;
+    pet.looking = false;
+    pet.lastAttention = now;
+    const back = t => catArrive(pet, catLock || nextCat(pet), t);
+    api.diary('ep:cats');
+    if (type === 'tower') {
+      // 搭好 → 晃几下 → 有时倒了（黑狸花在的时候更容易倒）
+      const sway = Array.from({ length: 2 + Math.floor(Math.random() * 3) }, () => ['叠猫猫塔_晃', 0]);
+      const fall = g['叠猫猫塔_倒'] && Math.random() < (pet.cat === '黑狸花' ? 0.6 : 0.3) ? [['叠猫猫塔_倒', 0]] : [];
+      catSteps(pet, [['变身_出', 0], ['叠猫猫塔_搭', 0], ...sway, ...fall], now, back);
+    } else if (type === 'train') {
+      // 小猫火车：播的时候整列火车横穿屏幕，跑到另一头再变回一只
+      const [min, max] = walkRange(pet);
+      const dir = pet.x - min < max - pet.x ? 1 : -1;
+      catSteps(pet, [['变身_出', 0]], now, t => {
+        pet.catBusy = true;
+        pet.state = 'cattrain';
+        pet.trainDir = dir;
+        pet.trainDone = back;
+        setAnim(pet, dir > 0 ? '小猫火车_向右' : '小猫火车_向左');
+      });
+    } else {
+      const anim = need;
+      const ms = { rollcall: 3000, sleep: 12_000, eat: 6000, dance: 6000 }[type];
+      catSteps(pet, [['变身_出', 0], [anim, ms]], now, back);
+    }
+    return true;
+  }
+
+  // 小猫火车每一帧往前开，开到头就结束
+  function runCatTrain(pet, now, dt) {
+    pet.lastAttention = now;
+    const [min, max] = xRange(pet);
+    pet.x += pet.trainDir * WALK_SPEED * 1.6 * dt;
+    if ((pet.trainDir > 0 && pet.x >= max) || (pet.trainDir < 0 && pet.x <= min)) {
+      pet.x = Math.min(Math.max(pet.x, min), max);
+      const done = pet.trainDone;
+      pet.trainDone = null;
+      pet.state = 'idle';
+      if (done) done(now); else goIdle(pet, now);
+    }
+  }
+
+  // 平时：到点换一只或五只一起玩；黑狸花偶尔去捣蛋追别人；橘狸花喜欢凑到别人身边；橘白狸花饭点吃饭；蓝猫容易困
+  function checkCat(now) {
+    const pet = catOf();
+    if (!pet || !pet.visible || focusing) return;
+    if (now >= nextCatSwitch) {
+      if (!catFree(pet, true)) { nextCatSwitch = now + 5000; return; }
+      nextCatSwitch = now + rand(...CAT_SWITCH);
+      const showFirst = Math.random() < CAT_SHOW_CHANCE || (pet.state === 'sleep' && (isNight() || now - pet.lastAttention > 5 * 60_000));
+      if (showFirst && startCatShow(pet, pet.state === 'sleep' ? 'sleep' : pickCatShow(pet, now), now)) return;
+      if (!catLock && pet.state !== 'sleep') switchCat(pet, now);
+      return;
+    }
+    if (!catFree(pet) || now < (pet.nextQuirk || 0)) return;
+    pet.nextQuirk = now + rand(40_000, 90_000);
+    if (pet.cat === '黑狸花' && features.chase && Math.random() < 0.5) {
+      const others = pets.filter(p => p !== pet && isFree(p) && p.si === pet.si);
+      if (others.length) startChase(pet, pick(others), now, Math.random() < 0.6);
+    } else if (pet.cat === '橘狸花' && Math.random() < 0.6) {
+      const others = pets.filter(p => p !== pet && isFree(p) && p.si === pet.si && !Combos.isForbidden(p.name, CAT));
+      if (others.length) { const o = others.sort((a, b) => Math.abs(a.x - pet.x) - Math.abs(b.x - pet.x))[0]; walkTo(pet, o.x + Math.sign(pet.x - o.x || 1) * (o.w + pet.w) * 0.3); }
+    } else if (pet.cat === '橘白狸花' && isMealTime() && pet.clips['吃饭']) {
+      playNamed(pet, '吃饭', now, 4000);
+      say(pet, '开饭啦开饭啦～', 3000);
+    }
+  }
+
+  function onCatDoubleClick(pet) {
+    if (pet.visitor || showcase || !pet.visible || pet.drag || pet.combo || catIsBusy(pet)) return;
+    const now = performance.now();
+    const next = nextCat(pet);
+    if (catLock) { catLock = next; api.setCatLock?.(next); } // 锁定时双击：换一只，锁定也跟着换
+    switchCat(pet, now, next, true);
+  }
+
+  function onCatLock(cat) {
+    catLock = CATS.includes(cat) ? cat : null;
+    const pet = catOf();
+    if (catLock && pet && pet.cat !== catLock) {
+      if (catFree(pet)) switchCat(pet, performance.now(), catLock);
+      else { wearSkin(pet, catLock); pet.anim = ''; setAnim(pet, pet.state === 'sleep' ? '睡觉' : idleAnim(pet)); }
+    }
+  }
+
+  function onCatCommand({ type, value } = {}) {
+    const pet = catOf();
+    const now = performance.now();
+    if (!pet || !pet.visible) return tip(`先在「选择宠物」里把${CAT}放出来哦`);
+    if (showcase) return;
+    if (pet.drag || pet.combo || catIsBusy(pet) || ['fall', 'jump', 'exit', 'enter'].includes(pet.state)) return tip(`${CAT}在忙，等一下再试哦`);
+    if (type === 'next') { onCatDoubleClick(pet); return; }
+    if (type === 'show' && !startCatShow(pet, value, now, true)) tip('这个现在玩不了，等一下再试哦');
+  }
+
+  // ---- 沙漠狐：空闲时偶尔玩自己的小爱好；和 99狐狐 比尾巴、睡着时用尾巴当被子 ----
+  const FENNEC_HOBBIES = ['互动_刨坑', '互动_堆沙堡', '互动_偷听', '互动_追尾巴', '互动_晒太阳'];
+  const FOX_NEAR = 400;
+  let nextFoxStory = performance.now() + rand(180_000, 360_000);
+  function maybeHobby(pet, now) {
+    if (pet.name !== FENNEC || pet.visitor || now < (pet.nextHobby || 0)) return false;
+    pet.nextHobby = now + rand(60_000, 150_000);
+    if (Math.random() < 0.5) return false;
+    const hour = new Date().getHours();
+    const sunny = hour >= 8 && hour < 18 && (!weatherKind || ['待机_晴天', '待机_炎热', '待机_多云'].includes(weatherKind));
+    const list = FENNEC_HOBBIES.filter(a => pet.clips[a]);
+    if (!list.length) return false;
+    const weight = a => (a === '互动_晒太阳' ? (sunny ? 4 : hour >= 7 && hour < 19 ? 0.5 : 0) : 1);
+    let r = Math.random() * list.reduce((sum, a) => sum + weight(a), 0);
+    let anim = list[0];
+    for (const a of list) { r -= weight(a); if (r <= 0) { anim = a; break; } }
+    if (!weight(anim)) return false;
+    pet.lastAttention = now;
+    playNamed(pet, anim, now, anim === '互动_晒太阳' ? 8000 : 4000);
+    return true;
+  }
+
+  function tryFoxStory(now, force = null) {
+    const fox = byName(FOX), fennec = byName(FENNEC);
+    const key = Combos.comboKey([FOX, FENNEC]);
+    if (!fox || !fennec || !fox.visible || !fennec.visible || fox.si !== fennec.si) return false;
+    const near = Math.abs(fox.x - fennec.x) <= FOX_NEAR * size;
+    const asleep = p => p.state === 'sleep' && !p.combo && !p.inScene && !p.inNest && onFloor(p);
+    // 两只都睡着了：沙漠狐用大尾巴给 99狐狐 当被子
+    if ((force === 'tailquilt' || (!force && asleep(fox) && asleep(fennec) && near)) && comboClips[key]?.tailquilt) {
+      if (force && (!isFree(fox) && !asleep(fox) || !isFree(fennec) && !asleep(fennec))) return false;
+      const pair = [fox, fennec].sort((a, b) => a.x - b.x);
+      const combo = makeCombo('tailquilt', pair, key, (fox.x + fennec.x) / 2, fox.y, now, 4000);
+      api.diary('ep:tails');
+      clampToScreen(combo, fox);
+      place(combo);
+      return true;
+    }
+    // 两只都闲着、离得不远：比比谁的尾巴更蓬松
+    if ((force === 'tails' || (!force && near)) && comboClips[key]?.tails && isFree(fox) && isFree(fennec)) {
+      const pair = [fox, fennec].sort((a, b) => a.x - b.x);
+      const combo = makeCombo('tails', pair, key, (fox.x + fennec.x) / 2, fox.y, now, 0); // 播一遍
+      api.diary('ep:tails');
+      clampToScreen(combo, fox);
+      place(combo);
+      return true;
+    }
+    return false;
+  }
+
   // ---- 狗狗修 bug / 写日记 / 纪念日 ----
   function dogDoes(anim, text, ms = 3500) {
     const dog = byName(DOG);
@@ -2592,7 +2914,7 @@
       pet.state = 'codex'; pet.then = null; pet.looking = false;
       setAnim(pet, '敲代码');
     }
-    if (CAN_START_TYPING.includes(pet.state) && !pet.inScene && !pet.tucked && !pet.routine && !showcase && isTypingLong(now)) {
+    if (CAN_START_TYPING.includes(pet.state) && !pet.inScene && !pet.tucked && !pet.routine && !catIsBusy(pet) && !showcase && isTypingLong(now)) {
       pet.state = 'typing';
       pet.then = null;
       pet.lastAttention = now;
@@ -2663,8 +2985,9 @@
         if (maybeCelebrate(pet, now)) break;
         if (pet.name === G && !pet.visitor && now >= pet.nextThink && Math.random() < 0.15 && startReading(pet, now)) break;
         if (maybeSweat(pet, now)) break;
+        if (maybeHobby(pet, now)) break;
         if (maybeDoActivity(pet, now)) break;
-        if (now - pet.lastAttention > SLEEP_AFTER) { if (!(features.nest && isNight() && goToNest(pet, now))) { pet.state = 'sleep'; setAnim(pet, '睡觉'); } break; } // 晚上困了回小窝
+        if (now - pet.lastAttention > (pet.cat === '蓝猫' ? SLEEP_AFTER / 2 : SLEEP_AFTER)) { if (!(features.nest && isNight() && goToNest(pet, now))) { pet.state = 'sleep'; setAnim(pet, '睡觉'); } break; } // 晚上困了回小窝；蓝猫爱睡觉，困得快
         if (now >= pet.nextThink) {
           if (wantsLedge(pet) && Math.random() < 0.9) {
             // 离窗口不远就直接跳；远的话走到离自己最近的那头再跳
@@ -2693,6 +3016,9 @@
           pet.then = null;
           if (then) then(now); else goIdle(pet, now);
         }
+        break;
+      case 'cattrain':
+        runCatTrain(pet, now, dt);
         break;
       case 'curious':
         pet.lastAttention = now; // 歪着头一直看，等鼠标动
@@ -2825,6 +3151,8 @@
     if (now >= nextSwapCheck) { nextSwapCheck = now + 60_000; if (features.swap && !focusing && Math.random() < 0.3) trySwapGlasses(now); }
     checkReadingHug(now);
     checkFocusDoze(now);
+    checkCat(now);
+    if (now >= nextFoxStory) { nextFoxStory = now + rand(120_000, 300_000); if (!focusing) tryFoxStory(now); }
     if (now >= nextTease) { nextTease = now + rand(120_000, 300_000); if (features.tease && !focusing) tryTease(now); }
     // 时不时：煤球猫猫追着玩、千千猫猫和梨梨兔兔送零食（专注时不打扰）
     if (now >= nextChase) { nextChase = now + rand(60_000, 150_000); if (features.chase && !focusing) tryChase(now); }
@@ -2875,6 +3203,12 @@
       comboClips[key] = {};
       for (const [kind, gif] of Object.entries(gifs)) comboClips[key][kind] = makeClip(gif); // row 贴贴 / stack 叠叠乐 / fight 打架
     }
+    for (const [cat, list] of Object.entries(data.catCombos || {})) {
+      catComboClips[cat] = {};
+      for (const [key, gifs] of Object.entries(list)) catComboClips[cat][key] = Object.fromEntries(Object.entries(gifs).map(([kind, gif]) => [kind, makeClip(gif)]));
+    }
+    catLock = CATS.includes(data.pets?.[CAT]?.lock) ? data.pets[CAT].lock : null;
+    { const cat = catOf(); if (cat) wearSkin(cat, cat.cat); } // 贴贴文件换成现在这只的
     size = data.size || 1;
     nickname = data.nickname || '千千';
     claudeWorking = !!data.claudeWorking;
@@ -2916,6 +3250,8 @@
     api.onClaudeNotify(onClaudeNotify);
     api.onClaudeFail(onClaudeFail);
     api.onClaudePet(onClaudePet);
+    api.onCatLock?.(onCatLock);
+    api.onCatCommand?.(onCatCommand);
     api.onSayPet(({ name, text } = {}) => { const pet = pets.find(p => p.name === name && p.visible) || pets.find(p => p.visible); if (pet) say(pet.combo || pet, text, 4000); });
     api.onFullscreen(on => {
       pauseClock(on);
