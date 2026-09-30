@@ -119,7 +119,7 @@ test('99狐狐 sits between 煤球猫猫 and 灰鸮g老师 and follows 煤球猫
   for (const name of ['哥哥狗狗-99狐狐_扶起来', '99狐狐-灰鸮g老师_接眼镜', '99狐狐-灰鸮g老师_围观睡着', '99狐狐-灰鸮g老师']) assert.ok(files.has(name), name);
 });
 
-const CATS = ['蓝猫', '橘狸花', '黑狸花', '橘白狸花', '白猫'];
+const CATS = ['芝麻', '面包', '核桃', '蛋黄酥', '西米'];
 const assets = path.join(__dirname, '..', '桌宠素材');
 const gifsIn = sub => fs.readdirSync(path.join(assets, sub)).filter(f => f.endsWith('.gif')).map(f => f.slice(0, -4));
 

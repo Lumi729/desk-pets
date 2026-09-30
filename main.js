@@ -33,7 +33,7 @@ const ASSETS = path.join(__dirname, '桌宠素材');
 const PETS = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '百变猫猫', '99狐狐', '沙漠狐', '灰鸮g老师'];
 // 百变猫猫：一个宠物位置，五只小猫轮流出场（素材在「百变猫猫/猫名/」，一起的互动在「百变猫猫/互动/」）
 const CAT = '百变猫猫';
-const CATS = ['蓝猫', '橘狸花', '黑狸花', '橘白狸花', '白猫'];
+const CATS = ['芝麻', '面包', '核桃', '蛋黄酥', '西米'];
 // 后来才加的宠物：已经在用的人更新后先不显示（自己去「选择宠物」里勾），新装的照常显示
 const NEW_PETS = ['99狐狐', '百变猫猫', '沙漠狐'];
 const FEATURES = [
@@ -151,7 +151,9 @@ function loadSettings() {
     if (Number.isFinite(saved.nest?.offset)) settings.nest = { si: Number.isInteger(saved.nest.si) ? saved.nest.si : 0, offset: saved.nest.offset };
     if (validTime(saved.diaryTime)) settings.diaryTime = saved.diaryTime;
     if (PETS.includes(saved.diaryWriter)) settings.diaryWriter = saved.diaryWriter;
-    if (CATS.includes(saved.catLock)) settings.catLock = catSkin = saved.catLock;
+    // 小猫改过名字：以前锁定的旧名字换成新名字
+    const catLock = { 蓝猫: '芝麻', 橘狸花: '面包', 黑狸花: '核桃', 橘白狸花: '蛋黄酥', 白猫: '西米' }[saved.catLock] || saved.catLock;
+    if (CATS.includes(catLock)) settings.catLock = catSkin = catLock;
     settings.nickname = cleanName(saved.nickname) || cleanName(saved.online?.name) || '千千'; // 以前只有联网名字，就用它
     if (/^\d{4}-\d\d-\d\d$/.test(saved.firstDay || '')) settings.firstDay = saved.firstDay;
     else {

@@ -88,7 +88,7 @@
   const G = '灰鸮g老师';
   const DOG = '哥哥狗狗';
   const CAT = '百变猫猫';          // 一个宠物位置，五只小猫轮流出场
-  const CATS = ['蓝猫', '橘狸花', '黑狸花', '橘白狸花', '白猫'];
+  const CATS = ['芝麻', '面包', '核桃', '蛋黄酥', '西米'];
   const FENNEC = '沙漠狐';
   const FOX = '99狐狐';
   const LONG_TYPING = 5 * 60_000;  // 连续打字多久算「写了好久」
@@ -383,7 +383,7 @@
     } else if (event.type === 'pointerup') {
       if (pet.catBusy) { /* 正在变身 / 五只一起玩，点一下不打断 */ }
       else if (pet.name === G && !pet.visitor && pet.clips[GLASSES[0]]) clickGlasses(pet, now);
-      else if (pet.cat === '白猫' && Math.random() < 0.35) { playNamed(pet, Math.random() < 0.5 ? '向左看' : '向右看', now, 1500); say(pet, pick(['哼，才不是想让你摸呢', '……就摸一下哦', '本小姐很忙的']), 3000); } // 傲娇
+      else if (pet.cat === '西米' && Math.random() < 0.35) { playNamed(pet, Math.random() < 0.5 ? '向左看' : '向右看', now, 1500); say(pet, pick(['哼，才不是想让你摸呢', '……就摸一下哦', '本小姐很忙的']), 3000); } // 傲娇
       else playRandomAction(pet, now);
       if (!pet.visitor) api.diary('clicks');
       api.touched();
@@ -2483,7 +2483,7 @@
   // ---- 百变猫猫：五只小猫轮流出场 ----
   // 每 2～4 分钟换下一只（五只都轮到之前不重复）：先播这只的「变身_出」，再播下一只的「变身_进」；
   // 偶尔中间插「抢出场」，或者新旧两只一起贴贴 / 叠叠乐一下再变回一只；偶尔五只一起玩。
-  // 性格：蓝猫爱睡觉，橘狸花爱贴贴，黑狸花爱捣蛋、爱打闹，橘白狸花贪吃，白猫傲娇
+  // 性格：芝麻爱睡觉，面包爱贴贴，核桃爱捣蛋、爱打闹，蛋黄酥贪吃，西米傲娇
   const CAT_SWITCH = [120_000, 240_000];
   const CAT_SHOW_CHANCE = 0.25;    // 到换猫的时候，有多大可能改成五只一起玩
   let catComboClips = {};          // 小猫名 → 组合名 → { row, stack, ... }（和别的宠物贴贴用这只自己的文件）
@@ -2509,10 +2509,10 @@
     api.catSkin?.(cat);
   }
 
-  // 下一只：这一轮还没轮到的里面挑；饭点橘白狸花更容易轮到，晚上蓝猫更容易轮到
+  // 下一只：这一轮还没轮到的里面挑；饭点蛋黄酥更容易轮到，晚上芝麻更容易轮到
   function nextCat(pet) {
     if (!catBag.length) catBag = CATS.filter(c => c !== pet.cat);
-    const weight = c => (c === '橘白狸花' && isMealTime() ? 5 : 1) * (c === '蓝猫' && isNight() ? 3 : 1);
+    const weight = c => (c === '蛋黄酥' && isMealTime() ? 5 : 1) * (c === '芝麻' && isNight() ? 3 : 1);
     let r = Math.random() * catBag.reduce((sum, c) => sum + weight(c), 0);
     for (const c of catBag) { r -= weight(c); if (r <= 0) return c; }
     return catBag[catBag.length - 1];
@@ -2558,9 +2558,9 @@
     const from = pet.cat;
     const duet = catDuet(from, next, pet.groupClips);
     const loves = c => c === from || c === next;
-    // 橘狸花爱贴贴：换猫时更容易和另一只贴一下；黑狸花爱捣蛋：更容易来抢出场
-    const duetChance = (loves('橘狸花') ? 0.45 : 0.2);
-    const grabChance = (loves('黑狸花') ? 0.35 : 0.12);
+    // 面包爱贴贴：换猫时更容易和另一只贴一下；核桃爱捣蛋：更容易来抢出场
+    const duetChance = (loves('面包') ? 0.45 : 0.2);
+    const grabChance = (loves('核桃') ? 0.35 : 0.12);
     if (duet && Math.random() < duetChance) {
       catSteps(pet, [[duet, 3000]], now, t => catArrive(pet, next, t));
       api.diary('ep:cats');
@@ -2577,11 +2577,11 @@
   function pickCatShow(pet, now) {
     const idleLong = now - pet.lastAttention > 5 * 60_000;
     const weights = {
-      tower: pet.cat === '黑狸花' ? 1.5 : 1,
-      rollcall: pet.cat === '白猫' ? 1.3 : 1,
-      train: pet.cat === '黑狸花' ? 1.5 : 1,
-      sleep: (isNight() || idleLong ? 4 : 0.5) * (pet.cat === '蓝猫' ? 2 : 1),
-      eat: isMealTime() ? (pet.cat === '橘白狸花' ? 6 : 4) : 0.3,
+      tower: pet.cat === '核桃' ? 1.5 : 1,
+      rollcall: pet.cat === '西米' ? 1.3 : 1,
+      train: pet.cat === '核桃' ? 1.5 : 1,
+      sleep: (isNight() || idleLong ? 4 : 0.5) * (pet.cat === '芝麻' ? 2 : 1),
+      eat: isMealTime() ? (pet.cat === '蛋黄酥' ? 6 : 4) : 0.3,
       dance: 1,
     };
     let r = Math.random() * Object.values(weights).reduce((a, b) => a + b, 0);
@@ -2603,9 +2603,9 @@
     const back = t => catArrive(pet, catLock || nextCat(pet), t);
     api.diary('ep:cats');
     if (type === 'tower') {
-      // 搭好 → 晃几下 → 有时倒了（黑狸花在的时候更容易倒）
+      // 搭好 → 晃几下 → 有时倒了（核桃在的时候更容易倒）
       const sway = Array.from({ length: 2 + Math.floor(Math.random() * 3) }, () => ['叠猫猫塔_晃', 0]);
-      const fall = g['叠猫猫塔_倒'] && Math.random() < (pet.cat === '黑狸花' ? 0.6 : 0.3) ? [['叠猫猫塔_倒', 0]] : [];
+      const fall = g['叠猫猫塔_倒'] && Math.random() < (pet.cat === '核桃' ? 0.6 : 0.3) ? [['叠猫猫塔_倒', 0]] : [];
       catSteps(pet, [['变身_出', 0], ['叠猫猫塔_搭', 0], ...sway, ...fall], now, back);
     } else if (type === 'train') {
       // 小猫火车：播的时候整列火车横穿屏幕，跑到另一头再变回一只
@@ -2640,7 +2640,7 @@
     }
   }
 
-  // 平时：到点换一只或五只一起玩；黑狸花偶尔去捣蛋追别人；橘狸花喜欢凑到别人身边；橘白狸花饭点吃饭；蓝猫容易困
+  // 平时：到点换一只或五只一起玩；核桃偶尔去捣蛋追别人；面包喜欢凑到别人身边；蛋黄酥饭点吃饭；芝麻容易困
   function checkCat(now) {
     const pet = catOf();
     if (!pet || !pet.visible || focusing) return;
@@ -2654,13 +2654,13 @@
     }
     if (!catFree(pet) || now < (pet.nextQuirk || 0)) return;
     pet.nextQuirk = now + rand(40_000, 90_000);
-    if (pet.cat === '黑狸花' && features.chase && Math.random() < 0.5) {
+    if (pet.cat === '核桃' && features.chase && Math.random() < 0.5) {
       const others = pets.filter(p => p !== pet && isFree(p) && p.si === pet.si);
       if (others.length) startChase(pet, pick(others), now, Math.random() < 0.6);
-    } else if (pet.cat === '橘狸花' && Math.random() < 0.6) {
+    } else if (pet.cat === '面包' && Math.random() < 0.6) {
       const others = pets.filter(p => p !== pet && isFree(p) && p.si === pet.si && !Combos.isForbidden(p.name, CAT));
       if (others.length) { const o = others.sort((a, b) => Math.abs(a.x - pet.x) - Math.abs(b.x - pet.x))[0]; walkTo(pet, o.x + Math.sign(pet.x - o.x || 1) * (o.w + pet.w) * 0.3); }
-    } else if (pet.cat === '橘白狸花' && isMealTime() && pet.clips['吃饭']) {
+    } else if (pet.cat === '蛋黄酥' && isMealTime() && pet.clips['吃饭']) {
       playNamed(pet, '吃饭', now, 4000);
       say(pet, '开饭啦开饭啦～', 3000);
     }
@@ -2987,7 +2987,7 @@
         if (maybeSweat(pet, now)) break;
         if (maybeHobby(pet, now)) break;
         if (maybeDoActivity(pet, now)) break;
-        if (now - pet.lastAttention > (pet.cat === '蓝猫' ? SLEEP_AFTER / 2 : SLEEP_AFTER)) { if (!(features.nest && isNight() && goToNest(pet, now))) { pet.state = 'sleep'; setAnim(pet, '睡觉'); } break; } // 晚上困了回小窝；蓝猫爱睡觉，困得快
+        if (now - pet.lastAttention > (pet.cat === '芝麻' ? SLEEP_AFTER / 2 : SLEEP_AFTER)) { if (!(features.nest && isNight() && goToNest(pet, now))) { pet.state = 'sleep'; setAnim(pet, '睡觉'); } break; } // 晚上困了回小窝；芝麻爱睡觉，困得快
         if (now >= pet.nextThink) {
           if (wantsLedge(pet) && Math.random() < 0.9) {
             // 离窗口不远就直接跳；远的话走到离自己最近的那头再跳

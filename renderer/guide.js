@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
 const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
-// 百变猫猫有五只小猫，图标用蓝猫那张
-const icon = name => el('img', { src: `../桌宠素材/托盘图标/${name === '百变猫猫' ? '百变猫猫_蓝猫' : name}-256.png`, alt: '' });
+// 百变猫猫有五只小猫，图标用芝麻那张
+const icon = name => el('img', { src: `../桌宠素材/托盘图标/${name === '百变猫猫' ? '百变猫猫_芝麻' : name}-256.png`, alt: '' });
 
 const INTROS = {
   千千猫猫: '爱捣蛋，最喜欢挑衅哥哥狗狗',

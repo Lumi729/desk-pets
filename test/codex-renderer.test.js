@@ -10,8 +10,8 @@ const handlers = source.slice(source.indexOf('  const companionWorkState ='), so
 const think = source.slice(source.indexOf('  const CAN_START_TYPING ='), source.indexOf('  function place(sprite)'));
 const names = ['千千猫猫', '梨梨兔兔', '哥哥狗狗', '梨梨哥哥', '煤球猫猫', '百变猫猫', '灰鸮g老师', '99狐狐', '沙漠狐'];
 function makePet(name, extra = {}) {
-  // 百变猫猫的动作分五套放在各自的文件夹里，这里用蓝猫那一套
-  const dir = name === '百变猫猫' ? path.join(name, '蓝猫') : name;
+  // 百变猫猫的动作分五套放在各自的文件夹里，这里用芝麻那一套
+  const dir = name === '百变猫猫' ? path.join(name, '芝麻') : name;
   const clips = Object.fromEntries(fs.readdirSync(path.join(__dirname, '../桌宠素材', dir))
     .filter(f => f.endsWith('.gif')).map(f => [f.slice(0, -4), true]));
   return { name, visible: true, state: 'idle', anim: '待机', lastAttention: 0, nextThink: Infinity, until: Infinity, y: 200, vy: 0, clips, ...extra };
