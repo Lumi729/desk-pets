@@ -1,0 +1,35 @@
+name: Android 测试安装包
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['android/**', 'renderer/combos.js', '桌宠素材/**', '.github/workflows/android-build.yml']
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - run: node --test test/android-assets.test.js
+      - name: 编译和检查安卓版
+        working-directory: android
+        run: gradle :app:assembleDebug :app:lintDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lijianxue-android-preview
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
