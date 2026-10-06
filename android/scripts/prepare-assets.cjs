@@ -6,6 +6,8 @@ const root = path.resolve(__dirname, '../..');
 const source = path.join(root, '桌宠素材');
 const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞', '吓一跳', '摇晃', '吐彩虹', '灵动岛'];
 // 像素风灵动岛的三段：左右两段不拉伸，中间那段横向平铺
+// 有的宠物没画「摸摸头」：点它时用「害羞」代替，不会停在待机（Claude）
+const FALLBACKS = { 摸摸头: ['害羞'] };
 const ISLAND = { left: '左.png', middle: '中.png', right: '右.png' };
 function prepare(out) {
   fs.rmSync(out, { recursive: true, force: true });
@@ -18,7 +20,9 @@ function prepare(out) {
       const folder = skin ? `${name}/${skin}` : name;
       const clips = {};
       for (const action of actions) {
-        const file = path.join(source, folder, `${action}.gif`);
+        const names = [action, ...(FALLBACKS[action] || [])];
+        const found = names.map(n => path.join(source, folder, `${n}.gif`)).find(f => fs.existsSync(f));
+        const file = found || path.join(source, folder, `${action}.gif`);
         if (fs.existsSync(file)) {
           const dest = `${id}/${action}.gif`;
           fs.mkdirSync(path.join(out, id), { recursive: true });

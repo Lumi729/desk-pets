@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
         // Keep safe content padding on both gesture and three-button navigation.
         else scroll.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
         text("✦  梨间雪",32,true); text("把小小的陪伴，装进口袋。",16,false);
-        text("安卓尝鲜版 · 0.2-preview · 输入联动与页面跳跃",13,false);
+        text("安卓尝鲜版 · "+UpdateChecker.current(this),13,false);
         permission=text("",14,false);
         button("让桌宠出来玩",()->startPets("start"));
         LinearLayout controls=new LinearLayout(this); page.addView(controls);
@@ -108,7 +108,11 @@ public final class MainActivity extends Activity {
             .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "功能展示：摇晃 → 吐彩虹 → 挂灵动岛"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-show"}[which])).show());
         text("贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫这一版先手动选花色。",13,false);
         text("第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。",13,false);
-        text("这一版不联网。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。",13,false);
+        text("除了检查更新（只连 GitHub 上桌宠的发布页）以外不联网。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。",13,false);
+        text("更新",21,true);
+        option("autoUpdate","自动检查更新（最多 12 小时一次）");
+        button("检查更新",()->checkUpdate(true));
+        text("发现新版本会问你要不要下载；下载好后打开系统安装界面，由你点「安装」。第一次需要允许「安装未知应用」。只接受 GitHub 上桌宠发布页的安装包。",13,false);
     }
     private void updateUsageStatus(){if(interfaceStatus!=null)interfaceStatus.setText(!prefs.getBoolean("interface",false)?"界面互动已关闭":InterfaceCompanion.connected?"界面互动已连接 · 回聊天应用输入，或到其他页面看它跳台阶":"等待你在无障碍设置中开启「界面互动 · 梨间雪桌宠」");if(usageStatus!=null)usageStatus.setText(!prefs.getBoolean("companion",false)?"联动已关闭":(UsageCompanion.allowed(this)||InterfaceCompanion.connected&&prefs.getBoolean("interface",false))?"联动已开启 · 回到其他应用，约 2 秒切换动作":"联动等待授权 · 请允许使用情况访问权限");}
     private void chooseApp(){
@@ -162,6 +166,38 @@ public final class MainActivity extends Activity {
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},3);
         try{startForegroundService(new Intent(this,PetService.class).setAction(action));toast(action.equals("hug")?"让伙伴们试试贴贴":"可以回到桌面看伙伴啦");}catch(RuntimeException e){toast("暂时无法开启，请回到应用再试一次");}
     }
-    @Override protected void onResume(){super.onResume();updateUsageStatus();if(permission!=null)permission.setText(Settings.canDrawOverlays(this)?"✧ 悬浮窗已允许":"✧ 初次开启需允许悬浮窗");if(pendingStart && Settings.canDrawOverlays(this)){pendingStart=false;startPets("start");}}
+    // ---- 更新（Claude）：查 GitHub 上的安卓发布页，有新版就问要不要下载，下载好打开系统安装界面 ----
+    private String pendingVersion,pendingUrl;
+    private final BroadcastReceiver downloaded=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){
+        long id=i.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID,-1);
+        if(id!=-1&&id==prefs.getLong("updateDownload",-2)&&!UpdateChecker.install(MainActivity.this,id))toast("下载没有完成，可以再点一次检查更新");
+    }};
+    private void checkUpdate(boolean manual){
+        if(manual)toast("正在检查更新…");
+        UpdateChecker.check(this,(version,url)->{
+            if(isFinishing())return;
+            if(version==null){if(manual)toast("已经是最新版啦（也可能是网络不通）");return;}
+            new AlertDialog.Builder(this).setTitle("发现新版本 "+version).setMessage("现在是 "+UpdateChecker.current(this)+"。要下载并安装吗？设置会保留。")
+                .setPositiveButton("下载",(d,i)->startDownload(version,url)).setNegativeButton("以后再说",null).show();
+        });
+    }
+    private void startDownload(String version,String url){
+        if(Build.VERSION.SDK_INT>=26&&!getPackageManager().canRequestPackageInstalls()){
+            pendingVersion=version;pendingUrl=url;
+            try{startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+getPackageName())));toast("允许「安装未知应用」后回来就会开始下载");}
+            catch(ActivityNotFoundException e){toast("请在系统设置里允许桌宠安装未知应用");}
+            return;
+        }
+        UpdateChecker.download(this,version,url);toast("开始下载，好了会打开安装界面");
+    }
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if("update".equals(intent.getAction()))checkUpdate(true);}
+    @Override protected void onPause(){super.onPause();try{unregisterReceiver(downloaded);}catch(IllegalArgumentException ignored){}}
+    @Override protected void onResume(){super.onResume();
+        IntentFilter done=new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+        if(Build.VERSION.SDK_INT>=33)registerReceiver(downloaded,done,Context.RECEIVER_EXPORTED);else registerReceiver(downloaded,done);
+        if(pendingUrl!=null&&(Build.VERSION.SDK_INT<26||getPackageManager().canRequestPackageInstalls())){String v=pendingVersion,u=pendingUrl;pendingVersion=pendingUrl=null;startDownload(v,u);}
+        long id=prefs.getLong("updateDownload",-1);if(id!=-1)UpdateChecker.install(this,id);
+        if("update".equals(getIntent().getAction())){getIntent().setAction(null);checkUpdate(true);}
+        else if(UpdateChecker.due(prefs))checkUpdate(false);updateUsageStatus();if(permission!=null)permission.setText(Settings.canDrawOverlays(this)?"✧ 悬浮窗已允许":"✧ 初次开启需允许悬浮窗");if(pendingStart && Settings.canDrawOverlays(this)){pendingStart=false;startPets("start");}}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
 }

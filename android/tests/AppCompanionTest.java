@@ -76,6 +76,17 @@ public final class AppCompanionTest {
         equal(IslandHang.x(1000,300,100,1080),980f);
         equal(IslandHang.y(180,40f,10),130f);
         equal(IslandHang.y(20,40f,10),0f);
+        // 检查更新（Claude）：只认更高的安卓版本，只接受本仓库安卓发布页的 APK
+        equal(UpdateRules.newer("android-v0.5-preview","0.4-preview"),true);
+        equal(UpdateRules.newer("android-v0.4-preview","0.4-preview"),false);
+        equal(UpdateRules.newer("android-v0.10-preview","0.9-preview"),true);
+        equal(UpdateRules.newer("android-v1.0-preview","0.12-preview"),true);
+        equal(UpdateRules.newer("android-v0.3-preview","0.4-preview"),false);
+        equal(UpdateRules.newer("v1.0.34","0.4-preview"),false);
+        equal(UpdateRules.newer("android-vbad","0.4-preview"),false);
+        equal(UpdateRules.trustedApk("https://github.com/Lumi729/desk-pets/releases/download/android-v0.5-preview/lijianxue-android-0.5-preview.apk"),true);
+        equal(UpdateRules.trustedApk("https://example.com/releases/download/android-v0.5-preview/x.apk"),false);
+        equal(UpdateRules.trustedApk("https://github.com/Lumi729/desk-pets/releases/download/v1.0.34/desk-pets-setup-1.0.34.exe"),false);
         System.out.println("App classification, overrides, stale events, switch ordering and screen reset passed");
     }
 }

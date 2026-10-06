@@ -65,3 +65,4 @@
 - 安卓逐层掉落用 Perch.catchFall 接住脚下最近的下层平台，跳落起点不能再次接住自身。IslandMedia 通过已授权的媒体会话显示标题与控制播放；本地计时仅在服务运行时检查，不声称系统精确闹钟。音乐/通知、充电与计时属于可选提示条能力，不宣称完整系统灵动岛或电话接听。
 
 - 安卓摇晃 / 灵动岛新素材（Claude，2026-10-06）：`prepare-assets.cjs` 打包「摇晃」「吐彩虹」「灵动岛」三个动作和 `桌宠素材/灵动岛/` 的左 / 中 / 右三段像素图（`catalog.json` 的 `island`）。弹力球飞动期间播摇晃，落地后 `spitRainbow` 播一遍吐彩虹再回待机（彩虹画在 GIF 里，PetView 不再程序画彩虹）。提示条背景是 `IslandBackground`：左右两段不拉伸、中间平铺、最近邻整像素放大（尺寸在 `IslandHang`，有 Java 测试），文字只在中间段。外卖 / 选中应用通知 / 演示出现在提示条上时，`updateHanger` 让 `islandPet`（默认第一只出来的）跑到下方跳上去挂着播灵动岛，GIF 顶边压住提示条底边一格；提示条消失或换成别的内容用 `startFall` 落回地面，拖动、双击会取消这次挂着。「通知时伙伴挂在提示条下面」开关默认关闭，只有演示不看开关。电脑版把这三个动作放进 `CORE`，不随机播。Java 回归需同时编译 IslandHang.java。
+- 安卓检查更新（Claude，2026-10-06）：`UpdateChecker` 只读本仓库 Releases 里 `android-v*` 的 APK（`UpdateRules` 比较版本、限制下载地址，有 Java 测试），系统下载器下载后打开系统安装界面，由用户确认；「自动检查更新」默认关闭，最多 12 小时一次。这是安卓版唯一联网处，需要 INTERNET / REQUEST_INSTALL_PACKAGES 权限。没有「摸摸头」的宠物由 `prepare-assets.cjs` 的 `FALLBACKS` 用「害羞」代替。Java 回归需同时编译 UpdateRules.java。
