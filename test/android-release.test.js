@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-for (const state of ['missing', 'draft', 'published']) {
+for (const state of ['missing', 'draft', 'published', 'unsigned']) {
   test(`Android publishing: ${state} release keeps desktop latest and existing packages safe`, { skip: process.platform === "win32" }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'android-release-'));
     try {
@@ -18,14 +18,20 @@ for (const state of ['missing', 'draft', 'published']) {
 const fs=require('node:fs');const a=process.argv.slice(2);
 fs.appendFileSync(process.env.CALL_LOG,JSON.stringify(a)+'\\n');
 if(a[1]==='view'){
-  if(process.env.RELEASE_STATE==='missing')process.exit(1);
+  if(['missing','unsigned'].includes(process.env.RELEASE_STATE))process.exit(1);
   console.log(process.env.RELEASE_STATE==='draft'?'true':'false');
 }
 `, { mode: 0o755 });
       const result = spawnSync('bash', [path.resolve('android/scripts/publish-preview.sh')], {
         cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${path.join(dir, 'bin')}:${process.env.PATH}`,
-          RUNNER_TEMP: dir, GITHUB_SHA: 'test-commit', RELEASE_STATE: state, CALL_LOG: log }
+          RUNNER_TEMP: dir, GITHUB_SHA: 'test-commit', RELEASE_STATE: state, CALL_LOG: log, ANDROID_SIGNED_APK: state==='unsigned'?'':path.join(dir,'android/app/build/outputs/apk/debug/app-debug.apk') }
       });
+      if(state==='unsigned'){
+        assert.notEqual(result.status,0);
+        assert.ok(!fs.readFileSync(log,'utf8').includes('"create"'));
+        assert.ok(!fs.readFileSync(log,'utf8').includes('"upload"'));
+        return;
+      }
       assert.equal(result.status, 0, result.stderr);
       const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
       assert.ok(calls.every(a => a[2] === 'android-v0.2-preview'));

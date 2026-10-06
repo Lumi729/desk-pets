@@ -1,4 +1,7 @@
 plugins { id 'com.android.application' }
+def fixedStore = System.getenv('ANDROID_KEYSTORE_PATH')
+def fixedPassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+def fixedSigningReady = fixedStore && fixedPassword
 android {
     namespace 'com.lumi.deskpets'
     compileSdk 35
@@ -10,6 +13,17 @@ android {
         versionName '0.2-preview'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    signingConfigs {
+        fixedRelease {
+            if (fixedSigningReady) {
+                storeFile file(fixedStore)
+                storePassword fixedPassword
+                keyAlias System.getenv('ANDROID_KEY_ALIAS') ?: 'deskpets'
+                keyPassword fixedPassword
+            }
+        }
+    }
+    buildTypes { release { signingConfig signingConfigs.fixedRelease } }
     sourceSets { main { assets.srcDirs = [layout.buildDirectory.dir('generated/petAssets')] } }
 }
 tasks.register('preparePetAssets', Exec) {
@@ -21,3 +35,9 @@ tasks.register('preparePetAssets', Exec) {
     outputs.dir(layout.buildDirectory.dir('generated/petAssets'))
 }
 tasks.named('preBuild').configure { dependsOn 'preparePetAssets' }
+tasks.register('requireFixedSigning') {
+    doLast {
+        if (!fixedSigningReady) throw new GradleException('Release requires a persistent signing keystore. Do not publish a debug APK as an update.')
+    }
+}
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn 'requireFixedSigning' }

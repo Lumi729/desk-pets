@@ -44,7 +44,21 @@ jobs:
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
-      - name: 发布安卓测试版（版本号未变则保留已有发布）
+      - name: 构建固定签名安装包（已配置时）
+        # Only release APKs signed with the privately stored persistent key.
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEYSTORE_PASSWORD" ]]; then
+            umask 077
+            export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/deskpets-release.p12"
+            trap 'rm -f "$ANDROID_KEYSTORE_PATH"' EXIT
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+            (cd android && gradle :app:assembleRelease :app:lintRelease)
+            echo "ANDROID_SIGNED_APK=$GITHUB_WORKSPACE/android/app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_ENV"
+          fi
+      - name: 发布固定签名 APK（已有版本不替换）
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
