@@ -26,3 +26,19 @@ test('Android packages real idle/interaction clips and obeys desktop pairing res
     assert.ok(hugs[`${cat.id}:${dog.id}`], 'initial pets can hug');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Android ships the shake, rainbow and island clips plus the three pixel island parts (Claude)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-island-'));
+  try {
+    const { pets, island } = prepare(dir);
+    for (const p of pets) for (const action of ['摇晃', '吐彩虹', '灵动岛']) assert.ok(p.clips[action], `${p.label}: ${action}`);
+    assert.deepEqual(Object.keys(island).sort(), ['left', 'middle', 'right']);
+    for (const file of Object.values(island)) {
+      const bytes = fs.readFileSync(path.join(dir, file));
+      assert.equal(bytes.subarray(1, 4).toString(), 'PNG');
+      assert.equal(bytes.readUInt32BE(20), 70, `${file} 应该是 70 像素高`); // 三段一样高，才能拼成一条
+    }
+    const catalog = JSON.parse(fs.readFileSync(path.join(dir, 'catalog.json'), 'utf8'));
+    assert.deepEqual(catalog.island, island);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

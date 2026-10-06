@@ -68,6 +68,14 @@ public final class AppCompanionTest {
         equal(SurfaceRules.kind("android.widget.Button","",false,false,true,10,100,40,360),SurfaceRules.CONTROL);
         equal(SurfaceRules.kind("android.widget.FrameLayout","",true,false,false,0,360,640,360),SurfaceRules.NONE);
         equal(SurfaceRules.kind("android.view.View","",false,false,false,10,240,100,360),SurfaceRules.NONE);
+        // 灵动岛（Claude）：整像素放大保持清晰，宠物居中挂在提示条下面、GIF 顶边压住提示条底边一点
+        equal(IslandHang.block(3f),19);equal(IslandHang.height(19),133);equal(IslandHang.cap(19),76);
+        equal(IslandHang.block(1f),6);equal(IslandHang.block(.1f),1);
+        equal(IslandHang.x(100,300,100,1080),200f);
+        equal(IslandHang.x(-50,100,100,1080),0f);
+        equal(IslandHang.x(1000,300,100,1080),980f);
+        equal(IslandHang.y(180,40f,10),130f);
+        equal(IslandHang.y(20,40f,10),0f);
         System.out.println("App classification, overrides, stale events, switch ordering and screen reset passed");
     }
 }

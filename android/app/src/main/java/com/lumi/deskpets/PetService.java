@@ -41,6 +41,11 @@ public final class PetService extends Service {
     private boolean islandFromNotice;
     private AlertDialog islandPanel;
     private long nextMediaCheck,lastNotice,timerFinishedUntil;
+    // 灵动岛：像素胶囊背景；通知出现时一只伙伴挂在下面（「通知时挂在提示条下」开关默认关闭，演示除外）
+    private IslandBackground islandArt;
+    private int islandBlock;
+    private boolean islandNotice;
+    private long hangSkipUntil;
 
     private final BroadcastReceiver screen=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){screenOn=!Intent.ACTION_SCREEN_OFF.equals(i.getAction());refreshVisibility();}};
     private final Runnable loop=new Runnable(){public void run(){if(destroyed)return;if(!Settings.canDrawOverlays(PetService.this)){stopSelf();return;}long now=SystemClock.uptimeMillis();float dt=Math.min(.05f,(now-lastFrame)/1000f);lastFrame=now;checkTimer();if(screenOn&&!paused)tick(now,dt);clock.postDelayed(this,screenOn&&!paused?50:1000);}};
@@ -53,7 +58,10 @@ public final class PetService extends Service {
         int direction;
         long until,decision,cooldown,lastTap;
         String action="待机";
-        boolean dragging,falling,bouncing;
+        boolean dragging,falling,bouncing,rainbowAfter;
+        int hang; // 0 平时，1 跑到提示条下面，2 跳上去，3 挂着
+        long hangStart;
+        float hangFromX,hangFromY;
         Perch perch,target;
         float hopX,hopY;
         long hopStart,nextHop;
@@ -79,6 +87,9 @@ public final class PetService extends Service {
         startForeground(7,notification());
         if(actors.isEmpty()||"start".equals(action)||"hug".equals(action)||(action!=null&&action.startsWith("test-")))rebuild();
         if("test-shake".equals(action))bounceParty();
+        if("test-rainbow".equals(action)){long now=SystemClock.uptimeMillis();for(Actor a:actors)spitRainbow(a,now);}
+        if("test-hang".equals(action))hangDemo();
+        if("test-show".equals(action)){bounceParty();clock.postDelayed(this::hangDemo,9000);}
         if("test-island".equals(action)){islandMessage="演示：外卖通知提醒";islandUntil=SystemClock.uptimeMillis()+6000;islandDismissed=0;showIsland(islandMessage);}
         if("test-narrow".equals(action)){
             endHug();Perch narrow=new Perch(width/2-unit/3,height/2,width/2+unit/3);surfaces=Arrays.asList(narrow);demoUntil=SystemClock.uptimeMillis()+7000;
@@ -146,7 +157,7 @@ public final class PetService extends Service {
         for(Actor a:actors){
             boolean missing=a.perch!=null && surfaces.stream().noneMatch(p->p.near(a.perch));
             boolean lostTarget=a.target!=null && surfaces.stream().noneMatch(p->p.near(a.target));
-            if(a.ballEnd>now)continue;
+            if(a.ballEnd>now||a.hang!=0)continue;
             if(changed||missing||lostTarget){
                 a.perch=a.target=null;a.hopStart=0;a.nextHop=now+1500;
                 if(!a.dragging && a.y<a.floor() && !a.falling)startFall(a,now);
@@ -168,9 +179,11 @@ public final class PetService extends Service {
         motion.enabled(unlocked&&options.getBoolean("motion",false));
         updateIsland(now,options,unlocked);
         updateInterface(now);
+        updateHanger(now,options);
         if(hugA!=null&&now>=hugEnd)endHug();
         for(Actor a:actors){
             if(a==hugA||a==hugB||a.dragging)continue;
+            if(a.hang!=0){hang(a,now,dt);continue;}
             if(a.ballEnd>now){
                 a.ballX+=motion.tilt*unit*5*dt;a.ballY+=unit*4*dt;
                 a.x+=a.ballX*dt;a.y+=a.ballY*dt;
@@ -178,7 +191,7 @@ public final class PetService extends Service {
                 if(a.y<=0){a.y=0;a.ballY=Math.abs(a.ballY)*.78f;}else if(a.y>=a.floor()){a.y=a.floor();a.ballY=-Math.abs(a.ballY)*.78f;}
                 position(a);continue;
             }
-            if(a.ballEnd!=0){a.ballEnd=0;startFall(a,now);a.view.rainbow();}
+            if(a.ballEnd!=0){a.ballEnd=0;startFall(a,now);a.rainbowAfter=true;} // 落地后吐彩虹（GIF 里画好了彩虹）
             if(a.hopStart>0){
                 float progress=Math.min(1,(now-a.hopStart)/700f);
                 a.x=a.hopX+(a.target.x(unit,width)-a.hopX)*progress;
@@ -190,7 +203,7 @@ public final class PetService extends Service {
             if(a.falling){
                 float before=a.y;a.velocity+=unit*5*dt;a.y+=a.velocity*dt;
                 if(a.velocity>=0){Perch caught=Perch.catchFall(surfaces,a.x,before,a.y,unit,a.floor());if(caught!=null){a.perch=caught;a.y=caught.top-unit;a.nextHop=now+3000;}}
-                if(a.y>=a.landing()){a.y=a.landing();a.falling=false;a.play(a.bouncing?"开心蹦蹦":"摔趴趴",1400);a.bouncing=false;}
+                if(a.y>=a.landing()){a.y=a.landing();a.falling=false;if(a.rainbowAfter)spitRainbow(a,now);else a.play(a.bouncing?"开心蹦蹦":"摔趴趴",1400);a.bouncing=false;}
                 position(a);continue;
             }
             if(a.until>now)continue;
@@ -219,11 +232,11 @@ public final class PetService extends Service {
         }
         if(hugA==null)for(int i=0;i<actors.size();i++)for(int j=i+1;j<actors.size();j++){
             Actor a=actors.get(i),b=actors.get(j);
-            if(!a.dragging&&!b.dragging&&!a.falling&&!b.falling&&now>a.cooldown&&now>b.cooldown&&now>a.until&&now>b.until&&Math.abs(a.x-b.x)<unit*.65f&&Math.abs(a.y-b.y)<unit*.25f){if(beginHug(a,b))return;}
+            if(!a.dragging&&!b.dragging&&!a.falling&&!b.falling&&a.hang==0&&b.hang==0&&now>a.cooldown&&now>b.cooldown&&now>a.until&&now>b.until&&Math.abs(a.x-b.x)<unit*.65f&&Math.abs(a.y-b.y)<unit*.25f){if(beginHug(a,b))return;}
         }
     }
     private boolean beginHug(Actor a,Actor b){
-        String clip=catalog.hug(a.pet,b.pet);if(clip.isEmpty()||hugA!=null||a.ballEnd!=0||b.ballEnd!=0||a.perch!=null||b.perch!=null||a.hopStart>0||b.hopStart>0)return false;
+        String clip=catalog.hug(a.pet,b.pet);if(clip.isEmpty()||hugA!=null||a.hang!=0||b.hang!=0||a.ballEnd!=0||b.ballEnd!=0||a.perch!=null||b.perch!=null||a.hopStart>0||b.hopStart>0)return false;
         hugA=a;hugB=b;a.direction=b.direction=0;a.falling=b.falling=false;a.dragging=b.dragging=false;
         a.pos.width=Math.min(width,unit*2);a.x=(a.x+b.x)/2;a.y=a.floor();a.view.show(clip);b.view.setVisibility(View.GONE);b.view.animate(false);position(a);hugEnd=SystemClock.uptimeMillis()+5500;return true;
     }
@@ -233,6 +246,7 @@ public final class PetService extends Service {
     }
     private void jump(Actor a){
         if(a==hugA||a==hugB)endHug();
+        if(a.hang!=0){a.hang=0;hangSkipUntil=islandUntil;}
         a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.direction=0;a.dragging=false;a.falling=true;a.bouncing=true;a.velocity=-unit*3.3f;a.play("开心蹦蹦",0);
     }
     private void setTouch(Actor a){
@@ -244,7 +258,7 @@ public final class PetService extends Service {
         a.view.setOnTouchListener(new View.OnTouchListener(){float downX,downY,startX,startY;boolean moved,longPressed;final int slop=ViewConfiguration.get(PetService.this).getScaledTouchSlop();final Runnable hold=()->{longPressed=true;a.dragging=false;a.view.performLongClick();};
             public boolean onTouch(View v,MotionEvent e){switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
-                    if(a==hugA||a==hugB)endHug();downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
+                    if(a==hugA||a==hugB)endHug();if(a.hang!=0){a.hang=0;hangSkipUntil=islandUntil;}a.rainbowAfter=false;downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
                 case MotionEvent.ACTION_MOVE:
                     float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.hypot(dx,dy)>slop){moved=true;a.lastTap=0;clock.removeCallbacks(hold);}if(moved&&!longPressed){a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
                 case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:
@@ -261,8 +275,9 @@ public final class PetService extends Service {
         for(Actor a:actors){
             if(a.dragging)continue;
             a.perch=a.target=null;a.hopStart=0;a.falling=false;a.direction=0;a.nextHop=now+8000;
+            a.hang=0;a.rainbowAfter=false;
             a.ballEnd=now+4500;a.ballX=(random.nextBoolean()?1:-1)*unit*3;a.ballY=-unit*5;
-            a.play("吓一跳",0);
+            a.play("摇晃",0); // 弹力球飞动期间摇晃
         }
     }
     private void updateIsland(long now,android.content.SharedPreferences prefs,boolean unlocked){
@@ -281,7 +296,8 @@ public final class PetService extends Service {
                 if(battery!=null&&battery.getIntExtra(BatteryManager.EXTRA_PLUGGED,0)!=0){int level=battery.getIntExtra(BatteryManager.EXTRA_LEVEL,0),scale=Math.max(1,battery.getIntExtra(BatteryManager.EXTRA_SCALE,100));batteryLabel="⚡ 充电中 · "+(level*100/scale)+"%";}
             }
         }
-        String label=now<islandUntil&&(prefs.getBoolean("delivery",false)||islandFromNotice||islandMessage.startsWith("演示"))?islandMessage:"";
+        boolean notice=now<islandUntil&&(prefs.getBoolean("delivery",false)||islandFromNotice||islandMessage.startsWith("演示"));
+        String label=notice?islandMessage:"";
         long remaining=prefs.getLong("timerEnd",0)-System.currentTimeMillis();
         if(SystemClock.elapsedRealtime()<timerFinishedUntil)label="⏱ 时间到啦";
         else if(label.isEmpty()&&remaining>0)label=String.format(java.util.Locale.ROOT,"⏱ %02d:%02d",remaining/60000,(remaining/1000)%60);
@@ -292,15 +308,21 @@ public final class PetService extends Service {
             else if("video".equals(companionMode))label="🐾 陪你看视频";
             else if("music".equals(companionMode))label="♫ 一起摇摆";
         }
-        if(label.isEmpty()||now<islandDismissed)hideIsland();else showIsland(label);
+        if(label.isEmpty()||now<islandDismissed){hideIsland();islandNotice=false;}
+        else{showIsland(label);islandNotice=notice&&label.equals(islandMessage);}
     }
     private void showIsland(String label){
         if(island==null){
             island=new android.widget.TextView(this);island.setGravity(Gravity.CENTER);island.setTextColor(android.graphics.Color.WHITE);island.setTextSize(14);
-            android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable();bg.setColor(0xEE302932);bg.setCornerRadius(100);island.setBackground(bg);
             float density=getResources().getDisplayMetrics().density;
-            WindowManager.LayoutParams p=new WindowManager.LayoutParams(Math.min(width,(int)(270*density)),(int)(48*density),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);p.gravity=Gravity.TOP|Gravity.CENTER_HORIZONTAL;p.y=(int)(12*density);
-            island.setSingleLine(true);island.setEllipsize(android.text.TextUtils.TruncateAt.END);island.setPadding(18,0,18,0);island.setOnClickListener(v->openIslandPanel());
+            // 像素胶囊：左右两段不拉伸、中间平铺，最近邻缩放；文字只放在中间段
+            islandBlock=IslandHang.block(density);
+            if(islandArt==null)islandArt=IslandBackground.load(this,catalog,islandBlock);
+            int islandHeight=islandArt==null?(int)(48*density):IslandHang.height(islandBlock);
+            if(islandArt!=null){island.setBackground(islandArt);int cap=islandArt.capWidth();island.setPadding(cap,0,cap,0);}
+            else{android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable();bg.setColor(0xEE302932);bg.setCornerRadius(100);island.setBackground(bg);island.setPadding(18,0,18,0);}
+            WindowManager.LayoutParams p=new WindowManager.LayoutParams(Math.min(width,(int)(270*density)),islandHeight,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);p.gravity=Gravity.TOP|Gravity.CENTER_HORIZONTAL;p.y=(int)(12*density);
+            island.setSingleLine(true);island.setEllipsize(android.text.TextUtils.TruncateAt.END);island.setOnClickListener(v->openIslandPanel());
             try{windows.addView(island,p);}catch(RuntimeException e){island=null;return;}
         }
         island.setText(label);
@@ -309,6 +331,62 @@ public final class PetService extends Service {
         android.content.SharedPreferences p=getSharedPreferences("pets",MODE_PRIVATE);long end=p.getLong("timerEnd",0);
         if(end>0&&System.currentTimeMillis()>=end){p.edit().putLong("timerEnd",0).apply();timerFinishedUntil=SystemClock.elapsedRealtime()+15000;islandDismissed=0;
             getSystemService(NotificationManager.class).notify(8,new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setContentTitle("桌宠计时器：时间到啦").setContentText("回到桌宠可以再开一轮").setAutoCancel(true).build());}
+    }
+    /** 吐一遍彩虹（约 2.7 秒，GIF 里画好了彩虹）再回待机。 */
+    private void spitRainbow(Actor a,long now){
+        if(a==hugA||a==hugB)endHug();
+        a.rainbowAfter=false;a.direction=0;a.play("吐彩虹",0);a.until=now+Math.max(2600,a.view.duration());
+    }
+    private void hangDemo(){
+        islandMessage="演示：挂在灵动岛上";islandFromNotice=false;islandUntil=SystemClock.uptimeMillis()+8000;islandDismissed=0;hangSkipUntil=0;showIsland(islandMessage);
+    }
+    /** 选好的伙伴（默认第一只出来的）在通知提示条出现时挂上去；提示条消失或换成别的内容就落回地面。 */
+    private void updateHanger(long now,android.content.SharedPreferences prefs){
+        boolean want=islandNotice&&island!=null&&island.isLaidOut()&&now>=hangSkipUntil
+            &&(prefs.getBoolean("islandHang",false)||islandMessage.startsWith("演示"));
+        Actor chosen=null;
+        if(want){
+            String id=prefs.getString("islandPet","");
+            for(Actor a:actors)if(a.pet.id.equals(id)&&a!=hugB){chosen=a;break;}
+            if(chosen==null&&!actors.isEmpty())chosen=actors.get(0);
+        }
+        for(Actor a:actors){
+            if(a==chosen){
+                if(a.hang==0&&!a.dragging){
+                    if(a==hugA||a==hugB)endHug();
+                    a.ballEnd=0;a.rainbowAfter=false;a.perch=a.target=null;a.hopStart=0;a.falling=false;a.bouncing=false;a.direction=0;
+                    boolean grounded=a.y>=a.floor()-1;
+                    a.hang=grounded?1:2;a.hangStart=now;a.hangFromX=a.x;a.hangFromY=a.y;
+                    if(!grounded)a.play("开心蹦蹦",0);
+                }
+            }else if(a.hang!=0){
+                a.hang=0;a.nextHop=now+3000;
+                if(a.y<a.floor())startFall(a,now);else a.play("待机",0); // 用现有的掉落逻辑落回地面
+            }
+        }
+    }
+    private void hang(Actor a,long now,float dt){
+        if(island==null){a.hang=0;startFall(a,now);return;}
+        int[] at=new int[2];island.getLocationOnScreen(at);
+        float tx=IslandHang.x(at[0]-originX,island.getWidth(),unit,width);
+        float ty=IslandHang.y(at[1]-originY+island.getHeight(),a.view.contentTop(),Math.max(1,islandBlock));
+        a.lastTap=0;
+        if(a.hang==1){ // 先在地上跑到提示条正下方
+            float step=unit*1.6f*dt,dx=tx-a.x;
+            if(Math.abs(dx)<=step){a.x=tx;a.hang=2;a.hangStart=now;a.hangFromX=a.x;a.hangFromY=a.y;a.play("开心蹦蹦",0);}
+            else{a.x+=Math.signum(dx)*step;a.play(dx<0?"向左走":"向右走",0);}
+        }else if(a.hang==2){ // 跳上去
+            float p=Math.min(1,(now-a.hangStart)/650f);
+            a.x=a.hangFromX+(tx-a.hangFromX)*p;
+            a.y=a.hangFromY+(ty-a.hangFromY)*p-unit*.6f*4*p*(1-p);
+            if(p>=1){a.hang=3;a.play("灵动岛",0);bringToFront(a);}
+        }else{a.x=tx;a.y=ty;if(!"灵动岛".equals(a.action))a.play("灵动岛",0);}
+        position(a);
+    }
+    /** 挂着时爪子要盖在提示条边上，所以把这只的窗口放到最上层。 */
+    private void bringToFront(Actor a){
+        if(!a.view.isAttachedToWindow())return;
+        try{windows.removeViewImmediate(a.view);windows.addView(a.view,a.pos);}catch(RuntimeException ignored){}
     }
     private void openIslandPanel(){
         if(islandPanel!=null)return;
@@ -324,7 +402,7 @@ public final class PetService extends Service {
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
     private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();if(islandPanel!=null)islandPanel.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
     private void clearActors(){hideIsland();hugA=hugB=null;clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
-    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();endHug();InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
+    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();endHug();InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.hang=0;a.rainbowAfter=false;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
     @Override public void onDestroy(){destroyed=true;if(islandPanel!=null)islandPanel.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent i){return null;}
 }

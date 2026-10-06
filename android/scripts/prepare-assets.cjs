@@ -4,7 +4,9 @@ const path = require('node:path');
 const rules = require('../../renderer/combos.js');
 const root = path.resolve(__dirname, '../..');
 const source = path.join(root, '桌宠素材');
-const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞', '吓一跳'];
+const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞', '吓一跳', '摇晃', '吐彩虹', '灵动岛'];
+// 像素风灵动岛的三段：左右两段不拉伸，中间那段横向平铺
+const ISLAND = { left: '左.png', middle: '中.png', right: '右.png' };
 function prepare(out) {
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
@@ -40,7 +42,15 @@ function prepare(out) {
       fs.copyFileSync(file, path.join(out, dest)); hugs[`${p.id}:${q.id}`] = dest;
     }
   }
-  const data = { pets, hugs };
+  const island = {};
+  fs.mkdirSync(path.join(out, 'island'));
+  for (const [part, file] of Object.entries(ISLAND)) {
+    const from = path.join(source, '灵动岛', file);
+    if (!fs.existsSync(from)) throw new Error(`Missing island part: ${file}`);
+    fs.copyFileSync(from, path.join(out, 'island', `${part}.png`));
+    island[part] = `island/${part}.png`;
+  }
+  const data = { pets, hugs, island };
   fs.writeFileSync(path.join(out, 'catalog.json'), JSON.stringify(data));
   return data;
 }

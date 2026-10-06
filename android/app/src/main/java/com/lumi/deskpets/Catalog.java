@@ -15,6 +15,7 @@ final class Catalog {
     }
     final List<Pet> pets = new ArrayList<>();
     final JSONObject hugs;
+    final JSONObject island; // 灵动岛三段像素图（旧素材包没有就是 null）
     Catalog(Context context) throws IOException, JSONException {
         try (InputStream in=context.getAssets().open("catalog.json")) {
             ByteArrayOutputStream bytes=new ByteArrayOutputStream();
@@ -24,6 +25,7 @@ final class Catalog {
             JSONArray items=root.getJSONArray("pets");
             for(int i=0;i<items.length();i++) pets.add(new Pet(items.getJSONObject(i)));
             hugs=root.getJSONObject("hugs");
+            island=root.optJSONObject("island");
         }
     }
     String hug(Pet a, Pet b) { return hugs.optString(a.id+":"+b.id, hugs.optString(b.id+":"+a.id, "")); }
