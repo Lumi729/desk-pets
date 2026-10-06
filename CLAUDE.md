@@ -50,3 +50,12 @@
 - Mac 多屏：`lib/mac-displays.js` 创建每屏显示窗口，隐藏透明主窗口唯一运行宠物逻辑；`renderer/mirror-host.js` 发送安全的场景节点与图片，各 `mirror.js` 只显示和回传坐标，禁止重复运行宠物 AI / 日记 / 联网。原生组件与真实双屏拖动仍需实机验证。
 - Codex 的 macOS hook 在 `lib/codex-posix.js`，只发白名单状态，使用应用自带 Electron 的 Node 模式；不得改用户审批和信任。Claude 使用系统 curl，安静退出。Windows 命令保留。
 - `.github/workflows/mac-build.yml` 在 Mac 上测试、启动真实窗口、构建两种 DMG，供发布流程复用；版本不变只留下 Actions 测试附件。下次新版本发布要等两种 DMG 和 Windows 安装包都成功才公开。
+
+## 安卓尝鲜版
+- 独立原生工程在 `android/`，安装与构建说明见 `android/README.md`；APK 测试附件由 `.github/workflows/android-build.yml` 生成，不改电脑版版本号或触发正式发布。
+- 素材由 `android/scripts/prepare-assets.cjs` 从电脑版抽取；配对继续复用 `renderer/combos.js`，不要绕过禁配规则。最多三只悬浮宠物，支持摸摸、拖动落地、双击跳跃、双人贴贴。
+- 应用联动：`UsageCompanion.java` 在用户开启开关并授权使用情况访问后查询前台应用；`AppCompanion.java` 负责分类和用户自定义动作。聊天/视频/音乐应用分别敲代码、看视频、跳舞；浏览器需用户自行指定动作，同一浏览器所有网页共用设置，不宣称识别到了实际打字或播放。
+- 只在本机判断应用；不读取或上传文字、按键、网址、截图，不保存识别历史。收起、熄屏或关掉联动后停止查询；进入授权设置前先收起桌宠，避免挡住系统权限开关。
+- 摸摸、拖动、落地、贴贴优先于联动；新增动作要加手机端「测试动作 / 功能展示」。准确站上输入框或按钮尚未实现，后续需验证界面边界识别，不用贴屏幕边缘代替。
+- 验证：仓库 `npm test`，`android/tests/AppCompanionTest.java` 的独立 Java 测试，以及 Gradle `:app:assembleDebug :app:lintDebug`。编译成功不等于真机验证，悬浮权限、后台限制和应用识别需手机实测。
+- 尝鲜 APK 使用调试签名；覆盖安装须保持同一签名，不提交签名私钥。其他构建机器的默认调试签名可能不同，长期分发前需配置固定签名。

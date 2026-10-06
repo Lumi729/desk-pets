@@ -20,6 +20,7 @@ public final class MainActivity extends Activity {
     private TextView permission;
     private SeekBar size;
     private Switch walking;
+    private TextView usageStatus;
     private boolean pendingStart;
     int dp(int value) { return Math.round(value*getResources().getDisplayMetrics().density); }
     @Override public void onCreate(Bundle state) {
@@ -30,14 +31,26 @@ public final class MainActivity extends Activity {
         // Keep safe content padding on both gesture and three-button navigation.
         else scroll.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
         text("✦  梨间雪",32,true); text("把小小的陪伴，装进口袋。",16,false);
-        text("安卓尝鲜版 · 先接两三只回家",13,false);
+        text("安卓尝鲜版 · 应用联动与跳跃",13,false);
         permission=text("",14,false);
         button("让桌宠出来玩",()->startPets("start"));
         LinearLayout controls=new LinearLayout(this); page.addView(controls);
         smallButton(controls,"收起 / 继续",()->startPets("toggle"));
         smallButton(controls,"全部回家",()->{stopService(new Intent(this,PetService.class));toast("小动物回家啦");});
+        text("陪你用手机",21,true);
+        Switch companion=new Switch(this);companion.setText("应用联动");companion.setChecked(prefs.getBoolean("companion",false));page.addView(companion);
+        companion.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("companion",on).apply();updateUsageStatus();});
+        usageStatus=text("",14,false);
+        text("打开聊天应用时陪你打字，视频应用里一起看，音乐应用里跳舞。只按应用判断，不判断你是否真的在输入或播放。",13,false);
+        button("允许识别当前应用",()->{
+            stopService(new Intent(this,PetService.class));pendingStart=true;
+            try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS,Uri.parse("package:"+getPackageName())));}
+            catch(ActivityNotFoundException e){try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));}catch(ActivityNotFoundException ignored){toast("请在系统设置中搜索使用情况访问权限");}}
+        });
+        button("设置每个应用的动作",()->chooseApp());
+        text("酒馆在浏览器里：把你用的浏览器设成「陪我打字」。这个浏览器里的其他网页也会用同一个动作。",13,false);
         text("选择陪你的伙伴",21,true);
-        text("最多同时 3 只；点一下摸摸，拖动放手会落下，长按回到这里。",14,false);
+        text("最多同时 3 只；点一下摸摸，双击跳起来，拖动放手会落下，长按回到这里。",14,false);
         Set<String> selected=prefs.getStringSet("selected",new HashSet<>(Arrays.asList("pet0","pet2")));
         try {
             Catalog catalog=new Catalog(this);
@@ -58,9 +71,29 @@ public final class MainActivity extends Activity {
         walking=new Switch(this);walking.setText("让它们自己散步");walking.setChecked(prefs.getBoolean("walking",true));page.addView(walking);walking.setOnCheckedChangeListener((v,on)->save());
         button("应用选择和大小",()->startPets("start"));
         button("试试贴贴 ♡",()->startPets("hug"));
+        button("测试动作 / 功能展示",()->new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
+            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump"}[which])).show());
         text("贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫这一版先手动选花色。",13,false);
         text("第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。",13,false);
         text("这一版不联网，不读取屏幕、聊天和按键。",13,false);
+    }
+    private void updateUsageStatus(){if(usageStatus!=null)usageStatus.setText(!prefs.getBoolean("companion",false)?"联动已关闭":UsageCompanion.allowed(this)?"联动已开启 · 回到其他应用，约 2 秒切换动作":"联动等待授权 · 请允许使用情况访问权限");}
+    private void chooseApp(){
+        Intent query=new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        java.util.List<android.content.pm.ResolveInfo> installed=getPackageManager().queryIntentActivities(query,0);
+        Map<String,String> unique=new java.util.TreeMap<>();
+        for(android.content.pm.ResolveInfo r:installed)if(!r.activityInfo.packageName.equals(getPackageName()))unique.put(r.activityInfo.packageName,r.loadLabel(getPackageManager()).toString());
+        java.util.List<String> packages=new ArrayList<>(unique.keySet());
+        packages.sort((a,b)->unique.get(a).compareToIgnoreCase(unique.get(b)));
+        String[] labels=new String[packages.size()];for(int i=0;i<labels.length;i++)labels[i]=unique.get(packages.get(i));
+        if(labels.length==0){toast("没有找到可选择的应用");return;}
+        new AlertDialog.Builder(this).setTitle("选择一个应用").setItems(labels,(dialog,index)->{
+            String pkg=packages.get(index);String saved=prefs.getString("app:"+pkg,"auto");int current=0;
+            for(int i=0;i<AppCompanion.MODES.length;i++)if(AppCompanion.MODES[i].equals(saved))current=i;
+            new AlertDialog.Builder(this).setTitle(labels[index]).setSingleChoiceItems(AppCompanion.LABELS,current,(d,which)->{
+                prefs.edit().putString("app:"+pkg,AppCompanion.MODES[which]).apply();d.dismiss();toast("动作已保存");
+            }).setNegativeButton("返回",null).show();
+        }).setNegativeButton("取消",null).show();
     }
     private TextView text(String s,int sp,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(Color.rgb(102,66,84));if(bold)v.setTypeface(null,android.graphics.Typeface.BOLD);v.setPadding(0,dp(10),0,dp(8));page.addView(v);return v;}
     private void button(String name,Runnable action){Button b=new Button(this);b.setText(name);b.setAllCaps(false);page.addView(b,new LinearLayout.LayoutParams(-1,dp(54)));b.setOnClickListener(v->action.run());}
@@ -76,6 +109,6 @@ public final class MainActivity extends Activity {
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},3);
         try{startForegroundService(new Intent(this,PetService.class).setAction(action));toast(action.equals("hug")?"让伙伴们试试贴贴":"可以回到桌面看伙伴啦");}catch(RuntimeException e){toast("暂时无法开启，请回到应用再试一次");}
     }
-    @Override protected void onResume(){super.onResume();if(permission!=null)permission.setText(Settings.canDrawOverlays(this)?"✧ 悬浮窗已允许":"✧ 初次开启需允许悬浮窗");if(pendingStart && Settings.canDrawOverlays(this)){pendingStart=false;startPets("start");}}
+    @Override protected void onResume(){super.onResume();updateUsageStatus();if(permission!=null)permission.setText(Settings.canDrawOverlays(this)?"✧ 悬浮窗已允许":"✧ 初次开启需允许悬浮窗");if(pendingStart && Settings.canDrawOverlays(this)){pendingStart=false;startPets("start");}}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
 }

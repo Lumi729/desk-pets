@@ -12,7 +12,7 @@ test('Android packages real idle/interaction clips and obeys desktop pairing res
     assert.equal(pets.length, 13);
     assert.equal(pets.filter(p => p.skin).length, 5);
     for (const p of pets) {
-      assert.ok(p.clips['待机']);
+      for (const action of ['待机', '敲代码', '看视频', '跳舞', '开心蹦蹦']) assert.ok(p.clips[action], `${p.label}: ${action}`);
       for (const file of Object.values(p.clips)) assert.match(fs.readFileSync(path.join(dir, file)).subarray(0, 6).toString(), /^GIF8[79]a$/);
     }
     for (const [pair, file] of Object.entries(hugs)) {

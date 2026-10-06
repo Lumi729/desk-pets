@@ -4,7 +4,7 @@ const path = require('node:path');
 const rules = require('../../renderer/combos.js');
 const root = path.resolve(__dirname, '../..');
 const source = path.join(root, '桌宠素材');
-const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼'];
+const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞'];
 function prepare(out) {
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });

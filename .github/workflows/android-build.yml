@@ -24,6 +24,11 @@ jobs:
         with:
           gradle-version: '8.13'
       - run: node --test test/android-assets.test.js
+      - name: 检查联动分类与切换
+        run: |
+          mkdir -p /tmp/pet-tests
+          javac -encoding UTF-8 -d /tmp/pet-tests android/app/src/main/java/com/lumi/deskpets/AppCompanion.java android/tests/AppCompanionTest.java
+          java -cp /tmp/pet-tests com.lumi.deskpets.AppCompanionTest
       - name: 编译和检查安卓版
         working-directory: android
         run: gradle :app:assembleDebug :app:lintDebug

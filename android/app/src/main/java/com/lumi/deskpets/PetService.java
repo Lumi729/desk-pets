@@ -19,6 +19,16 @@ public final class PetService extends Service {
     private boolean paused,screenOn=true,walking=true,destroyed;
     private int width,height,unit;
     private long lastFrame,hugEnd;
+    private HandlerThread usageThread;
+    private Handler usageClock;
+    private UsageCompanion usage;
+    private volatile boolean observeApps;
+    private volatile String companionMode="none";
+    private final Runnable usageLoop=new Runnable(){public void run(){
+        if(observeApps && getSharedPreferences("pets",MODE_PRIVATE).getBoolean("companion",false)) companionMode=usage.poll();
+        else { usage.clear(); companionMode="none"; }
+        usageClock.postDelayed(this,2000);
+    }};
     private Actor hugA,hugB;
     private final BroadcastReceiver screen=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){screenOn=!Intent.ACTION_SCREEN_OFF.equals(i.getAction());refreshVisibility();}};
     private final Runnable loop=new Runnable(){public void run(){if(destroyed)return;if(!Settings.canDrawOverlays(PetService.this)){stopSelf();return;}long now=SystemClock.uptimeMillis();float dt=Math.min(.05f,(now-lastFrame)/1000f);lastFrame=now;if(screenOn&&!paused)tick(now,dt);clock.postDelayed(this,screenOn&&!paused?50:1000);}};
@@ -28,9 +38,9 @@ public final class PetService extends Service {
         final WindowManager.LayoutParams pos;
         float x,y,velocity;
         int direction;
-        long until,decision,cooldown;
+        long until,decision,cooldown,lastTap;
         String action="待机";
-        boolean dragging,falling;
+        boolean dragging,falling,bouncing;
         @android.annotation.SuppressLint("RtlHardcoded") // Overlay physics use physical screen coordinates.
         Actor(Catalog.Pet p,int index){pet=p;view=new PetView(PetService.this);view.setContentDescription(p.label+"，点击摸摸，拖动移动，长按设置");pos=new WindowManager.LayoutParams(unit,unit,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);pos.gravity=Gravity.TOP|Gravity.LEFT;x=Math.min(maxX(this),unit*.2f+index*unit*1.05f);y=floor();view.show(p.clip(action));decision=SystemClock.uptimeMillis()+2000+random.nextInt(3000);setTouch(this);}
         int floor(){return Math.max(0,height-unit);}
@@ -42,6 +52,7 @@ public final class PetService extends Service {
         screenOn=getSystemService(PowerManager.class).isInteractive();
         IntentFilter filter=new IntentFilter();filter.addAction(Intent.ACTION_SCREEN_OFF);filter.addAction(Intent.ACTION_SCREEN_ON);
         if(Build.VERSION.SDK_INT>=33)registerReceiver(screen,filter,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(screen,filter);
+        usage=new UsageCompanion(this);usageThread=new HandlerThread("pet-app-companion");usageThread.start();usageClock=new Handler(usageThread.getLooper());usageClock.post(usageLoop);
         try{catalog=new Catalog(this);}catch(Exception e){stopSelf();}
     }
     @Override public int onStartCommand(Intent intent,int flags,int startId){
@@ -49,7 +60,12 @@ public final class PetService extends Service {
         if("stop".equals(action)){stopSelf();return START_NOT_STICKY;}
         if(!Settings.canDrawOverlays(this)||catalog==null){stopSelf();return START_NOT_STICKY;}
         startForeground(7,notification());
-        if(actors.isEmpty()||"start".equals(action)||"hug".equals(action))rebuild();
+        if(actors.isEmpty()||"start".equals(action)||"hug".equals(action)||(action!=null&&action.startsWith("test-")))rebuild();
+        if("test-jump".equals(action))for(Actor a:actors)jump(a);
+        if(action!=null && action.startsWith("test-") && !"test-jump".equals(action)){
+            endHug();String clip=AppCompanion.clip(action.substring(5));
+            if(!clip.isEmpty())for(Actor a:actors){a.direction=0;a.play(clip,6500);}
+        }
         if("toggle".equals(action)){paused=!paused;refreshVisibility();}
         if("hug".equals(action)){
             paused=false;refreshVisibility();boolean found=false;
@@ -83,8 +99,10 @@ public final class PetService extends Service {
         if(hugA!=null&&now>=hugEnd)endHug();
         for(Actor a:actors){
             if(a==hugA||a==hugB||a.dragging)continue;
-            if(a.falling){a.velocity+=unit*5*dt;a.y+=a.velocity*dt;if(a.y>=a.floor()){a.y=a.floor();a.falling=false;a.play("摔趴趴",1400);}position(a);continue;}
+            if(a.falling){a.velocity+=unit*5*dt;a.y+=a.velocity*dt;if(a.y>=a.floor()){a.y=a.floor();a.falling=false;a.play(a.bouncing?"开心蹦蹦":"摔趴趴",1400);a.bouncing=false;}position(a);continue;}
             if(a.until>now)continue;
+            String companionClip=AppCompanion.clip(companionMode);
+            if(!companionClip.isEmpty()){a.direction=0;a.play(companionClip,0);continue;}
             if(!a.action.equals("待机")&&!a.action.equals("向左走")&&!a.action.equals("向右走")){a.play("待机",0);a.decision=now+1500;}
             if(now>=a.decision){a.direction=walking?random.nextInt(3)-1:0;a.play(a.direction<0?"向左走":a.direction>0?"向右走":"待机",0);a.decision=now+2500+random.nextInt(4000);}
             if(a.direction!=0){a.x+=a.direction*unit*.22f*dt;if(a.x<=0||a.x>=maxX(a)){a.direction=-a.direction;a.play(a.direction<0?"向左走":"向右走",0);}position(a);}
@@ -103,15 +121,22 @@ public final class PetService extends Service {
         if(hugA==null)return;Actor a=hugA,b=hugB;hugA=hugB=null;a.pos.width=unit;a.play("待机",0);b.play("待机",0);a.cooldown=b.cooldown=SystemClock.uptimeMillis()+20000;
         a.x=Math.min(a.x,Math.max(0,width-unit*2.1f));b.x=a.x+unit*1.05f;b.y=a.y;a.decision=b.decision=SystemClock.uptimeMillis()+2000;position(a);position(b);refreshVisibility();
     }
+    private void jump(Actor a){
+        if(a==hugA||a==hugB)endHug();
+        a.direction=0;a.dragging=false;a.falling=true;a.bouncing=true;a.velocity=-unit*3.3f;a.play("开心蹦蹦",0);
+    }
     private void setTouch(Actor a){
-        a.view.setOnClickListener(v->{a.direction=0;a.play("摸摸头",2000);});
+        a.view.setOnClickListener(v->{long now=SystemClock.uptimeMillis();
+            if(a.lastTap!=0 && now-a.lastTap<=ViewConfiguration.getDoubleTapTimeout()){a.lastTap=0;jump(a);}
+            else{a.lastTap=now;a.direction=0;a.play("摸摸头",2000);}
+        });
         a.view.setOnLongClickListener(v->{openSettings();return true;});
         a.view.setOnTouchListener(new View.OnTouchListener(){float downX,downY,startX,startY;boolean moved,longPressed;final int slop=ViewConfiguration.get(PetService.this).getScaledTouchSlop();final Runnable hold=()->{longPressed=true;a.dragging=false;a.view.performLongClick();};
             public boolean onTouch(View v,MotionEvent e){switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
-                    if(a==hugA||a==hugB)endHug();downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.dragging=true;a.falling=false;a.direction=0;clock.postDelayed(hold,600);return true;
+                    if(a==hugA||a==hugB)endHug();downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
                 case MotionEvent.ACTION_MOVE:
-                    float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.hypot(dx,dy)>slop){moved=true;clock.removeCallbacks(hold);}if(moved&&!longPressed){a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
+                    float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.hypot(dx,dy)>slop){moved=true;a.lastTap=0;clock.removeCallbacks(hold);}if(moved&&!longPressed){a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
                 case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:
                     clock.removeCallbacks(hold);a.dragging=false;
                     if(moved||e.getActionMasked()==MotionEvent.ACTION_CANCEL||longPressed){a.falling=a.y<a.floor();a.velocity=0;if(a.falling)a.play("掉落",0);else a.play("待机",0);}
@@ -121,9 +146,9 @@ public final class PetService extends Service {
         });
     }
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
-    private void refreshVisibility(){for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
+    private void refreshVisibility(){observeApps=screenOn&&!paused;if(!observeApps)companionMode="none";for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
     private void clearActors(){hugA=hugB=null;clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
     @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);endHug();measure();for(Actor a:actors){a.y=a.floor();a.dragging=a.falling=false;position(a);}}
-    @Override public void onDestroy(){destroyed=true;clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
+    @Override public void onDestroy(){destroyed=true;observeApps=false;usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent i){return null;}
 }
