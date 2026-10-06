@@ -20,7 +20,7 @@ public final class PetService extends Service {
     private int width,height,unit,keyboardFloor=-1,originX,originY;
     private String surfaceApp="";
     private List<Perch> surfaces=Collections.emptyList();
-    private long lastFrame,hugEnd,demoUntil;
+    private long lastFrame,hugEnd,demoUntil,typingDemoUntil;
     private HandlerThread usageThread;
     private Handler usageClock;
     private UsageCompanion usage;
@@ -72,7 +72,11 @@ public final class PetService extends Service {
             endHug();surfaces=Arrays.asList(new Perch(0,height/2,width/2),new Perch(width/2,height*2/3,width),new Perch(0,height*5/6,width/2));
             demoUntil=SystemClock.uptimeMillis()+12000;for(Actor a:actors)a.nextHop=0;
         }
-        if(action!=null && action.startsWith("test-") && !"test-jump".equals(action) && !"test-perch".equals(action)){
+        if("test-drop".equals(action)){
+            endHug();typingDemoUntil=SystemClock.uptimeMillis()+6500;
+            for(Actor a:actors){a.y=Math.max(0,a.floor()-unit*2);a.play("敲代码",0);startFall(a,SystemClock.uptimeMillis());position(a);}
+        }
+        if(action!=null && action.startsWith("test-") && !"test-jump".equals(action) && !"test-perch".equals(action) && !"test-drop".equals(action)){
             endHug();String clip=AppCompanion.clip(action.substring(5));
             if(!clip.isEmpty())for(Actor a:actors){a.direction=0;a.play(clip,6500);}
         }
@@ -96,7 +100,7 @@ public final class PetService extends Service {
         else{android.util.DisplayMetrics m=new android.util.DisplayMetrics();windows.getDefaultDisplay().getMetrics(m);width=m.widthPixels;height=m.heightPixels;}
     }
     private void rebuild(){
-        clearActors();paused=false;keyboardFloor=-1;surfaceApp="";surfaces=Collections.emptyList();demoUntil=0;measure();android.content.SharedPreferences p=getSharedPreferences("pets",MODE_PRIVATE);
+        clearActors();paused=false;keyboardFloor=-1;surfaceApp="";surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();android.content.SharedPreferences p=getSharedPreferences("pets",MODE_PRIVATE);
         unit=Math.round(Math.max(56,Math.min(136,p.getInt("size",88)))*getResources().getDisplayMetrics().density);unit=Math.min(unit,Math.max(1,width/2));walking=p.getBoolean("walking",true);
         Set<String> ids=p.getStringSet("selected",new HashSet<>(Arrays.asList("pet0","pet2")));
         try{for(Catalog.Pet pet:catalog.pets)if(ids.contains(pet.id)&&actors.size()<3){Actor actor=new Actor(pet,actors.size());actor.pos.x=(int)actor.x;actor.pos.y=(int)actor.y;windows.addView(actor.view,actor.pos);actors.add(actor);}}
@@ -125,9 +129,17 @@ public final class PetService extends Service {
         for(Actor a:actors){
             boolean missing=a.perch!=null && surfaces.stream().noneMatch(p->p.near(a.perch));
             boolean lostTarget=a.target!=null && surfaces.stream().noneMatch(p->p.near(a.target));
-            if(changed||missing||lostTarget){a.perch=a.target=null;a.hopStart=0;a.nextHop=now+1500;if(!a.dragging){a.falling=a.y<a.floor();a.velocity=0;}}
+            if(changed||missing||lostTarget){
+                a.perch=a.target=null;a.hopStart=0;a.nextHop=now+1500;
+                if(!a.dragging && a.y<a.floor() && !a.falling)startFall(a,now);
+            }
+            if(!a.dragging && !a.falling && a.hopStart==0 && a.perch==null && a.y<a.floor())startFall(a,now);
             if(!a.dragging && a.y>a.floor()){a.y=a.floor();a.perch=a.target=null;a.hopStart=0;a.falling=false;position(a);}
         }
+    }
+    private void startFall(Actor a,long now){
+        a.perch=a.target=null;a.hopStart=0;a.direction=0;a.bouncing=false;
+        a.falling=true;a.velocity=0;a.nextHop=now+1500;a.play("掉落",0);
     }
     private void hopTo(Actor a,Perch p,long now){
         a.direction=0;a.falling=false;a.perch=null;a.target=p;a.hopX=a.x;a.hopY=a.y;a.hopStart=now;a.play("开心蹦蹦",0);
@@ -148,16 +160,16 @@ public final class PetService extends Service {
             if(a.falling){a.velocity+=unit*5*dt;a.y+=a.velocity*dt;if(a.y>=a.landing()){a.y=a.landing();a.falling=false;a.play(a.bouncing?"开心蹦蹦":"摔趴趴",1400);a.bouncing=false;}position(a);continue;}
             if(a.until>now)continue;
             InterfaceCompanion.Snapshot state=InterfaceCompanion.snapshot;
-            String mode=getSharedPreferences("pets",MODE_PRIVATE).getBoolean("companion",false)?companionMode:"none";
-            if(getSharedPreferences("pets",MODE_PRIVATE).getBoolean("companion",false) && !state.pkg.isEmpty())mode=AppCompanion.mode(state.pkg,getSharedPreferences("pets",MODE_PRIVATE).getAll());
-            mode=AppCompanion.active(mode,now,state.input);
+            android.content.SharedPreferences prefs=getSharedPreferences("pets",MODE_PRIVATE);
+            String mode=now<typingDemoUntil?"type":AppCompanion.live(prefs.getBoolean("companion",false),
+                state.pkg,prefs.getAll(),companionMode,now,prefs.getBoolean("interface",false)?state.input:0);
             String companionClip=AppCompanion.clip(mode);
             if(!companionClip.isEmpty()){a.direction=0;a.play(companionClip,0);continue;}
             if(!a.action.equals("待机")&&!a.action.equals("向左走")&&!a.action.equals("向右走")){a.play("待机",0);a.decision=now+1500;}
             if(now>=a.nextHop && !surfaces.isEmpty() && (walking || now<demoUntil)){
                 Perch next=Perch.below(surfaces,a.perch,unit,a.floor());
                 if(next!=null){hopTo(a,next,now);continue;}
-                if(a.perch!=null){a.perch=null;a.falling=true;a.velocity=0;a.play("掉落",0);a.nextHop=now+5000;continue;}
+                if(a.perch!=null){startFall(a,now);a.nextHop=now+5000;continue;}
             }
             if(now>=a.decision){a.direction=walking?random.nextInt(3)-1:0;a.play(a.direction<0?"向左走":a.direction>0?"向右走":"待机",0);a.decision=now+2500+random.nextInt(4000);}
             if(a.direction!=0){a.x+=a.direction*unit*.22f*dt;if(a.perch!=null){float center=a.perch.x(unit,width),space=Math.max(0,(a.perch.right-a.perch.left-unit)/2f);float left=Math.max(0,center-space),right=Math.min(maxX(a),center+space);a.x=Math.max(left,Math.min(right,a.x));if(a.x<=left||a.x>=right){a.direction=-a.direction;a.play(a.direction<0?"向左走":"向右走",0);}}else if(a.x<=0||a.x>=maxX(a)){a.direction=-a.direction;a.play(a.direction<0?"向左走":"向右走",0);}position(a);}
@@ -194,7 +206,7 @@ public final class PetService extends Service {
                     float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.hypot(dx,dy)>slop){moved=true;a.lastTap=0;clock.removeCallbacks(hold);}if(moved&&!longPressed){a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
                 case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:
                     clock.removeCallbacks(hold);a.dragging=false;
-                    if(moved||e.getActionMasked()==MotionEvent.ACTION_CANCEL||longPressed){a.falling=a.y<a.floor();a.velocity=0;if(a.falling)a.play("掉落",0);else a.play("待机",0);}
+                    if(moved||e.getActionMasked()==MotionEvent.ACTION_CANCEL||longPressed){a.falling=a.y<a.floor();a.velocity=0;if(a.falling)startFall(a,SystemClock.uptimeMillis());else a.play("待机",0);}
                     else{v.performClick();}return true;
                 default:return true;
             }}
@@ -203,7 +215,7 @@ public final class PetService extends Service {
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
     private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
     private void clearActors(){hugA=hugB=null;clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
-    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);endHug();InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.y=a.floor();a.dragging=a.falling=false;position(a);}}
+    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);endHug();InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.y=a.floor();a.dragging=a.falling=false;position(a);}}
     @Override public void onDestroy(){destroyed=true;observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent i){return null;}
 }

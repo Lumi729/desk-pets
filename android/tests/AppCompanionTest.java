@@ -22,6 +22,18 @@ public final class AppCompanionTest {
         equal(AppCompanion.active("type",2600,1000),"none");
         equal(AppCompanion.active("video",1000,0),"video");
         equal(AppCompanion.active("none",1000,999),"none");
+        for(String pkg:java.util.List.of("com.android.chrome","notes.any","search.any","com.tencent.mobileqq","com.spotify.music")){
+            equal(AppCompanion.live(true,pkg,Map.of(),"none",1000,999),"type");
+            equal(AppCompanion.live(false,pkg,Map.of(),"none",1000,999),"none");
+            equal(AppCompanion.live(true,pkg,Map.of("app:"+pkg,"none"),"none",1000,999),"none");
+        }
+        equal(AppCompanion.live(true,"notes.any",Map.of(),"none",3000,999),"none");
+        equal(AppCompanion.live(true,"com.spotify.music",Map.of(),"none",3000,999),"music");
+        equal(AppCompanion.live(true,"",Map.of(),"type",1000,999),"none");
+        // Input received during a fall remains available after the landing pause;
+        // stale input never starts a fresh typing loop after landing.
+        equal(AppCompanion.live(true,"notes.any",Map.of(),"none",2400,2300),"type");
+        equal(AppCompanion.live(true,"notes.any",Map.of(),"none",2400,700),"none");
         Perch first=new Perch(20,180,170),second=new Perch(100,300,280),narrow=new Perch(20,200,30);
         equal(Perch.below(java.util.List.of(second,narrow,first),null,100,400),first);
         equal(Perch.below(java.util.List.of(second,narrow,first),first,100,400),second);

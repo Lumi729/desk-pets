@@ -41,7 +41,10 @@ public final class InterfaceCompanion extends AccessibilityService {
         if(!enabled()){lastInput=0;clear();return;}
         if(event.getEventType()!=AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED)return;
         CharSequence pkg=event.getPackageName();
-        if(pkg==null || !pkg.toString().equals(app) || getPackageName().equals(app))return;
+        if(pkg==null || getPackageName().contentEquals(pkg) || event.isPassword())return;
+        // Refresh the foreground window before rejecting the first input after an app switch.
+        if(!pkg.toString().equals(app))inspect();
+        if(!pkg.toString().equals(app))return;
         AccessibilityNodeInfo node=event.getSource();
         try {
             if(node!=null && node.isEditable() && node.isFocused() && !node.isPassword()){
@@ -68,7 +71,8 @@ public final class InterfaceCompanion extends AccessibilityService {
                     if(!next.equals(app))lastInput=0;
                     AccessibilityNodeInfo focus=root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
                     if(focus!=null)try{if(focus.isPassword()||!focus.isEditable())lastInput=0;}finally{focus.recycle();}
-                    else lastInput=0;
+                    // Some WebViews omit findFocus while still sending focused editable events.
+                    // Keep only the short-lived event timestamp; never infer typing from a keyboard.
                     if(!getPackageName().equals(next) && getSharedPreferences("pets",MODE_PRIVATE).getBoolean("perching",false)){
                         Rect bounds=new Rect();active.getBoundsInScreen(bounds);
                         collect(root,surfaces,bounds,false,0,new int[]{0});

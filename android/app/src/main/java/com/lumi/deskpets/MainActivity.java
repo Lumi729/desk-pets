@@ -41,21 +41,21 @@ public final class MainActivity extends Activity {
         Switch companion=new Switch(this);companion.setText("应用联动");companion.setChecked(prefs.getBoolean("companion",false));page.addView(companion);
         companion.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("companion",on).apply();updateUsageStatus();});
         usageStatus=text("",14,false);
-        text("实际输入时才陪你打字，停下后约 1.6 秒停下。视频和音乐仍按应用联动。输入联动需开启下面的界面互动。",13,false);
+        text("全手机陪打字：检测到实际输入就一起打字，不用逐个设置应用，停下约 1.6 秒后停下。需要开启界面互动；密码框和不提供输入事件的页面无法联动。",13,false);
         button("允许识别当前应用",()->{
             stopService(new Intent(this,PetService.class));pendingStart=true;
             try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS,Uri.parse("package:"+getPackageName())));}
             catch(ActivityNotFoundException e){try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));}catch(ActivityNotFoundException ignored){toast("请在系统设置中搜索使用情况访问权限");}}
         });
         button("设置每个应用的动作",()->chooseApp());
-        text("酒馆在浏览器里：把你用的浏览器设成「陪我打字」。这个浏览器里的其他网页也会用同一个动作。",13,false);
+        text("浏览器、便签、搜索框等也会尝试陪打字；某个应用设为「不联动」时会尊重这个设置。",13,false);
         text("站到界面上",21,true);
         Switch ui=new Switch(this);ui.setText("界面互动 · 输入与键盘避让");ui.setChecked(prefs.getBoolean("interface",false));page.addView(ui);
         ui.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("interface",on).apply();InterfaceCompanion.clear();updateUsageStatus();});
         Switch perch=new Switch(this);perch.setText("自动跳上页面台阶（测试）");perch.setChecked(prefs.getBoolean("perching",false));page.addView(perch);
         perch.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean("perching",on).apply());
         interfaceStatus=text("",14,false);
-        text("键盘弹出时站到键盘上沿，收起后落回屏幕。消息气泡、按钮、输入框、列表图片和卡片上沿都能尝试当小台阶，自己跳上去再逐级往下跳。不限 QQ；应用提供的边界不同，识别不到就继续散步。",13,false);
+        text("键盘弹出时站到键盘上沿，收起后落回屏幕。消息气泡、按钮、输入框、列表图片和卡片上沿都能尝试当小台阶，自己跳上去再逐级往下跳。不限 QQ；滑动后台阶消失会播放掉落和落地动画，落稳后再继续陪打字。应用提供的边界不同，识别不到就继续散步。",13,false);
         text("需要你单独开启无障碍服务。只使用输入变化事件与控件边界，不获取聊天文字、输入内容或截图，不代点按钮，不联网。",13,false);
         button("允许界面互动（无障碍）",()->{
             stopService(new Intent(this,PetService.class));pendingStart=true;
@@ -85,7 +85,7 @@ public final class MainActivity extends Activity {
         button("应用选择和大小",()->startPets("start"));
         button("试试贴贴 ♡",()->startPets("hug"));
         button("测试动作 / 功能展示",()->new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
-            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch"}[which])).show());
+            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop"}[which])).show());
         text("贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫这一版先手动选花色。",13,false);
         text("第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。",13,false);
         text("这一版不联网。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。",13,false);

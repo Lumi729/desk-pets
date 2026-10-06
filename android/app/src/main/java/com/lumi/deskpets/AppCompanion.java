@@ -33,6 +33,15 @@ final class AppCompanion {
     static String active(String mode,long now,long input) {
         return "type".equals(mode) && !Perch.typing(now,input)?"none":mode;
     }
+    static String live(boolean enabled, String pkg, Map<String, ?> choices,
+                       String fallback, long now, long input) {
+        if (!enabled) return "none";
+        if (pkg == null || pkg.isEmpty()) return active(fallback, now, 0);
+        if ("none".equals(choices.get("app:" + pkg))) return "none";
+        // Actual input takes priority in every app, including browsers and media search.
+        if (Perch.typing(now, input)) return "type";
+        return active(mode(pkg, choices), now, 0);
+    }
     static String clip(String mode) {
         switch (mode) {
             case "type": return "敲代码";
