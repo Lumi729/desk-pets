@@ -66,6 +66,12 @@ final class UpdateChecker {
         c.getSharedPreferences("pets", Context.MODE_PRIVATE).edit().putLong("updateDownload", id).apply();
         return id;
     }
+    /** DownloadManager status of our download, or -1 if it is gone. */
+    static int status(Context c, long id) {
+        try (android.database.Cursor q = c.getSystemService(DownloadManager.class).query(new DownloadManager.Query().setFilterById(id))) {
+            return q != null && q.moveToFirst() ? q.getInt(q.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) : -1;
+        }
+    }
     /** Opens the system installer for a finished download; returns false if it is not ready. */
     static boolean install(Context c, long id) {
         DownloadManager dm = c.getSystemService(DownloadManager.class);

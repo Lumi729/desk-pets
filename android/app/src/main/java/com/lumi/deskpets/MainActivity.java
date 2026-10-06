@@ -168,9 +168,14 @@ public final class MainActivity extends Activity {
     }
     // ---- 更新（Claude）：查 GitHub 上的安卓发布页，有新版就问要不要下载，下载好打开系统安装界面 ----
     private String pendingVersion,pendingUrl;
-    private final BroadcastReceiver downloaded=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){
-        long id=i.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID,-1);
-        if(id!=-1&&id==prefs.getLong("updateDownload",-2)&&!UpdateChecker.install(MainActivity.this,id))toast("下载没有完成，可以再点一次检查更新");
+    // 停在设置页时每 2 秒看一下下载好了没有（不注册系统广播）
+    private final Handler poll=new Handler(Looper.getMainLooper());
+    private final Runnable watchDownload=new Runnable(){public void run(){
+        long id=prefs.getLong("updateDownload",-1);if(id==-1)return;
+        int status=UpdateChecker.status(MainActivity.this,id);
+        if(status==DownloadManager.STATUS_SUCCESSFUL)UpdateChecker.install(MainActivity.this,id);
+        else if(status==DownloadManager.STATUS_FAILED||status==-1){prefs.edit().remove("updateDownload").apply();toast("下载没有成功，可以再点一次检查更新");}
+        else poll.postDelayed(this,2000);
     }};
     private void checkUpdate(boolean manual){
         if(manual)toast("正在检查更新…");
@@ -188,15 +193,13 @@ public final class MainActivity extends Activity {
             catch(ActivityNotFoundException e){toast("请在系统设置里允许桌宠安装未知应用");}
             return;
         }
-        UpdateChecker.download(this,version,url);toast("开始下载，好了会打开安装界面");
+        UpdateChecker.download(this,version,url);toast("开始下载，好了会打开安装界面");poll.removeCallbacks(watchDownload);poll.postDelayed(watchDownload,2000);
     }
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if("update".equals(intent.getAction()))checkUpdate(true);}
-    @Override protected void onPause(){super.onPause();try{unregisterReceiver(downloaded);}catch(IllegalArgumentException ignored){}}
+    @Override protected void onPause(){super.onPause();poll.removeCallbacks(watchDownload);}
     @Override protected void onResume(){super.onResume();
-        IntentFilter done=new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
-        if(Build.VERSION.SDK_INT>=33)registerReceiver(downloaded,done,Context.RECEIVER_EXPORTED);else registerReceiver(downloaded,done);
         if(pendingUrl!=null&&(Build.VERSION.SDK_INT<26||getPackageManager().canRequestPackageInstalls())){String v=pendingVersion,u=pendingUrl;pendingVersion=pendingUrl=null;startDownload(v,u);}
-        long id=prefs.getLong("updateDownload",-1);if(id!=-1)UpdateChecker.install(this,id);
+        poll.removeCallbacks(watchDownload);poll.post(watchDownload);
         if("update".equals(getIntent().getAction())){getIntent().setAction(null);checkUpdate(true);}
         else if(UpdateChecker.due(prefs))checkUpdate(false);updateUsageStatus();if(permission!=null)permission.setText(Settings.canDrawOverlays(this)?"✧ 悬浮窗已允许":"✧ 初次开启需允许悬浮窗");if(pendingStart && Settings.canDrawOverlays(this)){pendingStart=false;startPets("start");}}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
