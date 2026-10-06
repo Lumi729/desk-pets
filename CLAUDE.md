@@ -59,3 +59,7 @@
 - 摸摸、拖动、落地、贴贴优先于联动；新增动作要加手机端「测试动作 / 功能展示」。`InterfaceCompanion.java` 是用户单独授权的可选无障碍服务：仅在宠物可见、屏幕解锁及开关开启时取窗口/控件边界与输入变化，不调用文字/描述 getter，不过滤按键、不截图、不执行点击或手势。`Perch.java` 负责落脚点几何与输入超时；PetService 把键盘顶边作为地面，并按通用控件与滚动内容边界逐级跳跃，不限 QQ；SurfaceRules.java 仅用角色、资源 ID 与几何筛选按钮/输入框、消息内容、图片/卡片，排除头像、居中短标签与整页容器。关闭功能或台阶失效要取消旧落脚点，读不到不能假装成功。各应用版本与输入法必须真机验证，演示台阶不代表真实识别。
 - 验证：仓库 `npm test`，`android/tests/AppCompanionTest.java` 的独立 Java 测试（同时编译 AppCompanion.java、Perch.java 与 SurfaceRules.java），以及 Gradle `:app:assembleDebug :app:lintDebug`。编译成功不等于真机验证，悬浮权限、后台限制和应用识别需手机实测。
 - 后续发布 APK 使用 GitHub Actions Secrets 中的固定签名；覆盖安装须保持同一签名，不提交签名私钥，不更换已有密钥。0.1/0.2 为临时调试签名，首次迁移可能需要重装。
+
+- 安卓 0.4-preview 功能：Perch.canWalk 让窄台阶静止等待，反向须检查前进方向。ShakeCompanion 仅在开关开启、宠物可见且解锁时注册加速度传感器；DeliveryCompanion 需独立通知授权和开关，外卖开关只允许白名单外卖应用临时匹配正文；另外只显示用户显式选择的应用通知标题，均不保存上传。新功能必须默认关闭；测试菜单中演示通知不代表真实订单状态。Java 回归需同时编译 DeliveryRules.java。
+
+- 安卓逐层掉落用 Perch.catchFall 接住脚下最近的下层平台，跳落起点不能再次接住自身。IslandMedia 通过已授权的媒体会话显示标题与控制播放；本地计时仅在服务运行时检查，不声称系统精确闹钟。音乐/通知、充电与计时属于可选提示条能力，不宣称完整系统灵动岛或电话接听。

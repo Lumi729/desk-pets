@@ -32,13 +32,24 @@ public final class PetService extends Service {
         usageClock.postDelayed(this,2000);
     }};
     private Actor hugA,hugB;
+    private ShakeCompanion motion;
+    private android.widget.TextView island;
+    private long islandUntil,islandDismissed,lastDelivery;
+    private String islandMessage="";
+    private IslandMedia media;
+    private String batteryLabel="";
+    private boolean islandFromNotice;
+    private AlertDialog islandPanel;
+    private long nextMediaCheck,lastNotice,timerFinishedUntil;
+
     private final BroadcastReceiver screen=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){screenOn=!Intent.ACTION_SCREEN_OFF.equals(i.getAction());refreshVisibility();}};
-    private final Runnable loop=new Runnable(){public void run(){if(destroyed)return;if(!Settings.canDrawOverlays(PetService.this)){stopSelf();return;}long now=SystemClock.uptimeMillis();float dt=Math.min(.05f,(now-lastFrame)/1000f);lastFrame=now;if(screenOn&&!paused)tick(now,dt);clock.postDelayed(this,screenOn&&!paused?50:1000);}};
+    private final Runnable loop=new Runnable(){public void run(){if(destroyed)return;if(!Settings.canDrawOverlays(PetService.this)){stopSelf();return;}long now=SystemClock.uptimeMillis();float dt=Math.min(.05f,(now-lastFrame)/1000f);lastFrame=now;checkTimer();if(screenOn&&!paused)tick(now,dt);clock.postDelayed(this,screenOn&&!paused?50:1000);}};
     private final class Actor {
         final Catalog.Pet pet;
         final PetView view;
         final WindowManager.LayoutParams pos;
-        float x,y,velocity;
+        float x,y,velocity,ballX,ballY;
+        long ballEnd;
         int direction;
         long until,decision,cooldown,lastTap;
         String action="待机";
@@ -58,7 +69,7 @@ public final class PetService extends Service {
         screenOn=getSystemService(PowerManager.class).isInteractive();
         IntentFilter filter=new IntentFilter();filter.addAction(Intent.ACTION_SCREEN_OFF);filter.addAction(Intent.ACTION_SCREEN_ON);
         if(Build.VERSION.SDK_INT>=33)registerReceiver(screen,filter,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(screen,filter);
-        usage=new UsageCompanion(this);usageThread=new HandlerThread("pet-app-companion");usageThread.start();usageClock=new Handler(usageThread.getLooper());usageClock.post(usageLoop);
+        media=new IslandMedia(this);motion=new ShakeCompanion(this,()->bounceParty());usage=new UsageCompanion(this);usageThread=new HandlerThread("pet-app-companion");usageThread.start();usageClock=new Handler(usageThread.getLooper());usageClock.post(usageLoop);
         try{catalog=new Catalog(this);}catch(Exception e){stopSelf();}
     }
     @Override public int onStartCommand(Intent intent,int flags,int startId){
@@ -67,6 +78,12 @@ public final class PetService extends Service {
         if(!Settings.canDrawOverlays(this)||catalog==null){stopSelf();return START_NOT_STICKY;}
         startForeground(7,notification());
         if(actors.isEmpty()||"start".equals(action)||"hug".equals(action)||(action!=null&&action.startsWith("test-")))rebuild();
+        if("test-shake".equals(action))bounceParty();
+        if("test-island".equals(action)){islandMessage="演示：外卖通知提醒";islandUntil=SystemClock.uptimeMillis()+6000;islandDismissed=0;showIsland(islandMessage);}
+        if("test-narrow".equals(action)){
+            endHug();Perch narrow=new Perch(width/2-unit/3,height/2,width/2+unit/3);surfaces=Arrays.asList(narrow);demoUntil=SystemClock.uptimeMillis()+7000;
+            for(Actor a:actors){a.perch=narrow;a.x=narrow.x(unit,width);a.y=narrow.top-unit;a.nextHop=SystemClock.uptimeMillis()+2500;a.direction=1;position(a);}
+        }
         if("test-jump".equals(action))for(Actor a:actors)jump(a);
         if("test-perch".equals(action)){
             endHug();surfaces=Arrays.asList(new Perch(0,height/2,width/2),new Perch(width/2,height*2/3,width),new Perch(0,height*5/6,width/2));
@@ -129,6 +146,7 @@ public final class PetService extends Service {
         for(Actor a:actors){
             boolean missing=a.perch!=null && surfaces.stream().noneMatch(p->p.near(a.perch));
             boolean lostTarget=a.target!=null && surfaces.stream().noneMatch(p->p.near(a.target));
+            if(a.ballEnd>now)continue;
             if(changed||missing||lostTarget){
                 a.perch=a.target=null;a.hopStart=0;a.nextHop=now+1500;
                 if(!a.dragging && a.y<a.floor() && !a.falling)startFall(a,now);
@@ -145,10 +163,22 @@ public final class PetService extends Service {
         a.direction=0;a.falling=false;a.perch=null;a.target=p;a.hopX=a.x;a.hopY=a.y;a.hopStart=now;a.play("开心蹦蹦",0);
     }
     private void tick(long now,float dt){
+        android.content.SharedPreferences options=getSharedPreferences("pets",MODE_PRIVATE);
+        boolean unlocked=!getSystemService(KeyguardManager.class).isKeyguardLocked();
+        motion.enabled(unlocked&&options.getBoolean("motion",false));
+        updateIsland(now,options,unlocked);
         updateInterface(now);
         if(hugA!=null&&now>=hugEnd)endHug();
         for(Actor a:actors){
             if(a==hugA||a==hugB||a.dragging)continue;
+            if(a.ballEnd>now){
+                a.ballX+=motion.tilt*unit*5*dt;a.ballY+=unit*4*dt;
+                a.x+=a.ballX*dt;a.y+=a.ballY*dt;
+                if(a.x<=0){a.x=0;a.ballX=Math.abs(a.ballX)*.78f;}else if(a.x>=maxX(a)){a.x=maxX(a);a.ballX=-Math.abs(a.ballX)*.78f;}
+                if(a.y<=0){a.y=0;a.ballY=Math.abs(a.ballY)*.78f;}else if(a.y>=a.floor()){a.y=a.floor();a.ballY=-Math.abs(a.ballY)*.78f;}
+                position(a);continue;
+            }
+            if(a.ballEnd!=0){a.ballEnd=0;startFall(a,now);a.view.rainbow();}
             if(a.hopStart>0){
                 float progress=Math.min(1,(now-a.hopStart)/700f);
                 a.x=a.hopX+(a.target.x(unit,width)-a.hopX)*progress;
@@ -157,7 +187,12 @@ public final class PetService extends Service {
                 if(progress>=1){a.perch=a.target;a.target=null;a.hopStart=0;a.play("待机",0);a.nextHop=now+2000+random.nextInt(1500);}
                 continue;
             }
-            if(a.falling){a.velocity+=unit*5*dt;a.y+=a.velocity*dt;if(a.y>=a.landing()){a.y=a.landing();a.falling=false;a.play(a.bouncing?"开心蹦蹦":"摔趴趴",1400);a.bouncing=false;}position(a);continue;}
+            if(a.falling){
+                float before=a.y;a.velocity+=unit*5*dt;a.y+=a.velocity*dt;
+                if(a.velocity>=0){Perch caught=Perch.catchFall(surfaces,a.x,before,a.y,unit,a.floor());if(caught!=null){a.perch=caught;a.y=caught.top-unit;a.nextHop=now+3000;}}
+                if(a.y>=a.landing()){a.y=a.landing();a.falling=false;a.play(a.bouncing?"开心蹦蹦":"摔趴趴",1400);a.bouncing=false;}
+                position(a);continue;
+            }
             if(a.until>now)continue;
             InterfaceCompanion.Snapshot state=InterfaceCompanion.snapshot;
             android.content.SharedPreferences prefs=getSharedPreferences("pets",MODE_PRIVATE);
@@ -171,8 +206,16 @@ public final class PetService extends Service {
                 if(next!=null){hopTo(a,next,now);continue;}
                 if(a.perch!=null){startFall(a,now);a.nextHop=now+5000;continue;}
             }
+            if(a.perch!=null && !a.perch.canWalk(unit,width)){
+                a.direction=0;a.x=a.perch.x(unit,width);a.play("待机",0);position(a);continue;
+            }
             if(now>=a.decision){a.direction=walking?random.nextInt(3)-1:0;a.play(a.direction<0?"向左走":a.direction>0?"向右走":"待机",0);a.decision=now+2500+random.nextInt(4000);}
-            if(a.direction!=0){a.x+=a.direction*unit*.22f*dt;if(a.perch!=null){float center=a.perch.x(unit,width),space=Math.max(0,(a.perch.right-a.perch.left-unit)/2f);float left=Math.max(0,center-space),right=Math.min(maxX(a),center+space);a.x=Math.max(left,Math.min(right,a.x));if(a.x<=left||a.x>=right){a.direction=-a.direction;a.play(a.direction<0?"向左走":"向右走",0);}}else if(a.x<=0||a.x>=maxX(a)){a.direction=-a.direction;a.play(a.direction<0?"向左走":"向右走",0);}position(a);}
+            if(a.direction!=0){
+                float left=a.perch==null?0:a.perch.walkLeft(unit,width),right=a.perch==null?maxX(a):a.perch.walkRight(unit,width);
+                a.x=Math.max(left,Math.min(right,a.x+a.direction*unit*.22f*dt));
+                if((a.direction<0&&a.x<=left)||(a.direction>0&&a.x>=right)){a.direction=-a.direction;a.play(a.direction<0?"向左走":"向右走",0);}
+                position(a);
+            }
         }
         if(hugA==null)for(int i=0;i<actors.size();i++)for(int j=i+1;j<actors.size();j++){
             Actor a=actors.get(i),b=actors.get(j);
@@ -180,7 +223,7 @@ public final class PetService extends Service {
         }
     }
     private boolean beginHug(Actor a,Actor b){
-        String clip=catalog.hug(a.pet,b.pet);if(clip.isEmpty()||hugA!=null||a.perch!=null||b.perch!=null||a.hopStart>0||b.hopStart>0)return false;
+        String clip=catalog.hug(a.pet,b.pet);if(clip.isEmpty()||hugA!=null||a.ballEnd!=0||b.ballEnd!=0||a.perch!=null||b.perch!=null||a.hopStart>0||b.hopStart>0)return false;
         hugA=a;hugB=b;a.direction=b.direction=0;a.falling=b.falling=false;a.dragging=b.dragging=false;
         a.pos.width=Math.min(width,unit*2);a.x=(a.x+b.x)/2;a.y=a.floor();a.view.show(clip);b.view.setVisibility(View.GONE);b.view.animate(false);position(a);hugEnd=SystemClock.uptimeMillis()+5500;return true;
     }
@@ -201,7 +244,7 @@ public final class PetService extends Service {
         a.view.setOnTouchListener(new View.OnTouchListener(){float downX,downY,startX,startY;boolean moved,longPressed;final int slop=ViewConfiguration.get(PetService.this).getScaledTouchSlop();final Runnable hold=()->{longPressed=true;a.dragging=false;a.view.performLongClick();};
             public boolean onTouch(View v,MotionEvent e){switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
-                    if(a==hugA||a==hugB)endHug();downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
+                    if(a==hugA||a==hugB)endHug();downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
                 case MotionEvent.ACTION_MOVE:
                     float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.hypot(dx,dy)>slop){moved=true;a.lastTap=0;clock.removeCallbacks(hold);}if(moved&&!longPressed){a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
                 case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:
@@ -212,10 +255,76 @@ public final class PetService extends Service {
             }}
         });
     }
+    private void bounceParty(){
+        if(!screenOn||paused||getSystemService(KeyguardManager.class).isKeyguardLocked())return;
+        endHug();long now=SystemClock.uptimeMillis();
+        for(Actor a:actors){
+            if(a.dragging)continue;
+            a.perch=a.target=null;a.hopStart=0;a.falling=false;a.direction=0;a.nextHop=now+8000;
+            a.ballEnd=now+4500;a.ballX=(random.nextBoolean()?1:-1)*unit*3;a.ballY=-unit*5;
+            a.play("吓一跳",0);
+        }
+    }
+    private void updateIsland(long now,android.content.SharedPreferences prefs,boolean unlocked){
+        if(!unlocked){hideIsland();return;}
+        if(prefs.getBoolean("delivery",false)&&DeliveryCompanion.hintAt>lastDelivery){
+            lastDelivery=DeliveryCompanion.hintAt;islandFromNotice=false;
+            if(SystemClock.elapsedRealtime()-lastDelivery<30000){islandMessage=DeliveryCompanion.hint;islandUntil=now+9000;islandDismissed=0;}
+        }
+        if(DeliveryCompanion.noticeAt>lastNotice && SystemClock.elapsedRealtime()-DeliveryCompanion.noticeAt<15000){
+            lastNotice=DeliveryCompanion.noticeAt;islandFromNotice=true;islandMessage=DeliveryCompanion.notice;islandUntil=now+7000;islandDismissed=0;
+        }
+        if(now>=nextMediaCheck){nextMediaCheck=now+1500;if(prefs.getBoolean("islandMedia",false))media.refresh();else media.clear();
+            batteryLabel="";
+            if(prefs.getBoolean("islandBattery",false)){
+                Intent battery=registerReceiver(null,new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+                if(battery!=null&&battery.getIntExtra(BatteryManager.EXTRA_PLUGGED,0)!=0){int level=battery.getIntExtra(BatteryManager.EXTRA_LEVEL,0),scale=Math.max(1,battery.getIntExtra(BatteryManager.EXTRA_SCALE,100));batteryLabel="⚡ 充电中 · "+(level*100/scale)+"%";}
+            }
+        }
+        String label=now<islandUntil&&(prefs.getBoolean("delivery",false)||islandFromNotice||islandMessage.startsWith("演示"))?islandMessage:"";
+        long remaining=prefs.getLong("timerEnd",0)-System.currentTimeMillis();
+        if(SystemClock.elapsedRealtime()<timerFinishedUntil)label="⏱ 时间到啦";
+        else if(label.isEmpty()&&remaining>0)label=String.format(java.util.Locale.ROOT,"⏱ %02d:%02d",remaining/60000,(remaining/1000)%60);
+        if(label.isEmpty()&&prefs.getBoolean("islandMedia",false)&&!media.title.isEmpty())label=(media.playing?"♫ ":"Ⅱ ")+media.title;
+        if(label.isEmpty()&&prefs.getBoolean("islandBattery",false))label=batteryLabel;
+        if(label.isEmpty()&&prefs.getBoolean("island",false)){
+            if(prefs.getBoolean("companion",false)&&Perch.typing(now,InterfaceCompanion.snapshot.input))label="🐾 陪你打字中";
+            else if("video".equals(companionMode))label="🐾 陪你看视频";
+            else if("music".equals(companionMode))label="♫ 一起摇摆";
+        }
+        if(label.isEmpty()||now<islandDismissed)hideIsland();else showIsland(label);
+    }
+    private void showIsland(String label){
+        if(island==null){
+            island=new android.widget.TextView(this);island.setGravity(Gravity.CENTER);island.setTextColor(android.graphics.Color.WHITE);island.setTextSize(14);
+            android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable();bg.setColor(0xEE302932);bg.setCornerRadius(100);island.setBackground(bg);
+            float density=getResources().getDisplayMetrics().density;
+            WindowManager.LayoutParams p=new WindowManager.LayoutParams(Math.min(width,(int)(270*density)),(int)(48*density),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);p.gravity=Gravity.TOP|Gravity.CENTER_HORIZONTAL;p.y=(int)(12*density);
+            island.setSingleLine(true);island.setEllipsize(android.text.TextUtils.TruncateAt.END);island.setPadding(18,0,18,0);island.setOnClickListener(v->openIslandPanel());
+            try{windows.addView(island,p);}catch(RuntimeException e){island=null;return;}
+        }
+        island.setText(label);
+    }
+    private void checkTimer(){
+        android.content.SharedPreferences p=getSharedPreferences("pets",MODE_PRIVATE);long end=p.getLong("timerEnd",0);
+        if(end>0&&System.currentTimeMillis()>=end){p.edit().putLong("timerEnd",0).apply();timerFinishedUntil=SystemClock.elapsedRealtime()+15000;islandDismissed=0;
+            getSystemService(NotificationManager.class).notify(8,new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setContentTitle("桌宠计时器：时间到啦").setContentText("回到桌宠可以再开一轮").setAutoCancel(true).build());}
+    }
+    private void openIslandPanel(){
+        if(islandPanel!=null)return;
+        islandPanel=new AlertDialog.Builder(this).setTitle("灵动面板").setItems(new String[]{"上一首","播放 / 暂停","下一首","取消计时器","隐藏提示 30 秒"},(d,i)->{
+            if(i<3 && getSharedPreferences("pets",MODE_PRIVATE).getBoolean("islandMedia",false))media.control(i);
+            if(i==3)getSharedPreferences("pets",MODE_PRIVATE).edit().putLong("timerEnd",0).apply();
+            if(i==4){islandDismissed=SystemClock.uptimeMillis()+30000;hideIsland();}
+        }).setNegativeButton("关闭",null).create();
+        islandPanel.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
+        islandPanel.setOnDismissListener(d->islandPanel=null);islandPanel.show();
+    }
+    private void hideIsland(){if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}}
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
-    private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
-    private void clearActors(){hugA=hugB=null;clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
-    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);endHug();InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.y=a.floor();a.dragging=a.falling=false;position(a);}}
-    @Override public void onDestroy(){destroyed=true;observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
+    private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();if(islandPanel!=null)islandPanel.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
+    private void clearActors(){hideIsland();hugA=hugB=null;clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
+    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();endHug();InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
+    @Override public void onDestroy(){destroyed=true;if(islandPanel!=null)islandPanel.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent i){return null;}
 }

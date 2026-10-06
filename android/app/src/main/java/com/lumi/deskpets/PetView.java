@@ -13,6 +13,9 @@ final class PetView extends View {
     private String path="";
     private long started;
     private boolean playing=true;
+    private long rainbowUntil;
+    private final Paint rainbowPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+    void rainbow(){rainbowUntil=SystemClock.uptimeMillis()+2300;invalidate();}
     PetView(Context context) { super(context); setLayerType(View.LAYER_TYPE_SOFTWARE,null); }
     void show(String asset) {
         if(asset.equals(path) && movie!=null) return;
@@ -32,6 +35,11 @@ final class PetView extends View {
         canvas.save();
         canvas.translate((getWidth()-movie.width()*scale)/2f,(getHeight()-movie.height()*scale));
         canvas.scale(scale,scale); movie.draw(canvas,0,0); canvas.restore();
+        if(SystemClock.uptimeMillis()<rainbowUntil){
+            int[] colors={0xFFF19BAA,0xFFFFC48F,0xFFFFE598,0xFFAEDCB9,0xFFAAD5EF,0xFFC2B0EA};
+            rainbowPaint.setStyle(Paint.Style.STROKE);rainbowPaint.setStrokeWidth(Math.max(2,getWidth()*.025f));
+            for(int i=0;i<colors.length;i++){rainbowPaint.setColor(colors[i]);float offset=i*getWidth()*.025f;canvas.drawArc(getWidth()*.42f,getHeight()*.65f+offset,getWidth()*.92f,getHeight()*.96f+offset,185,130,false,rainbowPaint);}
+        }
         if(playing && isShown() && getWindowVisibility()==VISIBLE && duration>0) postInvalidateDelayed(50);
     }
 }

@@ -15,5 +15,17 @@ final class Perch {
             && (best==null || p.top<best.top)) best=p;
         return best;
     }
+    // A descending pet lands on the first crossed top under the middle of its feet.
+    static Perch catchFall(List<Perch> choices,float x,float previousY,float nextY,int unit,int floor){
+        Perch best=null;float feet=x+unit*.5f;
+        for(Perch p:choices){float landing=p.top-unit;
+            if(p.fits(unit,floor)&&feet>=p.left&&feet<=p.right&&landing>previousY+.5f&&landing<=nextY
+                &&(best==null||p.top<best.top))best=p;
+        }
+        return best;
+    }
+    float walkLeft(int unit,int width) { return Math.max(0,x(unit,width)-Math.max(0,(right-left-unit)/2f)); }
+    float walkRight(int unit,int width) { return Math.min(Math.max(0,width-unit),x(unit,width)+Math.max(0,(right-left-unit)/2f)); }
+    boolean canWalk(int unit,int width) { return walkRight(unit,width)-walkLeft(unit,width)>=Math.max(8,unit*.18f); }
     static boolean typing(long now, long lastInput) { return lastInput>0 && now>=lastInput && now-lastInput<1600; }
 }

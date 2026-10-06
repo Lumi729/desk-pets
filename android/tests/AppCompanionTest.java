@@ -3,6 +3,23 @@ import java.util.Map;
 public final class AppCompanionTest {
     static void equal(Object actual,Object expected){if(!actual.equals(expected))throw new AssertionError(actual+" != "+expected);}
     public static void main(String[] args){
+        Perch upper=new Perch(80,300,230),lower=new Perch(80,500,230),side=new Perch(250,200,390);
+        java.util.List<Perch> platforms=java.util.List.of(lower,side,upper);
+        equal(Perch.catchFall(platforms,100,100,450,100,700),upper);
+        equal(Perch.catchFall(platforms,100,201,450,100,700),lower);
+        equal(Perch.catchFall(platforms,100,200,450,100,700),lower);
+        equal(Perch.catchFall(platforms,0,100,450,100,700)==null,true);
+        equal(Perch.catchFall(platforms,100,450,460,100,700)==null,true);
+
+        equal(DeliveryRules.supported("com.tencent.mobileqq"),false);
+        equal(DeliveryRules.supported("me.ele"),true);
+        for(String text:new String[]{"预计12点送达","还有5分钟送达","订单尚未送达","您的红包已送达","骑手已到吗？","优惠已送达"}) equal(DeliveryRules.hint(text),"");
+        equal(DeliveryRules.hint("订单已送达，请查看取餐码").isEmpty(),false);
+        equal(DeliveryRules.hint("骑手已到，请取餐").isEmpty(),false);
+        for(int span:new int[]{40,80,100,110}) equal(new Perch(100,300,100+span).canWalk(100,400),false);
+        equal(new Perch(100,300,300).canWalk(100,400),true);
+        equal(new Perch(-20,300,90).canWalk(100,400),false);
+        equal(new Perch(100,300,160).walkLeft(100,400),new Perch(100,300,160).walkRight(100,400));
         equal(AppCompanion.mode("com.tencent.mm",Map.of()),"type");
         equal(AppCompanion.mode("com.google.android.youtube",Map.of()),"video");
         equal(AppCompanion.mode("com.spotify.music",Map.of()),"music");

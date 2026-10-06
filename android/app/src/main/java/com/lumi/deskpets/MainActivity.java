@@ -62,6 +62,24 @@ public final class MainActivity extends Activity {
             try{startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));}
             catch(ActivityNotFoundException e){toast("请在系统无障碍设置中开启「界面互动 · 梨间雪桌宠」");}
         });
+        text("摇一摇和灵动提示",21,true);
+        option("motion","重力与摇晃互动");
+        text("轻轻连续晃动会让宠物像弹力球一样蹦几秒，然后出现晕乎乎的彩虹效果；飞起来时倾斜手机可改变方向。无需用力摇。",13,false);
+        option("island","顶部灵动提示条");
+        option("islandMedia","音乐状态与播放控制");
+        option("islandBattery","充电与电量提示");
+        button("选择灵动岛通知来源",()->chooseNoticeApps());
+        button("开始灵动岛计时器",()->new AlertDialog.Builder(this).setTitle("桌宠运行期间的计时器")
+            .setItems(new String[]{"1 分钟", "5 分钟", "15 分钟", "25 分钟", "取消计时"},(d,i)->{
+                long minutes=new long[]{1,5,15,25,0}[i];prefs.edit().putLong("timerEnd",minutes==0?0:System.currentTimeMillis()+minutes*60000).apply();startPets("start");}).show());
+        text("点顶部提示条可展开音乐控制和计时器。音乐与通知来源需要下方的通知访问授权；通知仅显示你选中应用的标题。计时器不是系统闹钟，桌宠被强制关闭后不能保证准时提醒。",13,false);
+        option("delivery","外卖通知提示");
+        text("外卖提示需单独授予通知访问权限。只在本机临时匹配美团/美团外卖/饿了么的取餐通知标题和正文，不保存或上传，不读取其他应用通知。仅转述通知，不能查询订单或保证外卖真的送达。",13,false);
+        button("允许音乐与通知访问",()->{
+            stopService(new Intent(this,PetService.class));pendingStart=true;
+            try{startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));}catch(ActivityNotFoundException e){toast("请在系统设置中搜索通知使用权");}
+        });
+        text("提示条可以点一下隐藏；熄屏或收起宠物时停止摇晃检测。",13,false);
         text("选择陪你的伙伴",21,true);
         text("最多同时 3 只；点一下摸摸，双击跳起来，拖动放手会落下，长按回到这里。",14,false);
         Set<String> selected=prefs.getStringSet("selected",new HashSet<>(Arrays.asList("pet0","pet2")));
@@ -85,7 +103,7 @@ public final class MainActivity extends Activity {
         button("应用选择和大小",()->startPets("start"));
         button("试试贴贴 ♡",()->startPets("hug"));
         button("测试动作 / 功能展示",()->new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
-            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop"}[which])).show());
+            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island"}[which])).show());
         text("贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫这一版先手动选花色。",13,false);
         text("第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。",13,false);
         text("这一版不联网。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。",13,false);
@@ -108,6 +126,14 @@ public final class MainActivity extends Activity {
             }).setNegativeButton("返回",null).show();
         }).setNegativeButton("取消",null).show();
     }
+    private void chooseNoticeApps(){
+        java.util.List<android.content.pm.ResolveInfo> installed=getPackageManager().queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0);
+        Map<String,String> names=new java.util.TreeMap<>();for(android.content.pm.ResolveInfo r:installed)if(!r.activityInfo.packageName.equals(getPackageName()))names.put(r.activityInfo.packageName,r.loadLabel(getPackageManager()).toString());
+        java.util.List<String> packages=new ArrayList<>(names.keySet());String[] labels=new String[packages.size()];boolean[] selected=new boolean[packages.size()];
+        for(int i=0;i<labels.length;i++){labels[i]=names.get(packages.get(i));selected[i]=prefs.getBoolean("notify:"+packages.get(i),false);}
+        new AlertDialog.Builder(this).setTitle("只显示选中应用的通知标题").setMultiChoiceItems(labels,selected,(d,i,on)->prefs.edit().putBoolean("notify:"+packages.get(i),on).apply()).setPositiveButton("完成",null).show();
+    }
+    private void option(String key,String title){Switch s=new Switch(this);s.setText(title);s.setChecked(prefs.getBoolean(key,false));page.addView(s);s.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean(key,on).apply());}
     private TextView text(String s,int sp,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(Color.rgb(102,66,84));if(bold)v.setTypeface(null,android.graphics.Typeface.BOLD);v.setPadding(0,dp(10),0,dp(8));page.addView(v);return v;}
     private void button(String name,Runnable action){Button b=new Button(this);b.setText(name);b.setAllCaps(false);page.addView(b,new LinearLayout.LayoutParams(-1,dp(54)));b.setOnClickListener(v->action.run());}
     private void smallButton(LinearLayout row,String name,Runnable action){Button b=new Button(this);b.setText(name);row.addView(b,new LinearLayout.LayoutParams(0,dp(52),1));b.setOnClickListener(v->action.run());}
