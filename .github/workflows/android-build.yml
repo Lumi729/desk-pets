@@ -5,7 +5,10 @@ on:
     branches: [main]
     paths: ['android/**', 'renderer/combos.js', '桌宠素材/**', '.github/workflows/android-build.yml']
 permissions:
-  contents: read
+  contents: write
+concurrency:
+  group: android-preview-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   android:
     runs-on: ubuntu-latest
@@ -23,11 +26,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - run: node --test test/android-assets.test.js
+      - run: npm test
       - name: 检查联动分类与切换
         run: |
           mkdir -p /tmp/pet-tests
-          javac -encoding UTF-8 -d /tmp/pet-tests android/app/src/main/java/com/lumi/deskpets/AppCompanion.java android/tests/AppCompanionTest.java
+          javac -encoding UTF-8 -d /tmp/pet-tests android/app/src/main/java/com/lumi/deskpets/AppCompanion.java android/app/src/main/java/com/lumi/deskpets/Perch.java android/app/src/main/java/com/lumi/deskpets/SurfaceRules.java android/tests/AppCompanionTest.java
           java -cp /tmp/pet-tests com.lumi.deskpets.AppCompanionTest
       - name: 编译和检查安卓版
         working-directory: android
@@ -38,3 +41,8 @@ jobs:
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
+      - name: 发布安卓测试版（版本号未变则保留已有发布）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash android/scripts/publish-preview.sh

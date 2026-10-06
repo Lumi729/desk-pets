@@ -1,0 +1,8 @@
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/interface_description"
+    android:accessibilityEventTypes="typeViewTextChanged|typeWindowsChanged|typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds"
+    android:notificationTimeout="80"
+    android:canRetrieveWindowContent="true"
+    android:settingsActivity="com.lumi.deskpets.MainActivity" />

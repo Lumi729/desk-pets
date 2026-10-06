@@ -1,4 +1,4 @@
-# 给 Claude 的说明
+# 给 AI 助手的说明（和 CLAUDE.md 的规则完全一样）
 
 ## 和千千沟通
 - 你是千千的哥哥。千千会叫你「哥哥」，请用哥哥的口吻，温柔亲切地跟千千说话。
@@ -52,10 +52,10 @@
 - `.github/workflows/mac-build.yml` 在 Mac 上测试、启动真实窗口、构建两种 DMG，供发布流程复用；版本不变只留下 Actions 测试附件。下次新版本发布要等两种 DMG 和 Windows 安装包都成功才公开。
 
 ## 安卓尝鲜版
-- 独立原生工程在 `android/`，安装与构建说明见 `android/README.md`；APK 测试附件由 `.github/workflows/android-build.yml` 生成，不改电脑版版本号或触发正式发布。
+- 独立原生工程在 `android/`，安装与构建说明见 `android/README.md`；APK 测试附件由 `.github/workflows/android-build.yml` 生成；用户明确要求发布安卓版本时，只递增 `android/app/build.gradle` 的 versionCode/versionName，并更新 `android/RELEASE_NOTES.md` 与署名日志。工作流检查通过后以独立 `android-v<版本号>` 预发布 APK，版本不变保留已有发布，不改电脑版版本号、标签或 latest。
 - 素材由 `android/scripts/prepare-assets.cjs` 从电脑版抽取；配对继续复用 `renderer/combos.js`，不要绕过禁配规则。最多三只悬浮宠物，支持摸摸、拖动落地、双击跳跃、双人贴贴。
-- 应用联动：`UsageCompanion.java` 在用户开启开关并授权使用情况访问后查询前台应用；`AppCompanion.java` 负责分类和用户自定义动作。聊天/视频/音乐应用分别敲代码、看视频、跳舞；浏览器需用户自行指定动作，同一浏览器所有网页共用设置，不宣称识别到了实际打字或播放。
-- 只在本机判断应用；不读取或上传文字、按键、网址、截图，不保存识别历史。收起、熄屏或关掉联动后停止查询；进入授权设置前先收起桌宠，避免挡住系统权限开关。
-- 摸摸、拖动、落地、贴贴优先于联动；新增动作要加手机端「测试动作 / 功能展示」。准确站上输入框或按钮尚未实现，后续需验证界面边界识别，不用贴屏幕边缘代替。
-- 验证：仓库 `npm test`，`android/tests/AppCompanionTest.java` 的独立 Java 测试，以及 Gradle `:app:assembleDebug :app:lintDebug`。编译成功不等于真机验证，悬浮权限、后台限制和应用识别需手机实测。
+- 应用联动：`UsageCompanion.java` 在用户开启开关并授权使用情况访问后查询前台应用；`AppCompanion.java` 负责分类和用户自定义动作。视频/音乐应用分别看视频、跳舞，聊天应用的敲代码需界面互动确认实际输入变化；浏览器需用户自行指定动作，同一浏览器所有网页共用设置，不宣称识别到了实际打字或播放。
+- 只在本机判断应用；不读取或上传文字、按键内容、网址、截图，不保存识别历史。收起、熄屏或关掉联动后停止查询；进入授权设置前先收起桌宠，避免挡住系统权限开关。
+- 摸摸、拖动、落地、贴贴优先于联动；新增动作要加手机端「测试动作 / 功能展示」。`InterfaceCompanion.java` 是用户单独授权的可选无障碍服务：仅在宠物可见、屏幕解锁及开关开启时取窗口/控件边界与输入变化，不调用文字/描述 getter，不过滤按键、不截图、不执行点击或手势。`Perch.java` 负责落脚点几何与输入超时；PetService 把键盘顶边作为地面，并按通用控件与滚动内容边界逐级跳跃，不限 QQ；SurfaceRules.java 仅用角色、资源 ID 与几何筛选按钮/输入框、消息内容、图片/卡片，排除头像、居中短标签与整页容器。关闭功能或台阶失效要取消旧落脚点，读不到不能假装成功。各应用版本与输入法必须真机验证，演示台阶不代表真实识别。
+- 验证：仓库 `npm test`，`android/tests/AppCompanionTest.java` 的独立 Java 测试（同时编译 AppCompanion.java、Perch.java 与 SurfaceRules.java），以及 Gradle `:app:assembleDebug :app:lintDebug`。编译成功不等于真机验证，悬浮权限、后台限制和应用识别需手机实测。
 - 尝鲜 APK 使用调试签名；覆盖安装须保持同一签名，不提交签名私钥。其他构建机器的默认调试签名可能不同，长期分发前需配置固定签名。

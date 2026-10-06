@@ -20,7 +20,7 @@ public final class MainActivity extends Activity {
     private TextView permission;
     private SeekBar size;
     private Switch walking;
-    private TextView usageStatus;
+    private TextView usageStatus,interfaceStatus;
     private boolean pendingStart;
     int dp(int value) { return Math.round(value*getResources().getDisplayMetrics().density); }
     @Override public void onCreate(Bundle state) {
@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
         // Keep safe content padding on both gesture and three-button navigation.
         else scroll.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
         text("✦  梨间雪",32,true); text("把小小的陪伴，装进口袋。",16,false);
-        text("安卓尝鲜版 · 应用联动与跳跃",13,false);
+        text("安卓尝鲜版 · 0.2-preview · 输入联动与页面跳跃",13,false);
         permission=text("",14,false);
         button("让桌宠出来玩",()->startPets("start"));
         LinearLayout controls=new LinearLayout(this); page.addView(controls);
@@ -41,7 +41,7 @@ public final class MainActivity extends Activity {
         Switch companion=new Switch(this);companion.setText("应用联动");companion.setChecked(prefs.getBoolean("companion",false));page.addView(companion);
         companion.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("companion",on).apply();updateUsageStatus();});
         usageStatus=text("",14,false);
-        text("打开聊天应用时陪你打字，视频应用里一起看，音乐应用里跳舞。只按应用判断，不判断你是否真的在输入或播放。",13,false);
+        text("实际输入时才陪你打字，停下后约 1.6 秒停下。视频和音乐仍按应用联动。输入联动需开启下面的界面互动。",13,false);
         button("允许识别当前应用",()->{
             stopService(new Intent(this,PetService.class));pendingStart=true;
             try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS,Uri.parse("package:"+getPackageName())));}
@@ -49,6 +49,19 @@ public final class MainActivity extends Activity {
         });
         button("设置每个应用的动作",()->chooseApp());
         text("酒馆在浏览器里：把你用的浏览器设成「陪我打字」。这个浏览器里的其他网页也会用同一个动作。",13,false);
+        text("站到界面上",21,true);
+        Switch ui=new Switch(this);ui.setText("界面互动 · 输入与键盘避让");ui.setChecked(prefs.getBoolean("interface",false));page.addView(ui);
+        ui.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("interface",on).apply();InterfaceCompanion.clear();updateUsageStatus();});
+        Switch perch=new Switch(this);perch.setText("自动跳上页面台阶（测试）");perch.setChecked(prefs.getBoolean("perching",false));page.addView(perch);
+        perch.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean("perching",on).apply());
+        interfaceStatus=text("",14,false);
+        text("键盘弹出时站到键盘上沿，收起后落回屏幕。消息气泡、按钮、输入框、列表图片和卡片上沿都能尝试当小台阶，自己跳上去再逐级往下跳。不限 QQ；应用提供的边界不同，识别不到就继续散步。",13,false);
+        text("需要你单独开启无障碍服务。只使用输入变化事件与控件边界，不获取聊天文字、输入内容或截图，不代点按钮，不联网。",13,false);
+        button("允许界面互动（无障碍）",()->{
+            stopService(new Intent(this,PetService.class));pendingStart=true;
+            try{startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));}
+            catch(ActivityNotFoundException e){toast("请在系统无障碍设置中开启「界面互动 · 梨间雪桌宠」");}
+        });
         text("选择陪你的伙伴",21,true);
         text("最多同时 3 只；点一下摸摸，双击跳起来，拖动放手会落下，长按回到这里。",14,false);
         Set<String> selected=prefs.getStringSet("selected",new HashSet<>(Arrays.asList("pet0","pet2")));
@@ -72,12 +85,12 @@ public final class MainActivity extends Activity {
         button("应用选择和大小",()->startPets("start"));
         button("试试贴贴 ♡",()->startPets("hug"));
         button("测试动作 / 功能展示",()->new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
-            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump"}[which])).show());
+            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch"}[which])).show());
         text("贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫这一版先手动选花色。",13,false);
         text("第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。",13,false);
-        text("这一版不联网，不读取屏幕、聊天和按键。",13,false);
+        text("这一版不联网。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。",13,false);
     }
-    private void updateUsageStatus(){if(usageStatus!=null)usageStatus.setText(!prefs.getBoolean("companion",false)?"联动已关闭":UsageCompanion.allowed(this)?"联动已开启 · 回到其他应用，约 2 秒切换动作":"联动等待授权 · 请允许使用情况访问权限");}
+    private void updateUsageStatus(){if(interfaceStatus!=null)interfaceStatus.setText(!prefs.getBoolean("interface",false)?"界面互动已关闭":InterfaceCompanion.connected?"界面互动已连接 · 回聊天应用输入，或到其他页面看它跳台阶":"等待你在无障碍设置中开启「界面互动 · 梨间雪桌宠」");if(usageStatus!=null)usageStatus.setText(!prefs.getBoolean("companion",false)?"联动已关闭":(UsageCompanion.allowed(this)||InterfaceCompanion.connected&&prefs.getBoolean("interface",false))?"联动已开启 · 回到其他应用，约 2 秒切换动作":"联动等待授权 · 请允许使用情况访问权限");}
     private void chooseApp(){
         Intent query=new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
         java.util.List<android.content.pm.ResolveInfo> installed=getPackageManager().queryIntentActivities(query,0);

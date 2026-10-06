@@ -30,6 +30,9 @@ final class AppCompanion {
             default: return "none";
         }
     }
+    static String active(String mode,long now,long input) {
+        return "type".equals(mode) && !Perch.typing(now,input)?"none":mode;
+    }
     static String clip(String mode) {
         switch (mode) {
             case "type": return "敲代码";

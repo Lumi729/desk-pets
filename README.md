@@ -1,6 +1,6 @@
 # 梨间雪桌宠
 
-安卓悬浮桌宠尝鲜版已加入独立的 [`android/`](android/README.md) 工程：选宠、散步、摸摸、拖动落地、双人贴贴、双击跳跃和可自定义的应用联动。安装与构建说明见该目录；电脑版版本保持独立。
+安卓悬浮桌宠尝鲜版已加入独立的 [`android/`](android/README.md) 工程：选宠、散步、摸摸、拖动落地、双人贴贴、双击跳跃、输入联动、键盘上沿避让和通用页面台阶。Android 0.2-preview 的 APK 见 [安卓发布页](https://github.com/Lumi729/desk-pets/releases/tag/android-v0.2-preview)；安装与构建说明见该目录。此次安卓更新署名：Codex（g老师）。电脑版版本保持独立。
 
 千千猫猫、梨梨兔兔、哥哥狗狗、梨梨哥哥、煤球猫猫、百变猫猫、99狐狐、沙漠狐、灰鸮g老师的桌宠（Electron，Windows / macOS）。
 

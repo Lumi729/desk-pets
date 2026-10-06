@@ -1,1 +1,1 @@
-<resources><string name="pet_size">宠物大小 · %1$d</string></resources>
+<resources><string name="pet_size">宠物大小 · %1$d</string><string name="interface_description">用于桌宠站到键盘、消息气泡和按钮上，以及实际输入时陪你打字。仅使用控件边界与输入变化事件，不获取聊天文字、输入内容或截图，不执行点击，不联网。需你单独开启；关闭界面互动或收起桌宠后停止观察。</string></resources>
