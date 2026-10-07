@@ -76,6 +76,7 @@ public final class MainActivity extends Activity {
         option("islandBattery","充电与电量提示");
         option("islandHang","伙伴挂在提示条下面");
         button("选择挂在提示条下的伙伴",()->chooseIslandPet());
+        button("百变猫猫：自动轮换 / 锁定一只",()->chooseCatLock());
         button("选择灵动岛通知来源",()->chooseNoticeApps());
         button("开始灵动岛计时器",()->new AlertDialog.Builder(this).setTitle("桌宠运行期间的计时器")
             .setItems(new String[]{"1 分钟", "5 分钟", "15 分钟", "25 分钟", "取消计时"},(d,i)->{
@@ -111,7 +112,7 @@ public final class MainActivity extends Activity {
         button("应用选择和大小",()->startPets("start"));
         button("试试贴贴 ♡",()->startPets("hug"));
         button("测试动作 / 功能展示",()->new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
-            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "外卖通知检查（看通知里能读到什么）", "挑衅哥哥（千千猫猫 / 梨梨兔兔轮流）", "两个哥哥打架和好", "送零食（千千猫猫 / 梨梨兔兔轮流）", "煤球猫猫追着玩", "打哈欠会传染", "g老师看书 + 哥哥批改作业", "g老师看书睡着被围观", "g老师摔倒接眼镜", "哥哥和g老师换眼镜", "沙漠狐的小爱好", "两只狐狸比尾巴", "两只狐狸尾巴被子", "功能展示：从摇晃到各种互动全部演一遍"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-inspect","test-tease","test-fight","test-snack","test-chase","test-yawn","test-read","test-watch","test-catch","test-swap","test-hobby","test-tails","test-tailquilt","test-show"}[which])).show());
+            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "外卖通知检查（看通知里能读到什么）", "挑衅哥哥（千千猫猫 / 梨梨兔兔轮流）", "两个哥哥打架和好", "送零食（千千猫猫 / 梨梨兔兔轮流）", "煤球猫猫追着玩", "打哈欠会传染", "g老师看书 + 哥哥批改作业", "g老师看书睡着被围观", "g老师摔倒接眼镜", "哥哥和g老师换眼镜", "沙漠狐的小爱好", "两只狐狸比尾巴", "两只狐狸尾巴被子", "叠叠乐（拖一只放到另一只头上）", "百变猫猫换一只", "功能展示：从摇晃到叠叠乐、百变猫猫全部演一遍"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-inspect","test-tease","test-fight","test-snack","test-chase","test-yawn","test-read","test-watch","test-catch","test-swap","test-hobby","test-tails","test-tailquilt","test-stack","test-cat","test-show"}[which])).show());
         text("哥哥狗狗和电脑版一样会照顾大家：有伙伴摔趴趴，它会走过去扶起来；晚上 11 点到早上 6 点，千千猫猫睡着时，它会过去盖被子（一晚一次），盖好后两只一起睡，摸一下才醒。演示会自动把千千猫猫和哥哥狗狗放出来。",13,false);
         text("和电脑版一样会闹：千千猫猫离哥哥狗狗近时偶尔挑衅它，梨梨兔兔也会挑衅梨梨哥哥，10 分钟里被挑衅超过 3 次哥哥直接投降；长按千千猫猫或梨梨兔兔也能叫它去挑衅。哥哥狗狗和梨梨哥哥贴贴完会打一架，冷静大约 3 分钟后再碰到先和好再贴贴。拖动、摸摸随时能打断。",13,false);
         text("平时还会：千千猫猫和梨梨兔兔互相送零食；煤球猫猫突然冲过去追着玩；一只打哈欠，旁边的跟着打；g老师偶尔看书，有伙伴挨过来就一起看（哥哥狗狗来是批改作业），看着看着会打瞌睡被围观，摔倒时旁边的伙伴帮忙接眼镜，偶尔和哥哥狗狗换眼镜；沙漠狐玩自己的小爱好，和 99狐狐 比尾巴，晚上两只一起睡时用尾巴当被子。",13,false);
@@ -175,6 +176,18 @@ public final class MainActivity extends Activity {
                 prefs.edit().remove("weatherPlace").remove("weatherLat").remove("weatherLon").remove("weatherNow").apply();updateWeatherStatus();
             }).setNegativeButton("取消",null).show();
         }catch(Exception e){toast("地点列表没有加载成功");}
+    }
+    private void chooseCatLock(){
+        try{
+            Catalog catalog=new Catalog(this);
+            java.util.List<String> skins=new ArrayList<>();java.util.List<String> labels=new ArrayList<>();
+            skins.add("");labels.add("自动轮换（2～4 分钟换一只）");
+            for(Catalog.Pet pet:catalog.cats()){skins.add(pet.skin);labels.add("只要"+pet.skin);}
+            int current=Math.max(0,skins.indexOf(prefs.getString("catLock","")));
+            new AlertDialog.Builder(this).setTitle("百变猫猫").setSingleChoiceItems(labels.toArray(new String[0]),current,(d,i)->{
+                prefs.edit().putString("catLock",skins.get(i)).apply();d.dismiss();toast(i==0?"会自动换小猫啦，双击也能换":"锁定好啦，只出来"+skins.get(i));
+            }).setNegativeButton("返回",null).show();
+        }catch(Exception e){toast("素材没有加载成功");}
     }
     private void chooseIslandPet(){
         try{

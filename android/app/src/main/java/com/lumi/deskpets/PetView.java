@@ -14,6 +14,9 @@ final class PetView extends View {
     private long started;
     private boolean playing=true;
     /** One loop of the current clip in ms (the rainbow clip already draws its own rainbow). */
+    /** GIF 原图大小（叠叠乐要按它算窗口大小）。 */
+    int gifWidth(){return movie==null?0:movie.width();}
+    int gifHeight(){return movie==null?0:movie.height();}
     int duration(){return movie==null?0:Math.max(100,movie.duration());}
     /** Distance from the view top to the GIF's top edge (GIFs are drawn bottom-aligned). */
     float contentTop(){if(movie==null)return 0;float scale=Math.min((float)getWidth()/movie.width(),(float)getHeight()/movie.height());return getHeight()-movie.height()*scale;}

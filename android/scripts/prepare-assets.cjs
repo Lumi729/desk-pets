@@ -5,7 +5,7 @@ const rules = require('../../renderer/combos.js');
 const Teases = require('../../renderer/teases.js');
 const root = path.resolve(__dirname, '../..');
 const source = path.join(root, '桌宠素材');
-const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞', '吓一跳', '向左看', '向右看', '打哈欠',
+const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞', '吓一跳', '向左看', '向右看', '打哈欠', '变身_出', '变身_进', '吃饭',
   // 送零食：叼着走过去、对方吃
   '叼胡萝卜向左走', '叼胡萝卜向右走', '叼小鱼向左走', '叼小鱼向右走', '吃胡萝卜', '吃小鱼', '摇晃', '吐彩虹', '灵动岛',
   // 天气和四季换装的待机（和电脑版同名，没有的跳过）
@@ -94,6 +94,36 @@ function prepare(out) {
   }
   // 天气地点：直接复用电脑版的「省 → 市 → 区县」（带中心点经纬度）
   fs.copyFileSync(path.join(root, 'lib', 'regions.json'), path.join(out, 'regions.json'));
+  // 叠叠乐（Claude）：从下到上 2～3 只，规则照 combos.js 的 canStack（g老师不叠、禁配的两只不能直接叠）。
+  // 键是「下>中>上」的宠物 id；有这个站位顺序的文件（比如 沙漠狐-99狐狐_2）就用它，不然用固定顺序的文件
+  const stacks = {}, copied = new Map();
+  fs.mkdirSync(path.join(out, 'stacks'));
+  const stackFile = (names, skin) => {
+    for (const key of [names.join('-'), rules.comboKey(names)]) {
+      const file = path.join(source, '贴贴', skin ? `百变猫猫_${skin}` : '', `${key}_2.gif`);
+      if (fs.existsSync(file)) return file;
+    }
+    return null;
+  };
+  const tryStack = list => {
+    const names = list.map(p => p.name);
+    if (new Set(names).size !== names.length) return;
+    const skin = list.find(p => p.skin)?.skin;
+    if (!rules.canStack(names.slice(0, -1), names[names.length - 1], key => !!stackFile(key.split('-'), skin))) return;
+    const file = stackFile(names, skin);
+    if (!copied.has(file)) { // 同一个文件只打包一次（不同站位可能用同一段动画）
+      const dest = `stacks/${copied.size}.gif`;
+      fs.copyFileSync(file, path.join(out, dest));
+      copied.set(file, dest);
+    }
+    stacks[list.map(p => p.id).join('>')] = copied.get(file);
+  };
+  for (const a of pets) for (const b of pets) {
+    if (a === b) continue;
+    tryStack([a, b]);
+    if (!stacks[`${a.id}>${b.id}`]) continue;
+    for (const c of pets) if (c !== a && c !== b) tryStack([a, b, c]);
+  }
   // 挑衅规则直接从电脑版 renderer/teases.js 生成；回应里的 { chase / hug / comfort } 写成 @chase / @hug / @comfort
   const teases = { window: Teases.WINDOW, limit: Teases.LIMIT, pairs: {} };
   for (const [teaser, { target, replies }] of Object.entries(Teases.PAIRS)) {
@@ -101,7 +131,7 @@ function prepare(out) {
       [tease, steps.map(step => typeof step === 'string' ? step : `@${Object.keys(step)[0]}`)])) };
   }
   Object.assign(stories, pairStories);
-  const data = { pets, hugs, island, stories, teases };
+  const data = { pets, hugs, island, stories, teases, stacks };
   fs.writeFileSync(path.join(out, 'catalog.json'), JSON.stringify(data));
   return data;
 }

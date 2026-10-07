@@ -121,3 +121,21 @@ test('Android ships snacks, yawns, g老师 and 沙漠狐 interactions (Claude)',
     assert.ok(!pets.some(p => p.clips['互动_写日记']), '写日记手机上用不到，不打包');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Android 叠叠乐 only stacks allowed pets, at most three high, with shared files (Claude)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-stack-'));
+  try {
+    const { pets, stacks } = prepare(dir);
+    const byId = Object.fromEntries(pets.map(p => [p.id, p]));
+    const keys = Object.keys(stacks);
+    assert.ok(keys.length > 0, '有可以叠的组合');
+    for (const key of keys) {
+      const names = key.split('>').map(id => byId[id].name);
+      assert.ok(names.length >= 2 && names.length <= 3, `${key} 两到三层`);
+      assert.ok(!names.some(n => rules.SOLO.includes(n)), `${key} 没有单独的伙伴`);
+      for (let i = 1; i < names.length; i++) assert.ok(!rules.isForbidden(names[i - 1], names[i]), `${key} 直接叠着的没有禁配`);
+      assert.ok(fs.existsSync(path.join(dir, stacks[key])), `${key} 文件在`);
+    }
+    assert.ok(new Set(Object.values(stacks)).size < keys.length, '同一个动画只打包一份');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

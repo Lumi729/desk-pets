@@ -63,6 +63,10 @@ public final class PetService extends Service {
     private final List<Actor> yawnQueue=new ArrayList<>();
     private final Handler show=new Handler(Looper.getMainLooper()); // 功能展示的时间表（换宠物时不会被清掉）
     private int snackDemoTurn;
+    // 叠叠乐（Claude）：从下到上最多 3 只，最下面那只的窗口变高播合在一起的动画，播完散开各自摔趴趴
+    private final List<Actor> stack=new ArrayList<>();
+    private long stackEnd;
+    private static final String MULTI="百变猫猫";
     private int weatherDemoStep=-1;
     private ShakeCompanion motion;
     private android.widget.TextView island;
@@ -83,7 +87,7 @@ public final class PetService extends Service {
     private final BroadcastReceiver screen=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){screenOn=!Intent.ACTION_SCREEN_OFF.equals(i.getAction());refreshVisibility();}};
     private final Runnable loop=new Runnable(){public void run(){if(destroyed)return;if(!Settings.canDrawOverlays(PetService.this)){stopSelf();return;}long now=SystemClock.uptimeMillis();float dt=Math.min(.05f,(now-lastFrame)/1000f);lastFrame=now;checkTimer();if(screenOn&&!paused)tick(now,dt);clock.postDelayed(this,screenOn&&!paused?50:1000);}};
     private final class Actor {
-        final Catalog.Pet pet;
+        Catalog.Pet pet; // 百变猫猫换小猫时会换成另一只
         final PetView view;
         final WindowManager.LayoutParams pos;
         float x,y,velocity,ballX,ballY;
@@ -97,6 +101,10 @@ public final class PetService extends Service {
         boolean reading; // g老师在看书
         long dozeAt,nextHobby;
         String thenClip; // 这个动作播完接着播（g老师摔趴趴后假装没摔过）
+        int catPhase; // 百变猫猫：0 平时，1 变身_出，2 变身_进
+        Catalog.Pet catNext;
+        long nextCatSwitch;
+        final List<Catalog.Pet> catBag=new ArrayList<>();
         long hangStart;
         float hangFromX,hangFromY;
         Perch perch,target;
@@ -144,6 +152,8 @@ public final class PetService extends Service {
         if("test-hobby".equals(action))hobbyDemo();
         if("test-tails".equals(action))tailsDemo();
         if("test-tailquilt".equals(action))tailquiltDemo();
+        if("test-stack".equals(action))stackDemo();
+        if("test-cat".equals(action))catDemo();
         if("test-fight".equals(action))fightDemoStart();
         if("test-helpup".equals(action))helpUpDemo();
         if("test-inspect".equals(action))openInspector();
@@ -195,6 +205,8 @@ public final class PetService extends Service {
         List<Catalog.Pet> order=new ArrayList<>();
         for(String name:must)for(Catalog.Pet pet:catalog.pets)if(pet.name.equals(name)&&!order.contains(pet)){order.add(pet);break;}
         for(Catalog.Pet pet:catalog.pets)if(ids.contains(pet.id)&&!order.contains(pet))order.add(pet);
+        String lock=p.getString("catLock","");
+        if(!lock.isEmpty())for(int i=0;i<order.size();i++)if(!order.get(i).skin.isEmpty())for(Catalog.Pet c:catalog.cats())if(c.skin.equals(lock))order.set(i,c); // 锁定了就出来那一只
         try{for(Catalog.Pet pet:order)if(actors.size()<3){Actor actor=new Actor(pet,actors.size());actor.pos.x=(int)actor.x;actor.pos.y=(int)actor.y;windows.addView(actor.view,actor.pos);actors.add(actor);}}
         catch(RuntimeException e){Toast.makeText(this,"悬浮窗未能开启，请检查系统权限",Toast.LENGTH_LONG).show();stopSelf();}
         if(actors.isEmpty())stopSelf();refreshVisibility();
@@ -255,13 +267,15 @@ public final class PetService extends Service {
         if(hugA!=null&&now>=hugEnd)advanceHug(now);
         if(sceneA!=null)runScene(now,dt);
         else if(storyKind==null&&now>=nextTease){nextTease=now+120_000+random.nextInt(180_000);autoTease(now);}
+        if(!stack.isEmpty()&&now>=stackEnd)scatter(now);
         if(sceneA==null&&storyKind==null&&hugA==null)everyday(now);
+        for(Actor a:actors)if(a.pet.name.equals(MULTI))checkCat(a,now);
         processYawn(now);
         checkReading(now);
         if(storyKind!=null)runStory(now,dt);else if(now>=nextBlanketCheck){nextBlanketCheck=now+30000;startBlanket(now,false);}
         for(Actor a:actors){
             if(a==hugA||a==hugB||a.dragging)continue;
-            if(a==storyPet||a==storyDog||a==sceneA||a==sceneB)continue; // 剧情里不随机走动、不贴贴
+            if(a==storyPet||a==storyDog||a==sceneA||a==sceneB||stack.contains(a))continue; // 剧情里不随机走动、不贴贴
             if(a.sleeping&&a.hang==0&&a.ballEnd==0)continue; // 盖着被子睡，摸一下才醒
             if(a.hang!=0){hang(a,now,dt);continue;}
             if(a.ballEnd>now){
@@ -287,6 +301,8 @@ public final class PetService extends Service {
                 position(a);continue;
             }
             if(a.until>now)continue;
+            if(a.catPhase==1){a.pet=a.catNext;a.catPhase=2;a.play("变身_进",0);a.until=now+Math.max(800,a.view.duration());continue;} // 换上下一只小猫
+            if(a.catPhase==2)a.catPhase=0;
             a.reading=false;
             if(a.thenClip!=null){String next=a.thenClip;a.thenClip=null;a.direction=0;a.play(next,0);a.until=now+Math.max(1500,a.view.duration());continue;}
             InterfaceCompanion.Snapshot state=InterfaceCompanion.snapshot;
@@ -316,7 +332,7 @@ public final class PetService extends Service {
         }
         if(hugA==null)for(int i=0;i<actors.size();i++)for(int j=i+1;j<actors.size();j++){
             Actor a=actors.get(i),b=actors.get(j);
-            if(!a.dragging&&!b.dragging&&!a.falling&&!b.falling&&a.hang==0&&b.hang==0&&!a.sleeping&&!b.sleeping&&!isStory(a)&&!isStory(b)&&!inScene(a)&&!inScene(b)&&!a.pet.name.equals(G)&&!b.pet.name.equals(G)&&now>a.cooldown&&now>b.cooldown&&now>a.until&&now>b.until&&Math.abs(a.x-b.x)<unit*.65f&&Math.abs(a.y-b.y)<unit*.25f){if(beginHug(a,b))return;}
+            if(!a.dragging&&!b.dragging&&!a.falling&&!b.falling&&a.hang==0&&b.hang==0&&!a.sleeping&&!b.sleeping&&!isStory(a)&&!isStory(b)&&!inScene(a)&&!inScene(b)&&!stack.contains(a)&&!stack.contains(b)&&a.catPhase==0&&b.catPhase==0&&!a.pet.name.equals(G)&&!b.pet.name.equals(G)&&now>a.cooldown&&now>b.cooldown&&now>a.until&&now>b.until&&Math.abs(a.x-b.x)<unit*.65f&&Math.abs(a.y-b.y)<unit*.25f){if(beginHug(a,b))return;}
         }
     }
     private boolean beginHug(Actor a,Actor b){
@@ -362,18 +378,22 @@ public final class PetService extends Service {
     }
     private void setTouch(Actor a){
         a.view.setOnClickListener(v->{long now=SystemClock.uptimeMillis();
-            if(a.lastTap!=0 && now-a.lastTap<=ViewConfiguration.getDoubleTapTimeout()){a.lastTap=0;jump(a);}
-            else{a.lastTap=now;a.direction=0;a.play("摸摸头",2000);}
+            if(a.lastTap!=0 && now-a.lastTap<=ViewConfiguration.getDoubleTapTimeout()){a.lastTap=0;if(a.pet.name.equals(MULTI))switchCat(a,null,now);else jump(a);} // 百变猫猫双击换下一只
+            else{a.lastTap=now;a.direction=0;
+                if("西米".equals(a.pet.skin)&&random.nextFloat()<.35f)a.play(random.nextBoolean()?"向左看":"向右看",1500); // 西米傲娇：有时扭头不让摸
+                else a.play("摸摸头",2000);}
         });
         a.view.setOnLongClickListener(v->{longPressMenu(a);return true;});
         a.view.setOnTouchListener(new View.OnTouchListener(){float downX,downY,startX,startY;boolean moved,longPressed;final int slop=ViewConfiguration.get(PetService.this).getScaledTouchSlop();final Runnable hold=()->{longPressed=true;a.dragging=false;a.view.performLongClick();};
             public boolean onTouch(View v,MotionEvent e){switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
+                    if(stack.contains(a))scatter(SystemClock.uptimeMillis());a.catPhase=0;
                     if(a==hugA||a==hugB)endHug();if(isStory(a))cancelStory();if(inScene(a))cancelScene();a.sleeping=false;a.reading=false;a.thenClip=null;yawnQueue.remove(a);if(a.hang!=0){a.hang=0;hangSkipUntil=Long.MAX_VALUE;}a.rainbowAfter=false;downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
                 case MotionEvent.ACTION_MOVE:
                     float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.hypot(dx,dy)>slop){moved=true;a.lastTap=0;clock.removeCallbacks(hold);}if(moved&&!longPressed){a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
                 case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:
                     clock.removeCallbacks(hold);a.dragging=false;
+                    if(moved&&e.getActionMasked()==MotionEvent.ACTION_UP&&tryStackDrop(a,SystemClock.uptimeMillis()))return true; // 松手落在别人头上 → 叠叠乐
                     if(moved||e.getActionMasked()==MotionEvent.ACTION_CANCEL||longPressed){a.falling=a.y<a.floor();a.velocity=0;if(a.falling)startFall(a,SystemClock.uptimeMillis());else a.play(idle(a),0);}
                     else{v.performClick();}return true;
                 default:return true;
@@ -385,7 +405,7 @@ public final class PetService extends Service {
     private Actor byName(String name){for(Actor a:actors)if(a.pet.name.equals(name))return a;return null;}
     /** 能参加剧情：看得见、在地上、没在拖 / 掉 / 飞 / 挂 / 贴贴 / 别的剧情里。 */
     private boolean storyFree(Actor a){
-        return a!=null&&!paused&&a!=hugA&&a!=hugB&&!isStory(a)&&!inScene(a)&&!a.dragging&&!a.falling&&a.hang==0&&a.ballEnd==0&&a.hopStart==0&&a.perch==null&&a.y>=a.floor()-1;
+        return a!=null&&!paused&&a!=hugA&&a!=hugB&&!isStory(a)&&!inScene(a)&&!stack.contains(a)&&a.catPhase==0&&!a.dragging&&!a.falling&&a.hang==0&&a.ballEnd==0&&a.hopStart==0&&a.perch==null&&a.y>=a.floor()-1;
     }
     /** 有宠物落地摔趴趴：哥哥狗狗在、而且有这只的「_扶起来」就走过去扶。 */
     private boolean tryHelpUp(Actor fallen,long now){
@@ -654,7 +674,9 @@ public final class PetService extends Service {
         boolean update(long now,float dt){String clip=catalog.pairStory(kind,a.pet,b.pet);endScene();if(!beginPair(a,b,kind,clip,min)){a.play(idle(a),0);b.play(idle(b),0);}return true;}};}
     // 追着玩：煤球猫猫突然冲向另一只，那只加速跑开，追一会儿一起开心蹦蹦
     private boolean tryChase(long now){
-        Actor coal=byName(COAL);if(!free(coal))return false;
+        Actor coal=byName(COAL);
+        Actor cat=byName(MULTI);if(cat!=null&&"核桃".equals(cat.pet.skin)&&free(cat)&&(!free(coal)||random.nextBoolean()))coal=cat; // 核桃爱捣蛋，也会去追
+        if(!free(coal))return false;
         List<Actor> others=new ArrayList<>();for(Actor a:actors)if(a!=coal&&free(a))others.add(a);
         if(others.isEmpty())return false;
         Actor target=others.get(random.nextInt(others.size()));
@@ -682,6 +704,12 @@ public final class PetService extends Service {
     /** 平时空闲时自己的事：g老师偶尔看书，沙漠狐偶尔玩小爱好。返回 true 表示已经开始做了。 */
     private boolean maybeOwnThing(Actor a,long now){
         if(a.pet.name.equals(G)&&random.nextFloat()<.06f&&a.pet.clips.has("互动_看书")){startReading(a,now,false);return true;}
+        if(a.pet.name.equals(MULTI))switch(a.pet.skin){ // 百变猫猫的性格（照电脑版）
+            case "芝麻":if(random.nextFloat()<.1f){a.direction=0;a.play("睡觉",0);a.until=now+6000;return true;}break; // 爱睡觉
+            case "面包":if(random.nextFloat()<.4f){Actor o=nearestOther(a);if(o!=null){a.direction=o.x<a.x?-1:1;a.play(a.direction<0?"向左走":"向右走",0);a.decision=now+4000;return true;}}break; // 爱贴贴：凑过去
+            case "蛋黄酥":if(mealTime()&&random.nextFloat()<.3f&&a.pet.clips.has("吃饭")){a.direction=0;a.play("吃饭",0);a.until=now+4000;return true;}break; // 贪吃
+            default:break;
+        }
         if(a.pet.name.equals(FENNEC)&&now>=a.nextHobby){a.nextHobby=now+60_000+random.nextInt(90_000);if(random.nextBoolean()&&playHobby(a,now,null))return true;}
         return false;
     }
@@ -780,6 +808,8 @@ public final class PetService extends Service {
             case "test-watch":case "test-catch":return Arrays.asList(G,CAT);
             case "test-hobby":return Arrays.asList(FENNEC);
             case "test-tails":case "test-tailquilt":return Arrays.asList(FOX,FENNEC);
+            case "test-stack":return Arrays.asList(CAT,BUNNY,"梨梨哥哥");
+            case "test-cat":return Arrays.asList(MULTI);
             default:return Collections.<String>emptyList();
         }
     }
@@ -819,13 +849,100 @@ public final class PetService extends Service {
     private void showcase(){
         show.removeCallbacksAndMessages(null);
         Runnable[] steps={this::bounceParty,this::hangDemo,this::weatherDemoStart,this::helpUpDemo,this::blanketDemo,this::teaseDemo,this::fightDemoStart,
-            this::snackDemo,this::chaseDemo,this::yawnDemo,this::readDemo,this::watchDemo,this::catchDemo,this::swapDemo,this::hobbyDemo,this::tailsDemo,this::tailquiltDemo};
-        long[] at={0,9000,18000,68000,84000,100000,116000,140000,158000,170000,184000,204000,220000,232000,244000,272000,284000};
+            this::snackDemo,this::chaseDemo,this::yawnDemo,this::readDemo,this::watchDemo,this::catchDemo,this::swapDemo,this::hobbyDemo,this::tailsDemo,this::tailquiltDemo,this::stackDemo,this::catDemo};
+        long[] at={0,9000,18000,68000,84000,100000,116000,140000,158000,170000,184000,204000,220000,232000,244000,272000,284000,300000,316000};
         for(int i=0;i<steps.length;i++)show.postDelayed(steps[i],at[i]);
+    }
+    // ---- 叠叠乐（Claude）：照电脑版 tryStack / scatter ----
+    /** 拖着的这只松手时，脚落在别人（或一摞）的头上，而且有对应的叠叠乐动画，就叠上去。 */
+    private boolean tryStackDrop(Actor a,long now){
+        if(hugA!=null||storyKind!=null||sceneA!=null)return false;
+        float feet=a.y+unit,center=a.x+a.pos.width/2f;
+        List<Actor> below=null;
+        if(!stack.isEmpty()&&stack.size()<3&&!stack.contains(a)){
+            Actor host=stack.get(0);float top=host.y+host.pos.height-host.view.gifHeight()*unit/300f,hc=host.x+host.pos.width/2f;
+            if(Math.abs(center-hc)<unit*.5f&&feet>top-unit*.3f&&feet<top+unit*.6f)below=new ArrayList<>(stack);
+        }
+        if(below==null)for(Actor t:actors){
+            if(t==a||!free(t))continue;
+            float top=t.y+t.view.contentTop(),tc=t.x+t.pos.width/2f;
+            if(Math.abs(center-tc)<unit*.45f&&feet>top-unit*.3f&&feet<top+unit*.5f){below=new ArrayList<>();below.add(t);break;}
+        }
+        if(below==null)return false;
+        List<Catalog.Pet> pets=new ArrayList<>();for(Actor b:below)pets.add(b.pet);pets.add(a.pet);
+        String clip=catalog.stack(pets);if(clip.isEmpty())return false;
+        below.add(a);startStack(below,clip,now);return true;
+    }
+    private void startStack(List<Actor> members,String clip,long now){
+        Actor host=members.get(0);float bottom=host.y+host.pos.height,center=host.x+host.pos.width/2f;
+        for(Actor m:members){m.dragging=false;m.falling=false;m.direction=0;m.hang=0;m.ballEnd=0;m.sleeping=false;m.reading=false;m.thenClip=null;m.catPhase=0;m.perch=m.target=null;m.hopStart=0;}
+        stack.clear();stack.addAll(members);
+        host.view.show(clip);
+        host.pos.width=Math.max(unit,Math.round(host.view.gifWidth()*unit/300f));host.pos.height=Math.max(unit,Math.round(host.view.gifHeight()*unit/300f));
+        host.x=Math.max(0,Math.min(width-host.pos.width,center-host.pos.width/2f));host.y=Math.max(0,bottom-host.pos.height);
+        for(int i=1;i<members.size();i++){Actor m=members.get(i);m.view.setVisibility(View.GONE);m.view.animate(false);}
+        position(host);stackEnd=now+4000;
+    }
+    /** 叠叠乐播完：散开，最下面那只原地摔趴趴，上面的从各自的高度掉下来摔趴趴。 */
+    private void scatter(long now){
+        if(stack.isEmpty())return;
+        List<Actor> members=new ArrayList<>(stack);stack.clear();
+        Actor host=members.get(0);int n=members.size();float gifH=host.view.gifHeight()*unit/300f;
+        float bottom=host.y+host.pos.height,center=host.x+host.pos.width/2f,step=n>1?Math.max(0,(gifH-unit*250f/300f)/(n-1)):0;
+        host.pos.width=unit;host.pos.height=unit;
+        for(int i=0;i<n;i++){
+            Actor m=members.get(i);m.x=Math.max(0,Math.min(width-unit,center-unit/2f+(i==0?0:(random.nextFloat()-.5f)*unit*.6f)));m.y=bottom-unit-i*step;m.cooldown=now+10000;
+            if(i==0){m.play("摔趴趴",1400);position(m);}else{startFall(m,now);position(m);}
+        }
+        refreshVisibility();
+    }
+    // ---- 百变猫猫（Claude）：2～4 分钟换下一只，变身_出 → 变身_进；双击换；设置里可锁定；性格照电脑版 ----
+    private static boolean mealTime(){java.util.Calendar c=java.util.Calendar.getInstance();int m=c.get(java.util.Calendar.HOUR_OF_DAY)*60+c.get(java.util.Calendar.MINUTE);return (m>=11*60+30&&m<=12*60+30)||(m>=17*60+30&&m<=18*60+30);}
+    private Actor nearestOther(Actor a){Actor best=null;for(Actor o:actors)if(o!=a&&free(o)&&(best==null||Math.abs(o.x-a.x)<Math.abs(best.x-a.x)))best=o;return best;}
+    private void checkCat(Actor a,long now){
+        if(a.nextCatSwitch==0)a.nextCatSwitch=now+120_000+random.nextInt(120_000);
+        String lock=getSharedPreferences("pets",MODE_PRIVATE).getString("catLock","");
+        if(!lock.isEmpty()&&!lock.equals(a.pet.skin)&&a.catPhase==0&&free(a)){for(Catalog.Pet c:catalog.cats())if(c.skin.equals(lock))switchCat(a,c,now);return;} // 锁定了某一只
+        if(now<a.nextCatSwitch||!lock.isEmpty())return;
+        if(!free(a)){a.nextCatSwitch=now+5000;return;}
+        a.nextCatSwitch=now+120_000+random.nextInt(120_000);switchCat(a,null,now);
+    }
+    /** 下一只：五只都轮到之前不重复；饭点蛋黄酥更容易轮到，晚上芝麻更容易轮到。 */
+    private Catalog.Pet nextCat(Actor a){
+        List<Catalog.Pet> cats=catalog.cats();
+        a.catBag.removeIf(c->c==a.pet);
+        if(a.catBag.isEmpty())for(Catalog.Pet c:cats)if(c!=a.pet)a.catBag.add(c);
+        int h=java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);boolean night=h>=23||h<7,meal=mealTime();
+        float total=0;for(Catalog.Pet c:a.catBag)total+=("蛋黄酥".equals(c.skin)&&meal?5:1)*("芝麻".equals(c.skin)&&night?3:1);
+        float r=random.nextFloat()*total;
+        for(Catalog.Pet c:a.catBag){r-=("蛋黄酥".equals(c.skin)&&meal?5:1)*("芝麻".equals(c.skin)&&night?3:1);if(r<=0)return c;}
+        return a.catBag.get(a.catBag.size()-1);
+    }
+    private void switchCat(Actor a,Catalog.Pet to,long now){
+        if(!a.pet.name.equals(MULTI)||a.catPhase!=0)return;
+        if(a==hugA||a==hugB)endHug();if(isStory(a))cancelStory();if(inScene(a))cancelScene();if(stack.contains(a))scatter(now);
+        Catalog.Pet next=to!=null?to:nextCat(a);if(next==null||next==a.pet)return;
+        a.catBag.remove(next);a.catNext=next;a.catPhase=1;a.direction=0;a.sleeping=false;a.reading=false;a.thenClip=null;
+        a.play("变身_出",0);a.until=now+Math.max(800,a.view.duration());
+    }
+    private void stackDemo(){
+        if(!ensureCast(Arrays.asList(CAT,BUNNY,"梨梨哥哥"),1.6f))return;
+        Actor cat=byName(CAT),bunny=byName(BUNNY),lili=byName("梨梨哥哥");long now=SystemClock.uptimeMillis();
+        String two=catalog.stack(Arrays.asList(cat.pet,bunny.pet));if(two.isEmpty())return;
+        startStack(new ArrayList<>(Arrays.asList(cat,bunny)),two,now);stackEnd=now+60_000;
+        clock.postDelayed(()->{ // 第三只也叠上去
+            if(stack.size()!=2||!actors.contains(lili))return;String three=catalog.stack(Arrays.asList(cat.pet,bunny.pet,lili.pet));
+            if(three.isEmpty()){stackEnd=SystemClock.uptimeMillis()+2500;return;}
+            freeForScene(lili);List<Actor> all=new ArrayList<>(stack);all.add(lili);startStack(all,three,SystemClock.uptimeMillis());
+        },2500);
+    }
+    private void catDemo(){
+        if(!ensureCast(Arrays.asList(MULTI),1))return;
+        switchCat(byName(MULTI),null,SystemClock.uptimeMillis());
     }
     private void bounceParty(){
         if(!screenOn||paused||getSystemService(KeyguardManager.class).isKeyguardLocked())return;
-        endHug();cancelStory();cancelScene();long now=SystemClock.uptimeMillis();
+        endHug();cancelStory();cancelScene();long now=SystemClock.uptimeMillis();if(!stack.isEmpty())scatter(now);
         for(Actor a:actors){
             if(a.dragging)continue;
             a.sleeping=false;
@@ -924,7 +1041,7 @@ public final class PetService extends Service {
             if(a==chosen){
                 if(a.hang==0&&!a.dragging){
                     if(a==hugA||a==hugB)endHug();
-                    if(isStory(a))cancelStory();if(inScene(a))cancelScene();a.sleeping=false;
+                    if(isStory(a))cancelStory();if(inScene(a))cancelScene();if(stack.contains(a))scatter(now);a.sleeping=false;
                     a.ballEnd=0;a.rainbowAfter=false;a.perch=a.target=null;a.hopStart=0;a.falling=false;a.bouncing=false;a.direction=0;
                     boolean grounded=a.y>=a.floor()-1;
                     a.hang=grounded?1:2;a.hangStart=now;a.hangFromX=a.x;a.hangFromY=a.y;
@@ -1023,8 +1140,8 @@ public final class PetService extends Service {
         if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}}
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
     private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();if(islandPanel!=null)islandPanel.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
-    private void clearActors(){hideIsland();hugA=hugB=null;storyKind=null;storyPet=storyDog=null;sceneA=sceneB=null;sceneSteps.clear();sceneStep=null;fightDemo=false;clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
-    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();endHug();cancelStory();cancelScene();InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.hang=0;a.rainbowAfter=false;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
+    private void clearActors(){hideIsland();hugA=hugB=null;storyKind=null;storyPet=storyDog=null;sceneA=sceneB=null;sceneSteps.clear();sceneStep=null;fightDemo=false;stack.clear();clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
+    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();endHug();cancelStory();cancelScene();if(!stack.isEmpty())scatter(SystemClock.uptimeMillis());InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.hang=0;a.rainbowAfter=false;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
     @Override public void onDestroy(){destroyed=true;closeInspector();show.removeCallbacksAndMessages(null);if(islandPanel!=null)islandPanel.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent i){return null;}
 }
