@@ -71,6 +71,7 @@ public final class PetService extends Service {
     private int islandBlock;
     private boolean islandNotice;
     private long hangSkipUntil;
+    private boolean islandMediaShown; // 提示条正显示音乐 / 视频 / 一起摇摆这些：伙伴照常播看视频、跳舞，不挂
 
     private final BroadcastReceiver screen=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){screenOn=!Intent.ACTION_SCREEN_OFF.equals(i.getAction());refreshVisibility();}};
     private final Runnable loop=new Runnable(){public void run(){if(destroyed)return;if(!Settings.canDrawOverlays(PetService.this)){stopSelf();return;}long now=SystemClock.uptimeMillis();float dt=Math.min(.05f,(now-lastFrame)/1000f);lastFrame=now;checkTimer();if(screenOn&&!paused)tick(now,dt);clock.postDelayed(this,screenOn&&!paused?50:1000);}};
@@ -592,13 +593,15 @@ public final class PetService extends Service {
         long remaining=prefs.getLong("timerEnd",0)-System.currentTimeMillis();
         if(SystemClock.elapsedRealtime()<timerFinishedUntil)label="⏱ 时间到啦";
         else if(label.isEmpty()&&remaining>0)label=String.format(java.util.Locale.ROOT,"⏱ %02d:%02d",remaining/60000,(remaining/1000)%60);
-        if(label.isEmpty()&&prefs.getBoolean("islandMedia",false)&&!media.title.isEmpty())label=(media.playing?"♫ ":"Ⅱ ")+media.title;
+        boolean mediaLabel=false;
+        if(label.isEmpty()&&prefs.getBoolean("islandMedia",false)&&!media.title.isEmpty()){label=(media.playing?"♫ ":"Ⅱ ")+media.title;mediaLabel=true;}
         if(label.isEmpty()&&prefs.getBoolean("islandBattery",false))label=batteryLabel;
         if(label.isEmpty()&&prefs.getBoolean("island",false)){
             if(prefs.getBoolean("companion",false)&&Perch.typing(now,InterfaceCompanion.snapshot.input))label="🐾 陪你打字中";
-            else if("video".equals(companionMode))label="🐾 陪你看视频";
-            else if("music".equals(companionMode))label="♫ 一起摇摆";
+            else if("video".equals(companionMode)){label="🐾 陪你看视频";mediaLabel=true;}
+            else if("music".equals(companionMode)){label="♫ 一起摇摆";mediaLabel=true;}
         }
+        islandMediaShown=mediaLabel;
         if(label.isEmpty()||now<islandDismissed){hideIsland();islandNotice=false;}
         else{showIsland(label);islandNotice=notice&&label.equals(islandMessage);}
     }
@@ -644,7 +647,9 @@ public final class PetService extends Service {
     /** 选好的伙伴（默认第一只出来的）在通知提示条出现时挂上去；提示条消失或换成别的内容就落回地面。 */
     private void updateHanger(long now,android.content.SharedPreferences prefs){
         // 提示条一出现（通知、充电、计时、音乐、陪伴状态都算）就挂上去，提示条消失再掉下来
-        boolean want=island!=null&&island.isLaidOut()&&now>=hangSkipUntil
+        // 听音乐、看视频时（提示条在放音乐 / 陪看视频，或应用联动正在看视频、跳舞）不挂，照常陪着播动作；别的提示都挂
+        boolean media=!islandMessage.startsWith("演示")&&(islandMediaShown||"video".equals(companionMode)||"music".equals(companionMode));
+        boolean want=island!=null&&island.isLaidOut()&&now>=hangSkipUntil&&!media
             &&(prefs.getBoolean("islandHang",false)||islandMessage.startsWith("演示"));
         Actor chosen=null;
         if(want){
