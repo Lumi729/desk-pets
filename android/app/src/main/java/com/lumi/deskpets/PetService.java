@@ -89,7 +89,7 @@ public final class PetService extends Service {
         if("start".equals(action)&&UpdateChecker.due(getSharedPreferences("pets",MODE_PRIVATE)))UpdateChecker.check(this,(version,url)->{ // 自动检查更新（默认关闭）
             if(version==null||destroyed)return;
             PendingIntent open=PendingIntent.getActivity(this,3,new Intent(this,MainActivity.class).setAction("update"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-            getSystemService(NotificationManager.class).notify(9,new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setContentTitle("桌宠有新版本 "+version).setContentText("点这里下载更新").setContentIntent(open).setAutoCancel(true).build());
+            getSystemService(NotificationManager.class).notify(9,new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setColor(0xFFEFA7C0).setLargeIcon(android.graphics.drawable.Icon.createWithResource(this,R.drawable.ic_qianqian_large)).setContentTitle("桌宠有新版本 "+version).setContentText("点这里下载更新").setContentIntent(open).setAutoCancel(true).build());
         });
         if("test-shake".equals(action))bounceParty();
         if("test-rainbow".equals(action)){long now=SystemClock.uptimeMillis();for(Actor a:actors)spitRainbow(a,now);}
@@ -126,7 +126,7 @@ public final class PetService extends Service {
         PendingIntent open=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent toggle=PendingIntent.getService(this,1,new Intent(this,PetService.class).setAction("toggle"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent stop=PendingIntent.getService(this,2,new Intent(this,PetService.class).setAction("stop"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-        return new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setContentTitle(paused?"伙伴们休息中":"梨间雪的小伙伴陪着你").setContentText("点这里选宠 · 长按宠物也能打开设置").setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true).addAction(new Notification.Action.Builder(null,paused?"继续":"收起",toggle).build()).addAction(new Notification.Action.Builder(null,"全部回家",stop).build()).build();
+        return new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setColor(0xFFEFA7C0).setLargeIcon(android.graphics.drawable.Icon.createWithResource(this,R.drawable.ic_qianqian_large)).setContentTitle(paused?"伙伴们休息中":"梨间雪的小伙伴陪着你").setContentText("点这里选宠 · 长按宠物也能打开设置").setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true).addAction(new Notification.Action.Builder(null,paused?"继续":"收起",toggle).build()).addAction(new Notification.Action.Builder(null,"全部回家",stop).build()).build();
     }
     @SuppressWarnings("deprecation") private void measure(){
         if(Build.VERSION.SDK_INT>=30){WindowMetrics m=windows.getCurrentWindowMetrics();android.graphics.Insets i=m.getWindowInsets().getInsetsIgnoringVisibility(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());width=m.getBounds().width()-i.left-i.right;height=m.getBounds().height()-i.top-i.bottom;}
@@ -327,7 +327,7 @@ public final class PetService extends Service {
             if(islandArt!=null){island.setBackground(islandArt);int cap=islandArt.capWidth();island.setPadding(cap,0,cap,0);}
             else{android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable();bg.setColor(0xEE302932);bg.setCornerRadius(100);island.setBackground(bg);island.setPadding(18,0,18,0);}
             WindowManager.LayoutParams p=new WindowManager.LayoutParams(Math.min(width,(int)(270*density)),islandHeight,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);p.gravity=Gravity.TOP|Gravity.CENTER_HORIZONTAL;p.y=(int)(12*density);
-            island.setSingleLine(true);island.setEllipsize(android.text.TextUtils.TruncateAt.END);island.setOnClickListener(v->openIslandPanel());
+            island.setSingleLine(true);island.setEllipsize(android.text.TextUtils.TruncateAt.END);island.setOnClickListener(v->{if(!openNotice())openIslandPanel();});island.setOnLongClickListener(v->{openIslandPanel();return true;});
             try{windows.addView(island,p);}catch(RuntimeException e){island=null;return;}
         }
         island.setText(label);
@@ -335,7 +335,7 @@ public final class PetService extends Service {
     private void checkTimer(){
         android.content.SharedPreferences p=getSharedPreferences("pets",MODE_PRIVATE);long end=p.getLong("timerEnd",0);
         if(end>0&&System.currentTimeMillis()>=end){p.edit().putLong("timerEnd",0).apply();timerFinishedUntil=SystemClock.elapsedRealtime()+15000;islandDismissed=0;
-            getSystemService(NotificationManager.class).notify(8,new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setContentTitle("桌宠计时器：时间到啦").setContentText("回到桌宠可以再开一轮").setAutoCancel(true).build());}
+            getSystemService(NotificationManager.class).notify(8,new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setColor(0xFFEFA7C0).setLargeIcon(android.graphics.drawable.Icon.createWithResource(this,R.drawable.ic_qianqian_large)).setContentTitle("桌宠计时器：时间到啦").setContentText("回到桌宠可以再开一轮").setAutoCancel(true).build());}
     }
     /** 吐一遍彩虹（约 2.7 秒，GIF 里画好了彩虹）再回待机。 */
     private void spitRainbow(Actor a,long now){
@@ -392,6 +392,24 @@ public final class PetService extends Service {
     private void bringToFront(Actor a){
         if(!a.view.isAttachedToWindow())return;
         try{windows.removeViewImmediate(a.view);windows.addView(a.view,a.pos);}catch(RuntimeException ignored){}
+    }
+    /** 提示条上正显示外卖 / 选中应用的通知时，点一下打开那条通知（和在通知栏里点一样）；打不开就打开那个应用。 */
+    private boolean openNotice(){
+        if(!islandNotice||islandMessage.startsWith("演示"))return false;
+        PendingIntent target=islandFromNotice?DeliveryCompanion.noticeIntent:DeliveryCompanion.hintIntent;
+        String pkg=islandFromNotice?DeliveryCompanion.noticePkg:DeliveryCompanion.hintPkg;
+        boolean opened=false;
+        if(target!=null)try{
+            android.os.Bundle options=null;
+            if(Build.VERSION.SDK_INT>=34)options=ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED).toBundle();
+            target.send(this,0,null,null,null,null,options);opened=true;
+        }catch(PendingIntent.CanceledException ignored){}
+        if(!opened&&pkg!=null&&!pkg.isEmpty()){
+            Intent launch=getPackageManager().getLaunchIntentForPackage(pkg);
+            if(launch!=null)try{startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));opened=true;}catch(RuntimeException ignored){}
+        }
+        if(opened){islandUntil=0;hideIsland();islandNotice=false;}
+        return opened;
     }
     private void openIslandPanel(){
         if(islandPanel!=null)return;

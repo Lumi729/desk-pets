@@ -11,6 +11,9 @@ public final class DeliveryCompanion extends NotificationListenerService {
     static volatile long hintAt;
     static volatile String notice="";
     static volatile long noticeAt;
+    // 点提示条时打开这条通知（只在内存里，不保存）
+    static volatile android.app.PendingIntent noticeIntent,hintIntent;
+    static volatile String noticePkg="",hintPkg="";
     private final LinkedHashMap<String,Long> seen=new LinkedHashMap<>();
     @Override public void onNotificationPosted(StatusBarNotification sbn){
         if(sbn==null)return;
@@ -25,7 +28,7 @@ public final class DeliveryCompanion extends NotificationListenerService {
         if(chosen){
             CharSequence t=n.extras.getCharSequence(Notification.EXTRA_TITLE);
             String label=sbn.getPackageName();try{label=getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(label,0)).toString();}catch(android.content.pm.PackageManager.NameNotFoundException ignored){}
-            notice=label+"："+(t==null?"有新通知":t.toString().substring(0,Math.min(80,t.length())));noticeAt=SystemClock.elapsedRealtime();
+            notice=label+"："+(t==null?"有新通知":t.toString().substring(0,Math.min(80,t.length())));noticeIntent=n.contentIntent;noticePkg=sbn.getPackageName();noticeAt=SystemClock.elapsedRealtime();
         }
         if(!delivery)return;
         // Read only the delivery app's visible notification text, transiently in memory.
@@ -39,7 +42,7 @@ public final class DeliveryCompanion extends NotificationListenerService {
         Long previous=seen.get(key);
         if(previous!=null&&now-previous<120000)return;
         seen.put(key,now);if(seen.size()>64)seen.remove(seen.keySet().iterator().next());
-        hint=message;hintAt=now;
+        hint=message;hintIntent=n.contentIntent;hintPkg=sbn.getPackageName();hintAt=now;
     }
-    @Override public void onListenerDisconnected(){hint="";hintAt=0;notice="";noticeAt=0;seen.clear();}
+    @Override public void onListenerDisconnected(){hint="";hintAt=0;notice="";noticeAt=0;noticeIntent=hintIntent=null;noticePkg=hintPkg="";seen.clear();}
 }
