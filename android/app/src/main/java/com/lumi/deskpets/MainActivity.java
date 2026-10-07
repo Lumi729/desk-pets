@@ -111,9 +111,10 @@ public final class MainActivity extends Activity {
         button("应用选择和大小",()->startPets("start"));
         button("试试贴贴 ♡",()->startPets("hug"));
         button("测试动作 / 功能展示",()->new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
-            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "外卖通知检查（看通知里能读到什么）", "挑衅哥哥（千千猫猫 / 梨梨兔兔轮流）", "两个哥哥打架和好", "功能展示：摇晃 → 吐彩虹 → 挂灵动岛 → 天气 → 扶起来 → 盖被子 → 挑衅 → 打架和好"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-inspect","test-tease","test-fight","test-show"}[which])).show());
+            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "外卖通知检查（看通知里能读到什么）", "挑衅哥哥（千千猫猫 / 梨梨兔兔轮流）", "两个哥哥打架和好", "送零食（千千猫猫 / 梨梨兔兔轮流）", "煤球猫猫追着玩", "打哈欠会传染", "g老师看书 + 哥哥批改作业", "g老师看书睡着被围观", "g老师摔倒接眼镜", "哥哥和g老师换眼镜", "沙漠狐的小爱好", "两只狐狸比尾巴", "两只狐狸尾巴被子", "功能展示：从摇晃到各种互动全部演一遍"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-inspect","test-tease","test-fight","test-snack","test-chase","test-yawn","test-read","test-watch","test-catch","test-swap","test-hobby","test-tails","test-tailquilt","test-show"}[which])).show());
         text("哥哥狗狗和电脑版一样会照顾大家：有伙伴摔趴趴，它会走过去扶起来；晚上 11 点到早上 6 点，千千猫猫睡着时，它会过去盖被子（一晚一次），盖好后两只一起睡，摸一下才醒。演示会自动把千千猫猫和哥哥狗狗放出来。",13,false);
         text("和电脑版一样会闹：千千猫猫离哥哥狗狗近时偶尔挑衅它，梨梨兔兔也会挑衅梨梨哥哥，10 分钟里被挑衅超过 3 次哥哥直接投降；长按千千猫猫或梨梨兔兔也能叫它去挑衅。哥哥狗狗和梨梨哥哥贴贴完会打一架，冷静大约 3 分钟后再碰到先和好再贴贴。拖动、摸摸随时能打断。",13,false);
+        text("平时还会：千千猫猫和梨梨兔兔互相送零食；煤球猫猫突然冲过去追着玩；一只打哈欠，旁边的跟着打；g老师偶尔看书，有伙伴挨过来就一起看（哥哥狗狗来是批改作业），看着看着会打瞌睡被围观，摔倒时旁边的伙伴帮忙接眼镜，偶尔和哥哥狗狗换眼镜；沙漠狐玩自己的小爱好，和 99狐狐 比尾巴，晚上两只一起睡时用尾巴当被子。",13,false);
         text("贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫这一版先手动选花色。",13,false);
         text("第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。",13,false);
         text("只有检查更新（只连 GitHub 上桌宠的发布页）和打开天气后查天气（只发所选地点的经纬度）时联网。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。",13,false);

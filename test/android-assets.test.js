@@ -98,3 +98,26 @@ test('Android tease rules come straight from teases.js, with every clip and the 
     assert.equal(Object.keys(stories.fight).length, 1);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Android ships snacks, yawns, g老师 and 沙漠狐 interactions (Claude)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-batch3-'));
+  try {
+    const { pets, stories } = prepare(dir);
+    const pet = name => pets.find(p => p.name === name);
+    const pair = (kind, a, b) => stories[kind][`${pet(a).id}:${pet(b).id}`] || stories[kind][`${pet(b).id}:${pet(a).id}`];
+    for (const clip of ['叼胡萝卜向左走', '叼胡萝卜向右走', '吃小鱼']) assert.ok(pet('千千猫猫').clips[clip], clip);
+    for (const clip of ['叼小鱼向左走', '叼小鱼向右走', '吃胡萝卜']) assert.ok(pet('梨梨兔兔').clips[clip], clip);
+    for (const p of pets) assert.ok(p.clips['打哈欠'], `${p.label} 打哈欠`);
+    for (const clip of ['互动_看书', '互动_看书打瞌睡', '互动_假装没摔过', '互动_夹书签']) assert.ok(pet('灰鸮g老师').clips[clip], clip);
+    for (const clip of ['互动_刨坑', '互动_堆沙堡', '互动_偷听', '互动_追尾巴', '互动_晒太阳']) assert.ok(pet('沙漠狐').clips[clip], clip);
+    assert.ok(pair('grading', '哥哥狗狗', '灰鸮g老师') && pair('bookmark', '哥哥狗狗', '灰鸮g老师') && pair('swap', '哥哥狗狗', '灰鸮g老师'));
+    for (const name of ['千千猫猫', '梨梨兔兔', '煤球猫猫', '99狐狐', '沙漠狐']) {
+      assert.ok(pair('watch', name, '灰鸮g老师'), `${name} 围观睡着`);
+      assert.ok(pair('catch', name, '灰鸮g老师'), `${name} 接眼镜`);
+    }
+    assert.ok(pair('tails', '99狐狐', '沙漠狐') && pair('tailquilt', '99狐狐', '沙漠狐'));
+    // 批改作业 / 书签 是两段不同的动画（文件名后缀不能互相吞掉）
+    assert.notEqual(pair('grading', '哥哥狗狗', '灰鸮g老师'), pair('bookmark', '哥哥狗狗', '灰鸮g老师'));
+    assert.ok(!pets.some(p => p.clips['互动_写日记']), '写日记手机上用不到，不打包');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

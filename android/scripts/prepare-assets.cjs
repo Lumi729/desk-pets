@@ -5,7 +5,9 @@ const rules = require('../../renderer/combos.js');
 const Teases = require('../../renderer/teases.js');
 const root = path.resolve(__dirname, '../..');
 const source = path.join(root, '桌宠素材');
-const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞', '吓一跳', '向左看', '向右看', '摇晃', '吐彩虹', '灵动岛',
+const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞', '吓一跳', '向左看', '向右看', '打哈欠',
+  // 送零食：叼着走过去、对方吃
+  '叼胡萝卜向左走', '叼胡萝卜向右走', '叼小鱼向左走', '叼小鱼向右走', '吃胡萝卜', '吃小鱼', '摇晃', '吐彩虹', '灵动岛',
   // 天气和四季换装的待机（和电脑版同名，没有的跳过）
   '待机_晴天', '待机_晴夜', '待机_多云', '待机_阴天', '待机_雾', '待机_毛毛雨', '待机_雨天', '待机_大雨', '待机_雷雨', '待机_下雪', '待机_降温', '待机_炎热',
   '待机_春', '待机_夏', '待机_秋', '待机_冬'];
@@ -33,8 +35,8 @@ function prepare(out) {
           fs.copyFileSync(file, path.join(out, dest)); clips[action] = dest;
         }
       }
-      // 挑衅 / 回应：整套照搬电脑版（文件名「挑衅_」「回应_」开头），只在挑衅剧情里用（Claude）
-      for (const file of fs.readdirSync(path.join(source, folder)).filter(f => /^(挑衅|回应)_.+\.gif$/.test(f)).sort()) {
+      // 挑衅 / 回应 / 互动：整套照搬电脑版（文件名「挑衅_」「回应_」「互动_」开头），只在专属剧情里用（Claude）
+      for (const file of fs.readdirSync(path.join(source, folder)).filter(f => /^(挑衅|回应|互动)_.+\.gif$/.test(f) && f !== '互动_写日记.gif').sort()) {
         const action = file.slice(0, -4), dest = `${id}/${action}.gif`;
         fs.mkdirSync(path.join(out, id), { recursive: true });
         fs.copyFileSync(path.join(source, folder, file), path.join(out, dest)); clips[action] = dest;
@@ -44,7 +46,10 @@ function prepare(out) {
     }
   }
   const hugs = {};
-  const pairStories = { fight: {}, makeup: {} }; // 两个哥哥：贴贴完打架（_打架），冷静后再见面先和好（_和好）
+  // 两只一起的特别剧情：两个哥哥打架 / 和好，g老师的批改作业 / 书签 / 围观睡着 / 接眼镜 / 换眼镜，两只狐狸比尾巴 / 尾巴被子
+  const PAIR_KINDS = [['fight', '_打架'], ['makeup', '_和好'], ['bookmark', '_批改作业_书签'], ['grading', '_批改作业'], ['watch', '_围观睡着'],
+    ['catch', '_接眼镜'], ['swap', '_换眼镜'], ['tails', '_比尾巴'], ['tailquilt', '_尾巴被子']];
+  const pairStories = Object.fromEntries(PAIR_KINDS.map(([kind]) => [kind, {}]));
   fs.mkdirSync(path.join(out, 'hugs'));
   for (let a = 0; a < pets.length; a++) for (let b = a + 1; b < pets.length; b++) {
     const p = pets[a], q = pets[b];
@@ -55,7 +60,7 @@ function prepare(out) {
     if (fs.existsSync(file)) {
       const dest = `hugs/${p.id}-${q.id}.gif`;
       fs.copyFileSync(file, path.join(out, dest)); hugs[`${p.id}:${q.id}`] = dest;
-      for (const [kind, suffix] of [['fight', '_打架'], ['makeup', '_和好']]) {
+      for (const [kind, suffix] of PAIR_KINDS) {
         const extra = file.replace(/\.gif$/, `${suffix}.gif`);
         if (!fs.existsSync(extra)) continue;
         const to = `hugs/${p.id}-${q.id}${suffix}.gif`;
