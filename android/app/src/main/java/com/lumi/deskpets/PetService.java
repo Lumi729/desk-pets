@@ -110,6 +110,7 @@ public final class PetService extends Service {
         if("test-hang".equals(action))hangDemo();
         if("test-show".equals(action)){bounceParty();clock.postDelayed(this::hangDemo,9000);clock.postDelayed(this::weatherDemoStart,18000);clock.postDelayed(this::helpUpDemo,68000);clock.postDelayed(this::blanketDemo,84000);}
         if("test-helpup".equals(action))helpUpDemo();
+        if("test-inspect".equals(action))openInspector();
         if("test-blanket".equals(action))blanketDemo();
         if("test-weather".equals(action))weatherDemoStart();
         if("test-island".equals(action)){islandMessage="演示：外卖通知提醒";islandUntil=SystemClock.uptimeMillis()+6000;islandDismissed=0;showIsland(islandMessage);}
@@ -212,6 +213,7 @@ public final class PetService extends Service {
         boolean unlocked=!getSystemService(KeyguardManager.class).isKeyguardLocked();
         motion.enabled(unlocked&&options.getBoolean("motion",false));
         updateIsland(now,options,unlocked);
+        updateInspector();
         updateInterface(now);
         updateHanger(now,options);
         if(hugA!=null&&now>=hugEnd)endHug();
@@ -558,12 +560,44 @@ public final class PetService extends Service {
         islandPanel.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
         islandPanel.setOnDismissListener(d->islandPanel=null);islandPanel.show();
     }
+    // ---- 外卖通知检查（Claude）：屏幕上一个小窗口，显示外卖 App 通知能读到的字段；点一下关闭 ----
+    private android.widget.TextView inspector;
+    private long inspectorShown=-1;
+    private void openInspector(){
+        DeliveryCompanion.inspecting=true;synchronized(DeliveryCompanion.inspected){DeliveryCompanion.inspected.clear();}
+        if(inspector==null){
+            float d=getResources().getDisplayMetrics().density;
+            inspector=new android.widget.TextView(this);inspector.setTextColor(android.graphics.Color.WHITE);inspector.setTextSize(12);inspector.setPadding((int)(12*d),(int)(10*d),(int)(12*d),(int)(10*d));
+            android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable();bg.setColor(0xE6302932);bg.setCornerRadius(16*d);inspector.setBackground(bg);
+            inspector.setOnClickListener(v->closeInspector());
+            WindowManager.LayoutParams p=new WindowManager.LayoutParams(width-(int)(16*d),WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);
+            p.gravity=Gravity.TOP|Gravity.CENTER_HORIZONTAL;p.y=(int)(76*d);
+            try{windows.addView(inspector,p);}catch(RuntimeException e){inspector=null;DeliveryCompanion.inspecting=false;return;}
+        }
+        inspectorShown=-1;DeliveryCompanion.scanActive();updateInspector();
+    }
+    private void updateInspector(){
+        if(inspector==null||inspectorShown==DeliveryCompanion.inspectedAt)return;
+        inspectorShown=DeliveryCompanion.inspectedAt;
+        StringBuilder b=new StringBuilder("外卖通知检查（只显示在屏幕上，不保存不上传；点这里关闭）\n");
+        if(!DeliveryCompanion.connected())b.append("\n还没有通知访问权限：在设置页点「允许音乐与通知访问」打开后再试。");
+        synchronized(DeliveryCompanion.inspected){
+            if(DeliveryCompanion.inspected.isEmpty())b.append("\n等待美团 / 美团外卖 / 饿了么的通知……下单后通知出来或更新时会显示在这里。");
+            java.util.List<String> list=new java.util.ArrayList<>(DeliveryCompanion.inspected.values());java.util.Collections.reverse(list);
+            for(String t:list)b.append("\n\n").append(t);
+        }
+        inspector.setText(b);
+    }
+    private void closeInspector(){
+        DeliveryCompanion.stopInspect();
+        if(inspector!=null){if(inspector.isAttachedToWindow())windows.removeView(inspector);inspector=null;}
+    }
     private void hideIsland(){hangSkipUntil=0; // 下次提示条出来又可以挂
         if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}}
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
     private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();if(islandPanel!=null)islandPanel.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
     private void clearActors(){hideIsland();hugA=hugB=null;storyKind=null;storyPet=storyDog=null;clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
     @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();endHug();cancelStory();InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.hang=0;a.rainbowAfter=false;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
-    @Override public void onDestroy(){destroyed=true;if(islandPanel!=null)islandPanel.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
+    @Override public void onDestroy(){destroyed=true;closeInspector();if(islandPanel!=null)islandPanel.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent i){return null;}
 }

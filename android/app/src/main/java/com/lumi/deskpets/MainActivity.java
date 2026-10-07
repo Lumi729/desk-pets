@@ -111,7 +111,7 @@ public final class MainActivity extends Activity {
         button("应用选择和大小",()->startPets("start"));
         button("试试贴贴 ♡",()->startPets("hug"));
         button("测试动作 / 功能展示",()->new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
-            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "功能展示：摇晃 → 吐彩虹 → 挂灵动岛 → 天气 → 扶起来 → 盖被子"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-show"}[which])).show());
+            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "外卖通知检查（看通知里能读到什么）", "功能展示：摇晃 → 吐彩虹 → 挂灵动岛 → 天气 → 扶起来 → 盖被子"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-inspect","test-show"}[which])).show());
         text("哥哥狗狗和电脑版一样会照顾大家：有伙伴摔趴趴，它会走过去扶起来；晚上 11 点到早上 6 点，千千猫猫睡着时，它会过去盖被子（一晚一次），盖好后两只一起睡，摸一下才醒。演示会自动把千千猫猫和哥哥狗狗放出来。",13,false);
         text("贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫这一版先手动选花色。",13,false);
         text("第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。",13,false);

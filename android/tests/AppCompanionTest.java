@@ -109,6 +109,12 @@ public final class AppCompanionTest {
         equal(Weather.pick("待机_晴天","待机_秋",noAutumn),"待机_晴天");// 没有季节动画就用其它天气
         equal(Weather.pick(null,null,all),"待机");equal(Weather.pick("待机_雨天","待机_秋",none),"待机");
         equal(Weather.label("待机_毛毛雨"),"毛毛雨");equal(Weather.ALL.length,16);
+        // 外卖通知检查（Claude）：字段排成几行，空的写「（没有）」
+        String shown=DeliveryRules.inspect("美团外卖","12:00:00","骑手正在送餐","距你800米",null," ",true,3,10,false);
+        equal(shown.contains("标题：骑手正在送餐"),true);equal(shown.contains("正文：距你800米"),true);equal(shown.contains("子文本：（没有）"),true);
+        equal(shown.contains("大文本：（没有）"),true);equal(shown.contains("常驻：是"),true);equal(shown.contains("进度条：有进度条 3 / 10"),true);
+        equal(DeliveryRules.inspect("饿了么","12:00:01",null,null,null,null,false,0,0,true).contains("不确定进度"),true);
+        equal(DeliveryRules.inspect("饿了么","12:00:01",null,null,null,null,false,0,0,false).contains("进度条：（没有）"),true);
         System.out.println("App classification, overrides, stale events, switch ordering and screen reset passed");
     }
 }
