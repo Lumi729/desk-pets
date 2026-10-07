@@ -68,13 +68,13 @@ public final class MainActivity extends Activity {
         option("island","顶部灵动提示条");
         option("islandMedia","音乐状态与播放控制");
         option("islandBattery","充电与电量提示");
-        option("islandHang","通知时伙伴挂在提示条下面");
+        option("islandHang","伙伴挂在提示条下面");
         button("选择挂在提示条下的伙伴",()->chooseIslandPet());
         button("选择灵动岛通知来源",()->chooseNoticeApps());
         button("开始灵动岛计时器",()->new AlertDialog.Builder(this).setTitle("桌宠运行期间的计时器")
             .setItems(new String[]{"1 分钟", "5 分钟", "15 分钟", "25 分钟", "取消计时"},(d,i)->{
                 long minutes=new long[]{1,5,15,25,0}[i];prefs.edit().putLong("timerEnd",minutes==0?0:System.currentTimeMillis()+minutes*60000).apply();startPets("start");}).show());
-        text("外卖、选中应用的通知或演示出现在提示条上时，选好的伙伴会跑到提示条下面挂着，提示条消失后再落回地面；默认是第一只出来的伙伴。点顶部提示条可展开音乐控制和计时器。音乐与通知来源需要下方的通知访问授权；通知仅显示你选中应用的标题。计时器不是系统闹钟，桌宠被强制关闭后不能保证准时提醒。",13,false);
+        text("提示条出现时（通知、充电、计时、音乐都算），选好的伙伴会跑到提示条下面挂着，提示条消失后再落回地面；默认是第一只出来的伙伴。点顶部提示条可展开音乐控制和计时器。音乐与通知来源需要下方的通知访问授权；通知仅显示你选中应用的标题。计时器不是系统闹钟，桌宠被强制关闭后不能保证准时提醒。",13,false);
         option("delivery","外卖通知提示");
         text("外卖提示需单独授予通知访问权限。只在本机临时匹配美团/美团外卖/饿了么的取餐通知标题和正文，不保存或上传，不读取其他应用通知。仅转述通知，不能查询订单或保证外卖真的送达。",13,false);
         button("允许音乐与通知访问",()->{

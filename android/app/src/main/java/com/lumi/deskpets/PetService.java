@@ -251,7 +251,7 @@ public final class PetService extends Service {
     }
     private void jump(Actor a){
         if(a==hugA||a==hugB)endHug();
-        if(a.hang!=0){a.hang=0;hangSkipUntil=islandUntil;}
+        if(a.hang!=0){a.hang=0;hangSkipUntil=Long.MAX_VALUE;}
         a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.direction=0;a.dragging=false;a.falling=true;a.bouncing=true;a.velocity=-unit*3.3f;a.play("开心蹦蹦",0);
     }
     private void setTouch(Actor a){
@@ -263,7 +263,7 @@ public final class PetService extends Service {
         a.view.setOnTouchListener(new View.OnTouchListener(){float downX,downY,startX,startY;boolean moved,longPressed;final int slop=ViewConfiguration.get(PetService.this).getScaledTouchSlop();final Runnable hold=()->{longPressed=true;a.dragging=false;a.view.performLongClick();};
             public boolean onTouch(View v,MotionEvent e){switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
-                    if(a==hugA||a==hugB)endHug();if(a.hang!=0){a.hang=0;hangSkipUntil=islandUntil;}a.rainbowAfter=false;downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
+                    if(a==hugA||a==hugB)endHug();if(a.hang!=0){a.hang=0;hangSkipUntil=Long.MAX_VALUE;}a.rainbowAfter=false;downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
                 case MotionEvent.ACTION_MOVE:
                     float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.hypot(dx,dy)>slop){moved=true;a.lastTap=0;clock.removeCallbacks(hold);}if(moved&&!longPressed){a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
                 case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:
@@ -347,7 +347,8 @@ public final class PetService extends Service {
     }
     /** 选好的伙伴（默认第一只出来的）在通知提示条出现时挂上去；提示条消失或换成别的内容就落回地面。 */
     private void updateHanger(long now,android.content.SharedPreferences prefs){
-        boolean want=islandNotice&&island!=null&&island.isLaidOut()&&now>=hangSkipUntil
+        // 提示条一出现（通知、充电、计时、音乐、陪伴状态都算）就挂上去，提示条消失再掉下来
+        boolean want=island!=null&&island.isLaidOut()&&now>=hangSkipUntil
             &&(prefs.getBoolean("islandHang",false)||islandMessage.startsWith("演示"));
         Actor chosen=null;
         if(want){
@@ -421,7 +422,8 @@ public final class PetService extends Service {
         islandPanel.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
         islandPanel.setOnDismissListener(d->islandPanel=null);islandPanel.show();
     }
-    private void hideIsland(){if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}}
+    private void hideIsland(){hangSkipUntil=0; // 下次提示条出来又可以挂
+        if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}}
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
     private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();if(islandPanel!=null)islandPanel.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
     private void clearActors(){hideIsland();hugA=hugB=null;clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
