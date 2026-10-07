@@ -5,7 +5,7 @@ import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import java.util.LinkedHashMap;
 
-/** Opt-in and allowlisted: no history scan, uploads, notification actions or full text storage. */
+/** Opt-in: no uploads, notification actions or storage; everything read stays in memory only. */
 public final class DeliveryCompanion extends NotificationListenerService {
     static volatile String hint="";
     static volatile long hintAt;
@@ -15,39 +15,90 @@ public final class DeliveryCompanion extends NotificationListenerService {
     static volatile android.app.PendingIntent noticeIntent,hintIntent;
     static volatile String noticePkg="",hintPkg="";
     private final LinkedHashMap<String,Long> seen=new LinkedHashMap<>();
-    // ---- 外卖通知检查（Claude）：测试菜单里打开时，把白名单外卖 App 通知能读到的字段临时显示在屏幕上 ----
-    // 只在内存里留最近 3 条，关掉工具就清空；不保存、不上传、不写日志。
+    // ---- 外卖通知检查（Claude）：测试菜单里打开时，把可能是外卖的通知能读到的字段临时显示在屏幕上 ----
+    // 白名单包名的通知，或标题 / 正文里有「送达、骑手、取餐、配送、商家」的通知都列出来（方便确认真实包名）。
+    // 只在内存里留最近 6 条，关掉工具就清空；不保存、不上传、不写日志。
     static volatile boolean inspecting;
     static final LinkedHashMap<String,String> inspected=new LinkedHashMap<>();
     static volatile long inspectedAt;
+    /** 上次读通知栏一共看了几条（-1 是还没读过）。 */
+    static volatile int scannedTotal=-1;
     private static volatile DeliveryCompanion current;
-    @Override public void onListenerConnected(){current=this;if(inspecting)scanActive();}
+    // ---- 外卖进度（Claude）：正在进行的那条外卖通知（只在内存里，通知消失或送达就清掉） ----
+    static final class Live{final String key,pkg;final CharSequence title,text;final android.app.PendingIntent intent;
+        Live(String key,String pkg,CharSequence title,CharSequence text,android.app.PendingIntent intent){this.key=key;this.pkg=pkg;this.title=title;this.text=text;this.intent=intent;}}
+    static volatile Live live;
+    /** 灵动岛上的那一行（now 是当天第几分钟）；没有就空。 */
+    static String liveLabel(int now){Live l=live;return l==null?"":DeliveryRules.label(l.title,l.text,now);}
+    @Override public void onListenerConnected(){current=this;if(inspecting)scanActive();if(getSharedPreferences("pets",MODE_PRIVATE).getBoolean("delivery",false))refreshLive();}
     static boolean connected(){return current!=null;}
-    /** 打开工具时先看一眼已经在通知栏里的外卖通知。 */
+    /** 打开工具或点「刷新」时，把已经在通知栏里的通知读一遍。 */
     static void scanActive(){
         DeliveryCompanion c=current;if(c==null)return;
-        try{StatusBarNotification[] all=c.getActiveNotifications();if(all!=null)for(StatusBarNotification sbn:all)c.inspect(sbn,false);}catch(RuntimeException ignored){}
+        synchronized(inspected){inspected.clear();}
+        int total=0;
+        try{StatusBarNotification[] all=c.getActiveNotifications();if(all!=null){total=all.length;for(StatusBarNotification sbn:all)c.inspect(sbn,false);}}catch(RuntimeException ignored){}
+        scannedTotal=total;inspectedAt=SystemClock.elapsedRealtime();
     }
-    static void stopInspect(){inspecting=false;synchronized(inspected){inspected.clear();}inspectedAt=android.os.SystemClock.elapsedRealtime();}
+    /** 外卖提示开着时（约每分钟一次）重新找正在进行的外卖通知，漏掉的更新 / 消失也能跟上。 */
+    static void refreshLive(){
+        DeliveryCompanion c=current;if(c==null){live=null;return;}
+        Live found=null;
+        try{StatusBarNotification[] all=c.getActiveNotifications();if(all!=null)for(StatusBarNotification sbn:all){found=liveFrom(sbn);if(found!=null)break;}}catch(RuntimeException ignored){}
+        live=found;
+    }
+    private static CharSequence text(android.os.Bundle e){CharSequence t=e.getCharSequence(Notification.EXTRA_TEXT);return t!=null?t:e.getCharSequence(Notification.EXTRA_BIG_TEXT);}
+    /** 这条是正在进行、读得到预计送达时间的外卖通知吗？ */
+    private static Live liveFrom(StatusBarNotification sbn){
+        if(sbn==null)return null;
+        try{
+            Notification n=sbn.getNotification();if(n==null||n.extras==null)return null;
+            CharSequence title=n.extras.getCharSequence(Notification.EXTRA_TITLE),body=text(n.extras);
+            if(!DeliveryRules.supported(sbn.getPackageName())&&!DeliveryRules.looksLike(title,body))return null;
+            if(DeliveryRules.done(title,body))return null;
+            if(DeliveryRules.etaMinute(title)<0&&DeliveryRules.etaMinute(body)<0)return null;
+            return new Live(sbn.getKey(),sbn.getPackageName(),title,body,n.contentIntent);
+        }catch(RuntimeException e){return null;}
+    }
+    static void stopInspect(){inspecting=false;synchronized(inspected){inspected.clear();}scannedTotal=-1;inspectedAt=SystemClock.elapsedRealtime();}
     private void inspect(StatusBarNotification sbn,boolean removed){
-        if(!inspecting||sbn==null||!DeliveryRules.supported(sbn.getPackageName()))return;
-        String app=sbn.getPackageName();try{app=getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(app,0)).toString();}catch(android.content.pm.PackageManager.NameNotFoundException ignored){}
-        String time=new java.text.SimpleDateFormat("HH:mm:ss",java.util.Locale.ROOT).format(new java.util.Date());
-        String text;
-        if(removed)text="【"+app+" · "+time+"】\n这条通知消失了";
-        else{
-            Notification n=sbn.getNotification();android.os.Bundle e=n.extras==null?new android.os.Bundle():n.extras;
-            text=DeliveryRules.inspect(app,time,e.getCharSequence(Notification.EXTRA_TITLE),e.getCharSequence(Notification.EXTRA_TEXT),e.getCharSequence(Notification.EXTRA_SUB_TEXT),e.getCharSequence(Notification.EXTRA_BIG_TEXT),
-                sbn.isOngoing(),e.getInt(Notification.EXTRA_PROGRESS,0),e.getInt(Notification.EXTRA_PROGRESS_MAX,0),e.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE,false));
-        }
-        synchronized(inspected){inspected.remove(sbn.getKey());inspected.put(sbn.getKey(),text);while(inspected.size()>3)inspected.remove(inspected.keySet().iterator().next());}
-        inspectedAt=android.os.SystemClock.elapsedRealtime();
+        if(!inspecting||sbn==null)return;
+        try{
+            Notification n=sbn.getNotification();android.os.Bundle e=n==null||n.extras==null?new android.os.Bundle():n.extras;
+            CharSequence title=e.getCharSequence(Notification.EXTRA_TITLE),body=e.getCharSequence(Notification.EXTRA_TEXT),sub=e.getCharSequence(Notification.EXTRA_SUB_TEXT),big=e.getCharSequence(Notification.EXTRA_BIG_TEXT);
+            String pkg=sbn.getPackageName();
+            if(!DeliveryRules.supported(pkg)&&!DeliveryRules.looksLike(title,body,sub,big)){
+                boolean listed;synchronized(inspected){listed=inspected.containsKey(sbn.getKey());}
+                if(!(removed&&listed))return; // 别的通知不看；只跟进已经列出来的那条消失
+            }
+            String app=pkg;try{app=getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(pkg,0)).toString();}catch(android.content.pm.PackageManager.NameNotFoundException ignored){}
+            String time=new java.text.SimpleDateFormat("HH:mm:ss",java.util.Locale.ROOT).format(new java.util.Date());
+            String shown;
+            if(removed)shown="【"+app+" · "+time+"】\n包名："+pkg+"\n这条通知消失了";
+            else{
+                java.util.List<String> keys=new java.util.ArrayList<>(e.keySet());java.util.Collections.sort(keys);
+                shown=DeliveryRules.inspect(app,pkg,time,n.getChannelId(),n.category,sbn.isOngoing(),title,body,sub,big,
+                    e.getInt(Notification.EXTRA_PROGRESS,0),e.getInt(Notification.EXTRA_PROGRESS_MAX,0),e.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE,false),String.join(", ",keys));
+                String island=DeliveryRules.label(title,text(e),nowMinute());
+                shown+="\n灵动岛会显示："+(island.isEmpty()?"（读不到预计送达时间，不显示）":island);
+            }
+            synchronized(inspected){inspected.remove(sbn.getKey());inspected.put(sbn.getKey(),shown);while(inspected.size()>6)inspected.remove(inspected.keySet().iterator().next());}
+            inspectedAt=SystemClock.elapsedRealtime();
+        }catch(RuntimeException ignored){}
     }
-    @Override public void onNotificationRemoved(StatusBarNotification sbn){inspect(sbn,true);}
+    static int nowMinute(){java.util.Calendar c=java.util.Calendar.getInstance();return c.get(java.util.Calendar.HOUR_OF_DAY)*60+c.get(java.util.Calendar.MINUTE);}
+    @Override public void onNotificationRemoved(StatusBarNotification sbn){
+        inspect(sbn,true);
+        Live l=live;if(sbn!=null&&l!=null&&l.key.equals(sbn.getKey()))live=null;
+    }
     @Override public void onNotificationPosted(StatusBarNotification sbn){
         if(sbn==null)return;
         inspect(sbn,false);
         android.content.SharedPreferences prefs=getSharedPreferences("pets",MODE_PRIVATE);
+        if(prefs.getBoolean("delivery",false)){ // 外卖进度：更新就跟着变，送达或不再有预计时间就收起
+            Live found=liveFrom(sbn),l=live;
+            if(found!=null)live=found;else if(l!=null&&l.key.equals(sbn.getKey()))live=null;
+        }
         boolean delivery=prefs.getBoolean("delivery",false)&&DeliveryRules.supported(sbn.getPackageName());
         boolean chosen=prefs.getBoolean("notify:"+sbn.getPackageName(),false);
         if(!delivery&&!chosen)return;
@@ -74,5 +125,5 @@ public final class DeliveryCompanion extends NotificationListenerService {
         seen.put(key,now);if(seen.size()>64)seen.remove(seen.keySet().iterator().next());
         hint=message;hintIntent=n.contentIntent;hintPkg=sbn.getPackageName();hintAt=now;
     }
-    @Override public void onListenerDisconnected(){current=null;hint="";hintAt=0;notice="";noticeAt=0;noticeIntent=hintIntent=null;noticePkg=hintPkg="";seen.clear();}
+    @Override public void onListenerDisconnected(){current=null;live=null;hint="";hintAt=0;notice="";noticeAt=0;noticeIntent=hintIntent=null;noticePkg=hintPkg="";seen.clear();}
 }

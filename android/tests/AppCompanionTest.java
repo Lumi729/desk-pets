@@ -110,11 +110,25 @@ public final class AppCompanionTest {
         equal(Weather.pick(null,null,all),"待机");equal(Weather.pick("待机_雨天","待机_秋",none),"待机");
         equal(Weather.label("待机_毛毛雨"),"毛毛雨");equal(Weather.ALL.length,16);
         // 外卖通知检查（Claude）：字段排成几行，空的写「（没有）」
-        String shown=DeliveryRules.inspect("美团外卖","12:00:00","骑手正在送餐","距你800米",null," ",true,3,10,false);
+        String shown=DeliveryRules.inspect("美团外卖","com.sankuai.meituan.takeoutnew","12:00:00","order","progress",true,"骑手正在送餐","距你800米",null," ",3,10,false,"android.title, android.text");
+        equal(shown.contains("包名：com.sankuai.meituan.takeoutnew"),true);equal(shown.contains("channel：order"),true);equal(shown.contains("category：progress"),true);
         equal(shown.contains("标题：骑手正在送餐"),true);equal(shown.contains("正文：距你800米"),true);equal(shown.contains("子文本：（没有）"),true);
         equal(shown.contains("大文本：（没有）"),true);equal(shown.contains("常驻：是"),true);equal(shown.contains("进度条：有进度条 3 / 10"),true);
-        equal(DeliveryRules.inspect("饿了么","12:00:01",null,null,null,null,false,0,0,true).contains("不确定进度"),true);
-        equal(DeliveryRules.inspect("饿了么","12:00:01",null,null,null,null,false,0,0,false).contains("进度条：（没有）"),true);
+        equal(shown.contains("extras 键名：android.title, android.text"),true);
+        equal(DeliveryRules.inspect("饿了么","me.ele","12:00:01",null,null,false,null,null,null,null,0,0,true,"").contains("不确定进度"),true);
+        equal(DeliveryRules.inspect("饿了么","me.ele","12:00:01",null,null,false,null,null,null,null,0,0,false,null).contains("进度条：（没有）"),true);
+        // 外卖进度（Claude）：千千真机上美团外卖的常驻通知
+        equal(DeliveryRules.looksLike("预计10月8日 00:11送达","商家正在备餐，骑手正赶往商家"),true);
+        equal(DeliveryRules.looksLike("小明","晚上一起吃饭吗"),false);equal(DeliveryRules.looksLike(null,null),false);
+        equal(DeliveryRules.etaMinute("预计10月8日 00:11送达"),11);equal(DeliveryRules.etaMinute("预计 18:45 送达"),18*60+45);
+        equal(DeliveryRules.etaMinute("预计今天 12：05前送达"),12*60+5);equal(DeliveryRules.etaMinute("骑手正赶往商家"),-1);equal(DeliveryRules.etaMinute(null),-1);
+        equal(DeliveryRules.minutesLeft(11,23*60+50),21);equal(DeliveryRules.minutesLeft(12*60,11*60+30),30);equal(DeliveryRules.minutesLeft(12*60,12*60+5),-5);
+        equal(DeliveryRules.status("商家正在备餐，骑手正赶往商家"),"骑手正赶往商家");equal(DeliveryRules.status(null),"");
+        equal(DeliveryRules.label("预计10月8日 00:11送达","商家正在备餐，骑手正赶往商家",23*60+50),"🛵 还有 21 分钟 · 骑手正赶往商家");
+        equal(DeliveryRules.label("预计 12:00送达","骑手正在送餐，距你1.2公里",11*60+52),"🛵 还有 8 分钟 · 1.2公里 · 骑手正在送餐");
+        equal(DeliveryRules.label("预计 12:00送达","骑手正在送餐",12*60+3),"🛵 预计 12:00 送达 · 骑手正在送餐");
+        equal(DeliveryRules.label("订单已送达","预计 12:00送达",11*60),"");equal(DeliveryRules.label("骑手正赶往商家","商家正在备餐",11*60),"");
+        equal(DeliveryRules.distance("骑手距您 800 米"),"800米");equal(DeliveryRules.distance("还有 5 分钟"),"");
         // 挑衅（Claude）：和 teases.js 的 replyFor 一样，10 分钟里第 4 次就投降
         java.util.Map<String,java.util.List<String>> replies=new java.util.LinkedHashMap<>();
         replies.put("就这",java.util.List.of("委屈"));replies.put("来打我呀",java.util.List.of("跺脚","@chase"));

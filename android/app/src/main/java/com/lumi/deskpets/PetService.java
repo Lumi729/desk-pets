@@ -81,6 +81,8 @@ public final class PetService extends Service {
     private IslandBackground islandArt;
     private int islandBlock;
     private boolean islandNotice;
+    private boolean islandLive; // 提示条正显示外卖进度（Claude）
+    private long nextLiveCheck;
     private long hangSkipUntil;
     private boolean islandMediaShown; // 提示条正显示音乐 / 视频 / 一起摇摆这些：伙伴照常播看视频、跳舞，不挂
 
@@ -970,6 +972,14 @@ public final class PetService extends Service {
         }
         boolean notice=now<islandUntil&&(prefs.getBoolean("delivery",false)||islandFromNotice||islandMessage.startsWith("演示"));
         String label=notice?islandMessage:"";
+        // 外卖进度（Claude）：每分钟重新读一次正在进行的外卖通知，按现在的时间算还有几分钟；读不到就不显示
+        String delivery="";
+        if(prefs.getBoolean("delivery",false)){
+            if(now>=nextLiveCheck){nextLiveCheck=now+60000;DeliveryCompanion.refreshLive();}
+            delivery=DeliveryCompanion.liveLabel(DeliveryCompanion.nowMinute());
+        }else if(DeliveryCompanion.live!=null)DeliveryCompanion.live=null;
+        boolean live=label.isEmpty()&&!delivery.isEmpty();
+        if(live)label=delivery;
         long remaining=prefs.getLong("timerEnd",0)-System.currentTimeMillis();
         if(SystemClock.elapsedRealtime()<timerFinishedUntil)label="⏱ 时间到啦";
         else if(label.isEmpty()&&remaining>0)label=String.format(java.util.Locale.ROOT,"⏱ %02d:%02d",remaining/60000,(remaining/1000)%60);
@@ -984,6 +994,7 @@ public final class PetService extends Service {
         islandMediaShown=mediaLabel;
         if(label.isEmpty()||now<islandDismissed){hideIsland();islandNotice=false;}
         else{showIsland(label);islandNotice=notice&&label.equals(islandMessage);}
+        islandLive=live&&label.equals(delivery)&&now>=islandDismissed;
     }
     private void showIsland(String label){
         if(island==null){
@@ -1078,9 +1089,10 @@ public final class PetService extends Service {
     }
     /** 提示条上正显示外卖 / 选中应用的通知时，点一下打开那条通知（和在通知栏里点一样）；打不开就打开那个应用。 */
     private boolean openNotice(){
-        if(!islandNotice||islandMessage.startsWith("演示"))return false;
-        PendingIntent target=islandFromNotice?DeliveryCompanion.noticeIntent:DeliveryCompanion.hintIntent;
-        String pkg=islandFromNotice?DeliveryCompanion.noticePkg:DeliveryCompanion.hintPkg;
+        DeliveryCompanion.Live order=islandLive?DeliveryCompanion.live:null;
+        if(order==null&&(!islandNotice||islandMessage.startsWith("演示")))return false;
+        PendingIntent target=order!=null?order.intent:islandFromNotice?DeliveryCompanion.noticeIntent:DeliveryCompanion.hintIntent;
+        String pkg=order!=null?order.pkg:islandFromNotice?DeliveryCompanion.noticePkg:DeliveryCompanion.hintPkg;
         boolean opened=false;
         if(target!=null)try{
             android.os.Bundle options=null;
@@ -1091,7 +1103,7 @@ public final class PetService extends Service {
             Intent launch=getPackageManager().getLaunchIntentForPackage(pkg);
             if(launch!=null)try{startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));opened=true;}catch(RuntimeException ignored){}
         }
-        if(opened){islandUntil=0;hideIsland();islandNotice=false;}
+        if(opened&&order==null){islandUntil=0;hideIsland();islandNotice=false;} // 外卖进度点开 App 后还留着
         return opened;
     }
     private void openIslandPanel(){
@@ -1104,37 +1116,61 @@ public final class PetService extends Service {
         islandPanel.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
         islandPanel.setOnDismissListener(d->islandPanel=null);islandPanel.show();
     }
-    // ---- 外卖通知检查（Claude）：屏幕上一个小窗口，显示外卖 App 通知能读到的字段；点一下关闭 ----
-    private android.widget.TextView inspector;
+    // ---- 外卖通知检查（Claude）：屏幕上一个小窗口，显示可能是外卖的通知能读到的字段；有「刷新」「关闭」 ----
+    private android.widget.LinearLayout inspector;
+    private android.widget.TextView inspectorText;
     private long inspectorShown=-1;
     private void openInspector(){
-        DeliveryCompanion.inspecting=true;synchronized(DeliveryCompanion.inspected){DeliveryCompanion.inspected.clear();}
+        DeliveryCompanion.inspecting=true;
         if(inspector==null){
             float d=getResources().getDisplayMetrics().density;
-            inspector=new android.widget.TextView(this);inspector.setTextColor(android.graphics.Color.WHITE);inspector.setTextSize(12);inspector.setPadding((int)(12*d),(int)(10*d),(int)(12*d),(int)(10*d));
+            inspector=new android.widget.LinearLayout(this);inspector.setOrientation(android.widget.LinearLayout.VERTICAL);inspector.setPadding((int)(12*d),(int)(8*d),(int)(12*d),(int)(8*d));
             android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable();bg.setColor(0xE6302932);bg.setCornerRadius(16*d);inspector.setBackground(bg);
-            inspector.setOnClickListener(v->closeInspector());
+            android.widget.LinearLayout row=new android.widget.LinearLayout(this);
+            for(String name:new String[]{"刷新","关闭"}){
+                android.widget.Button button=new android.widget.Button(this);button.setText(name);button.setAllCaps(false);
+                button.setOnClickListener(v->{if(name.equals("关闭"))closeInspector();else{inspectorShown=-1;checkListener();DeliveryCompanion.scanActive();updateInspector();}});
+                row.addView(button,new android.widget.LinearLayout.LayoutParams(0,(int)(44*d),1));
+            }
+            inspector.addView(row);
+            android.widget.ScrollView scroll=new android.widget.ScrollView(this);
+            inspectorText=new android.widget.TextView(this);inspectorText.setTextColor(android.graphics.Color.WHITE);inspectorText.setTextSize(12);inspectorText.setTextIsSelectable(false);
+            scroll.addView(inspectorText);
+            inspector.addView(scroll,new android.widget.LinearLayout.LayoutParams(-1,(int)(height*0.5f)));
             WindowManager.LayoutParams p=new WindowManager.LayoutParams(width-(int)(16*d),WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);
             p.gravity=Gravity.TOP|Gravity.CENTER_HORIZONTAL;p.y=(int)(76*d);
-            try{windows.addView(inspector,p);}catch(RuntimeException e){inspector=null;DeliveryCompanion.inspecting=false;return;}
+            try{windows.addView(inspector,p);}catch(RuntimeException e){inspector=null;inspectorText=null;DeliveryCompanion.inspecting=false;return;}
         }
-        inspectorShown=-1;DeliveryCompanion.scanActive();updateInspector();
+        inspectorShown=-1;checkListener();DeliveryCompanion.scanActive();updateInspector();
+    }
+    /** 通知使用权开着吗（系统设置里的名单）。 */
+    private boolean listenerAllowed(){
+        String list=Settings.Secure.getString(getContentResolver(),"enabled_notification_listeners");
+        return list!=null&&list.contains(new android.content.ComponentName(this,DeliveryCompanion.class).flattenToString());
+    }
+    /** 权限开了但还没连上：请系统重新连一次。 */
+    private void checkListener(){
+        if(!DeliveryCompanion.connected()&&listenerAllowed())try{android.service.notification.NotificationListenerService.requestRebind(new android.content.ComponentName(this,DeliveryCompanion.class));}catch(RuntimeException ignored){}
     }
     private void updateInspector(){
-        if(inspector==null||inspectorShown==DeliveryCompanion.inspectedAt)return;
+        if(inspector==null||inspectorText==null||inspectorShown==DeliveryCompanion.inspectedAt)return;
         inspectorShown=DeliveryCompanion.inspectedAt;
-        StringBuilder b=new StringBuilder("外卖通知检查（只显示在屏幕上，不保存不上传；点这里关闭）\n");
-        if(!DeliveryCompanion.connected())b.append("\n还没有通知访问权限：在设置页点「允许音乐与通知访问」打开后再试。");
-        synchronized(DeliveryCompanion.inspected){
-            if(DeliveryCompanion.inspected.isEmpty())b.append("\n等待美团 / 美团外卖 / 饿了么的通知……下单后通知出来或更新时会显示在这里。");
+        StringBuilder b=new StringBuilder("外卖通知检查（只显示在屏幕上，不保存不上传不写日志）\n");
+        if(!DeliveryCompanion.connected()){
+            if(!listenerAllowed())b.append("\n⚠ 通知使用权没开：在设置页点「允许音乐与通知访问」，给「外卖提示 · 梨间雪桌宠」打开，再点「刷新」。");
+            else b.append("\n通知使用权开了，但还没连上，已经请系统重新连接，过几秒点「刷新」。");
+        }else synchronized(DeliveryCompanion.inspected){
+            int total=DeliveryCompanion.scannedTotal;
+            if(DeliveryCompanion.inspected.isEmpty())b.append("\n没找到外卖通知：通知栏里").append(total>=0?"的 "+total+" 条通知":"").append("没有美团 / 饿了么的，也没有标题或正文包含「送达、骑手、取餐、配送、商家」的。有新的会自动出现，也可以点「刷新」。");
+            else b.append("\n读了一遍通知栏").append(total>=0?"（共 "+total+" 条）":"").append("，找到这些（最新的在上面）：");
             java.util.List<String> list=new java.util.ArrayList<>(DeliveryCompanion.inspected.values());java.util.Collections.reverse(list);
             for(String t:list)b.append("\n\n").append(t);
         }
-        inspector.setText(b);
+        inspectorText.setText(b);
     }
     private void closeInspector(){
         DeliveryCompanion.stopInspect();
-        if(inspector!=null){if(inspector.isAttachedToWindow())windows.removeView(inspector);inspector=null;}
+        if(inspector!=null){if(inspector.isAttachedToWindow())windows.removeView(inspector);inspector=null;inspectorText=null;}
     }
     private void hideIsland(){hangSkipUntil=0; // 下次提示条出来又可以挂
         if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}}
