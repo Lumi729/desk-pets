@@ -87,6 +87,28 @@ public final class AppCompanionTest {
         equal(UpdateRules.trustedApk("https://github.com/Lumi729/desk-pets/releases/download/android-v0.5-preview/lijianxue-android-0.5-preview.apk"),true);
         equal(UpdateRules.trustedApk("https://example.com/releases/download/android-v0.5-preview/x.apk"),false);
         equal(UpdateRules.trustedApk("https://github.com/Lumi729/desk-pets/releases/download/v1.0.34/desk-pets-setup-1.0.34.exe"),false);
+        // 天气与四季（Claude）：和电脑版 lib/weather.js 同样的规则
+        equal(Weather.idle(0,20,12),"待机_晴天");equal(Weather.idle(1,20,6),"待机_晴天");equal(Weather.idle(1,20,19),"待机_晴夜");equal(Weather.idle(0,20,3),"待机_晴夜");
+        equal(Weather.idle(2,20,12),"待机_多云");equal(Weather.idle(3,20,12),"待机_阴天");
+        for(int c:new int[]{45,48})equal(Weather.idle(c,20,12),"待机_雾");
+        for(int c:new int[]{51,53,55,56,57})equal(Weather.idle(c,20,12),"待机_毛毛雨");
+        for(int c:new int[]{61,80})equal(Weather.idle(c,20,12),"待机_雨天");
+        for(int c:new int[]{63,65,66,67,81,82})equal(Weather.idle(c,20,12),"待机_大雨");
+        for(int c:new int[]{71,73,75,77,85,86})equal(Weather.idle(c,20,12),"待机_下雪");
+        for(int c:new int[]{95,96,99})equal(Weather.idle(c,20,12),"待机_雷雨");
+        for(int c:new int[]{0,1,2,3,45,48,71})equal(Weather.isRain(c),false);
+        for(int c:new int[]{51,57,61,67,80,82,95,99})equal(Weather.isRain(c),true);
+        equal(Weather.idle(0,5,12),"待机_降温");equal(Weather.idle(3,9.9,12),"待机_降温");equal(Weather.idle(2,33,12),"待机_炎热");equal(Weather.idle(0,32,12),"待机_晴天");
+        equal(Weather.idle(61,5,12),"待机_雨天");equal(Weather.idle(71,-3,12),"待机_下雪");equal(Weather.idle(95,35,12),"待机_雷雨");
+        equal(Weather.idle(-1,5,12)==null,true);equal(Weather.idle(42,20,12)==null,true);equal(Weather.idle(0,Double.NaN,12),"待机_晴天");
+        equal(Weather.season(3),"待机_春");equal(Weather.season(5),"待机_春");equal(Weather.season(6),"待机_夏");equal(Weather.season(8),"待机_夏");
+        equal(Weather.season(9),"待机_秋");equal(Weather.season(11),"待机_秋");equal(Weather.season(12),"待机_冬");equal(Weather.season(1),"待机_冬");equal(Weather.season(2),"待机_冬");
+        java.util.function.Predicate<String> all=n->true,none=n->false,noAutumn=n->!n.equals("待机_秋");
+        equal(Weather.pick("待机_雨天","待机_秋",all),"待机_雨天");   // 特殊天气 > 季节
+        equal(Weather.pick("待机_晴天","待机_秋",all),"待机_秋");     // 季节 > 其它天气
+        equal(Weather.pick("待机_晴天","待机_秋",noAutumn),"待机_晴天");// 没有季节动画就用其它天气
+        equal(Weather.pick(null,null,all),"待机");equal(Weather.pick("待机_雨天","待机_秋",none),"待机");
+        equal(Weather.label("待机_毛毛雨"),"毛毛雨");equal(Weather.ALL.length,16);
         System.out.println("App classification, overrides, stale events, switch ordering and screen reset passed");
     }
 }

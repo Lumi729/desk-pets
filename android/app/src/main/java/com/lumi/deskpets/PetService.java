@@ -29,9 +29,14 @@ public final class PetService extends Service {
     private final Runnable usageLoop=new Runnable(){public void run(){
         if(observeApps && getSharedPreferences("pets",MODE_PRIVATE).getBoolean("companion",false)) companionMode=usage.poll();
         else { usage.clear(); companionMode="none"; }
+        weather.poll(observeApps); // 天气：开关开着、桌宠看得见时最多 30 分钟查一次
         usageClock.postDelayed(this,2000);
     }};
     private Actor hugA,hugB;
+    // 天气与季节换装（默认关闭）：只替换平时的待机，不打断别的动作
+    private WeatherCompanion weather;
+    private String weatherDemo;
+    private int weatherDemoStep=-1;
     private ShakeCompanion motion;
     private android.widget.TextView island;
     private long islandUntil,islandDismissed,lastDelivery;
@@ -77,7 +82,7 @@ public final class PetService extends Service {
         screenOn=getSystemService(PowerManager.class).isInteractive();
         IntentFilter filter=new IntentFilter();filter.addAction(Intent.ACTION_SCREEN_OFF);filter.addAction(Intent.ACTION_SCREEN_ON);
         if(Build.VERSION.SDK_INT>=33)registerReceiver(screen,filter,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(screen,filter);
-        media=new IslandMedia(this);motion=new ShakeCompanion(this,()->bounceParty());usage=new UsageCompanion(this);usageThread=new HandlerThread("pet-app-companion");usageThread.start();usageClock=new Handler(usageThread.getLooper());usageClock.post(usageLoop);
+        weather=new WeatherCompanion(this);media=new IslandMedia(this);motion=new ShakeCompanion(this,()->bounceParty());usage=new UsageCompanion(this);usageThread=new HandlerThread("pet-app-companion");usageThread.start();usageClock=new Handler(usageThread.getLooper());usageClock.post(usageLoop);
         try{catalog=new Catalog(this);}catch(Exception e){stopSelf();}
     }
     @Override public int onStartCommand(Intent intent,int flags,int startId){
@@ -94,7 +99,8 @@ public final class PetService extends Service {
         if("test-shake".equals(action))bounceParty();
         if("test-rainbow".equals(action)){long now=SystemClock.uptimeMillis();for(Actor a:actors)spitRainbow(a,now);}
         if("test-hang".equals(action))hangDemo();
-        if("test-show".equals(action)){bounceParty();clock.postDelayed(this::hangDemo,9000);}
+        if("test-show".equals(action)){bounceParty();clock.postDelayed(this::hangDemo,9000);clock.postDelayed(this::weatherDemoStart,18000);}
+        if("test-weather".equals(action))weatherDemoStart();
         if("test-island".equals(action)){islandMessage="演示：外卖通知提醒";islandUntil=SystemClock.uptimeMillis()+6000;islandDismissed=0;showIsland(islandMessage);}
         if("test-narrow".equals(action)){
             endHug();Perch narrow=new Perch(width/2-unit/3,height/2,width/2+unit/3);surfaces=Arrays.asList(narrow);demoUntil=SystemClock.uptimeMillis()+7000;
@@ -140,6 +146,13 @@ public final class PetService extends Service {
         catch(RuntimeException e){Toast.makeText(this,"悬浮窗未能开启，请检查系统权限",Toast.LENGTH_LONG).show();stopSelf();}
         if(actors.isEmpty())stopSelf();refreshVisibility();
     }
+    /** 平时的待机：特殊天气 > 季节 > 其它天气 > 普通待机（和电脑版一样）。 */
+    private String idle(Actor a){
+        if(weatherDemo!=null)return a.pet.clips.has(weatherDemo)?weatherDemo:"待机";
+        if(!getSharedPreferences("pets",MODE_PRIVATE).getBoolean("weather",false))return "待机";
+        return Weather.pick(weather.idle(),WeatherCompanion.season(),a.pet.clips::has);
+    }
+    private static boolean idling(String action){return action.startsWith("待机");}
     private int maxX(Actor a){return Math.max(0,width-a.pos.width);}
     private void position(Actor a){a.x=Math.max(0,Math.min(maxX(a),a.x));a.y=Math.max(0,Math.min(a.floor(),a.y));a.pos.x=Math.round(a.x);a.pos.y=Math.round(a.y);if(a.view.isAttachedToWindow())try{windows.updateViewLayout(a.view,a.pos);}catch(RuntimeException e){stopSelf();}}
     private void updateInterface(long now){
@@ -202,7 +215,7 @@ public final class PetService extends Service {
                 a.x=a.hopX+(a.target.x(unit,width)-a.hopX)*progress;
                 a.y=a.hopY+(a.target.top-unit-a.hopY)*progress-unit*.7f*4*progress*(1-progress);
                 position(a);
-                if(progress>=1){a.perch=a.target;a.target=null;a.hopStart=0;a.play("待机",0);a.nextHop=now+2000+random.nextInt(1500);}
+                if(progress>=1){a.perch=a.target;a.target=null;a.hopStart=0;a.play(idle(a),0);a.nextHop=now+2000+random.nextInt(1500);}
                 continue;
             }
             if(a.falling){
@@ -218,16 +231,17 @@ public final class PetService extends Service {
                 state.pkg,prefs.getAll(),companionMode,now,prefs.getBoolean("interface",false)?state.input:0);
             String companionClip=AppCompanion.clip(mode);
             if(!companionClip.isEmpty()){a.direction=0;a.play(companionClip,0);continue;}
-            if(!a.action.equals("待机")&&!a.action.equals("向左走")&&!a.action.equals("向右走")){a.play("待机",0);a.decision=now+1500;}
+            String rest=idle(a);
+            if(!a.action.equals(rest)&&!a.action.equals("向左走")&&!a.action.equals("向右走")){boolean was=idling(a.action);a.play(rest,0);if(!was)a.decision=now+1500;} // 天气变了只换待机样子
             if(now>=a.nextHop && !surfaces.isEmpty() && (walking || now<demoUntil)){
                 Perch next=Perch.below(surfaces,a.perch,unit,a.floor());
                 if(next!=null){hopTo(a,next,now);continue;}
                 if(a.perch!=null){startFall(a,now);a.nextHop=now+5000;continue;}
             }
             if(a.perch!=null && !a.perch.canWalk(unit,width)){
-                a.direction=0;a.x=a.perch.x(unit,width);a.play("待机",0);position(a);continue;
+                a.direction=0;a.x=a.perch.x(unit,width);a.play(idle(a),0);position(a);continue;
             }
-            if(now>=a.decision){a.direction=walking?random.nextInt(3)-1:0;a.play(a.direction<0?"向左走":a.direction>0?"向右走":"待机",0);a.decision=now+2500+random.nextInt(4000);}
+            if(now>=a.decision){a.direction=walking?random.nextInt(3)-1:0;a.play(a.direction<0?"向左走":a.direction>0?"向右走":idle(a),0);a.decision=now+2500+random.nextInt(4000);}
             if(a.direction!=0){
                 float left=a.perch==null?0:a.perch.walkLeft(unit,width),right=a.perch==null?maxX(a):a.perch.walkRight(unit,width);
                 a.x=Math.max(left,Math.min(right,a.x+a.direction*unit*.22f*dt));
@@ -246,7 +260,7 @@ public final class PetService extends Service {
         a.pos.width=Math.min(width,unit*2);a.x=(a.x+b.x)/2;a.y=a.floor();a.view.show(clip);b.view.setVisibility(View.GONE);b.view.animate(false);position(a);hugEnd=SystemClock.uptimeMillis()+5500;return true;
     }
     private void endHug(){
-        if(hugA==null)return;Actor a=hugA,b=hugB;hugA=hugB=null;a.pos.width=unit;a.play("待机",0);b.play("待机",0);a.cooldown=b.cooldown=SystemClock.uptimeMillis()+20000;
+        if(hugA==null)return;Actor a=hugA,b=hugB;hugA=hugB=null;a.pos.width=unit;a.play(idle(a),0);b.play(idle(b),0);a.cooldown=b.cooldown=SystemClock.uptimeMillis()+20000;
         a.x=Math.min(a.x,Math.max(0,width-unit*2.1f));b.x=a.x+unit*1.05f;b.y=a.y;a.decision=b.decision=SystemClock.uptimeMillis()+2000;position(a);position(b);refreshVisibility();
     }
     private void jump(Actor a){
@@ -268,7 +282,7 @@ public final class PetService extends Service {
                     float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.hypot(dx,dy)>slop){moved=true;a.lastTap=0;clock.removeCallbacks(hold);}if(moved&&!longPressed){a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
                 case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:
                     clock.removeCallbacks(hold);a.dragging=false;
-                    if(moved||e.getActionMasked()==MotionEvent.ACTION_CANCEL||longPressed){a.falling=a.y<a.floor();a.velocity=0;if(a.falling)startFall(a,SystemClock.uptimeMillis());else a.play("待机",0);}
+                    if(moved||e.getActionMasked()==MotionEvent.ACTION_CANCEL||longPressed){a.falling=a.y<a.floor();a.velocity=0;if(a.falling)startFall(a,SystemClock.uptimeMillis());else a.play(idle(a),0);}
                     else{v.performClick();}return true;
                 default:return true;
             }}
@@ -342,6 +356,16 @@ public final class PetService extends Service {
         if(a==hugA||a==hugB)endHug();
         a.rainbowAfter=false;a.direction=0;a.play("吐彩虹",0);a.until=now+Math.max(2600,a.view.duration());
     }
+    /** 天气演示：所有天气和四季待机轮流播，每个 3 秒，提示条上写着是什么天气。 */
+    private void weatherDemoStart(){weatherDemoStep=-1;clock.removeCallbacks(weatherDemoNext);clock.post(weatherDemoNext);}
+    private final Runnable weatherDemoNext=new Runnable(){public void run(){
+        weatherDemoStep++;
+        if(weatherDemoStep>=Weather.ALL.length){weatherDemo=null;weatherDemoStep=-1;for(Actor a:actors)if(a.until<=SystemClock.uptimeMillis()&&idling(a.action))a.play(idle(a),0);return;}
+        weatherDemo=Weather.ALL[weatherDemoStep];long now=SystemClock.uptimeMillis();
+        for(Actor a:actors)if(a!=hugB&&!a.dragging&&!a.falling&&a.hang==0&&a.ballEnd==0){a.direction=0;a.play(idle(a),0);a.until=now+3000;}
+        islandMessage="演示：天气 · "+Weather.label(weatherDemo)+"（"+(weatherDemoStep+1)+"/"+Weather.ALL.length+"）";islandFromNotice=false;islandUntil=now+3200;islandDismissed=0;showIsland(islandMessage);
+        clock.postDelayed(this,3000);
+    }};
     private void hangDemo(){
         islandMessage="演示：挂在灵动岛上";islandFromNotice=false;islandUntil=SystemClock.uptimeMillis()+8000;islandDismissed=0;hangSkipUntil=0;showIsland(islandMessage);
     }
@@ -367,7 +391,7 @@ public final class PetService extends Service {
                 }
             }else if(a.hang!=0){
                 a.hang=0;a.nextHop=now+3000;
-                if(a.y<a.floor())startFall(a,now);else a.play("待机",0); // 用现有的掉落逻辑落回地面
+                if(a.y<a.floor())startFall(a,now);else a.play(idle(a),0); // 用现有的掉落逻辑落回地面
             }
         }
     }

@@ -4,7 +4,10 @@ const path = require('node:path');
 const rules = require('../../renderer/combos.js');
 const root = path.resolve(__dirname, '../..');
 const source = path.join(root, '桌宠素材');
-const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞', '吓一跳', '摇晃', '吐彩虹', '灵动岛'];
+const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞', '吓一跳', '摇晃', '吐彩虹', '灵动岛',
+  // 天气和四季换装的待机（和电脑版同名，没有的跳过）
+  '待机_晴天', '待机_晴夜', '待机_多云', '待机_阴天', '待机_雾', '待机_毛毛雨', '待机_雨天', '待机_大雨', '待机_雷雨', '待机_下雪', '待机_降温', '待机_炎热',
+  '待机_春', '待机_夏', '待机_秋', '待机_冬'];
 // 像素风灵动岛的三段：左右两段不拉伸，中间那段横向平铺
 // 有的宠物没画「摸摸头」：点它时用「害羞」代替，不会停在待机（Claude）
 const FALLBACKS = { 摸摸头: ['害羞'] };
@@ -54,6 +57,8 @@ function prepare(out) {
     fs.copyFileSync(from, path.join(out, 'island', `${part}.png`));
     island[part] = `island/${part}.png`;
   }
+  // 天气地点：直接复用电脑版的「省 → 市 → 区县」（带中心点经纬度）
+  fs.copyFileSync(path.join(root, 'lib', 'regions.json'), path.join(out, 'regions.json'));
   const data = { pets, hugs, island };
   fs.writeFileSync(path.join(out, 'catalog.json'), JSON.stringify(data));
   return data;

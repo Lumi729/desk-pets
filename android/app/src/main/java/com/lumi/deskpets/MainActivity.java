@@ -20,7 +20,7 @@ public final class MainActivity extends Activity {
     private TextView permission;
     private SeekBar size;
     private Switch walking;
-    private TextView usageStatus,interfaceStatus;
+    private TextView usageStatus,interfaceStatus,weatherStatus;
     private boolean pendingStart;
     int dp(int value) { return Math.round(value*getResources().getDisplayMetrics().density); }
     @Override public void onCreate(Bundle state) {
@@ -62,6 +62,12 @@ public final class MainActivity extends Activity {
             try{startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));}
             catch(ActivityNotFoundException e){toast("请在系统无障碍设置中开启「界面互动 · 梨间雪桌宠」");}
         });
+        text("天气与四季",21,true);
+        Switch weatherSwitch=new Switch(this);weatherSwitch.setText("天气与季节换装");weatherSwitch.setChecked(prefs.getBoolean("weather",false));page.addView(weatherSwitch);
+        weatherSwitch.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("weather",on).apply();updateWeatherStatus();});
+        weatherStatus=text("",14,false);
+        button("选择天气地点",()->chooseWeatherPlace());
+        text("和电脑版一样：下雨、下雪、起雾、打雷、很热、降温时换成对应的待机，平时按春夏秋冬换装，晚上晴天是晴夜。不申请定位权限：地点自己选省、市、区县，只把那里的经纬度发给天气服务 open-meteo，开着桌宠时最多 30 分钟查一次；查不到就用普通待机。只换平时的待机，不打断摸摸、拖动、贴贴和陪打字。",13,false);
         text("摇一摇和灵动提示",21,true);
         option("motion","重力与摇晃互动");
         text("轻轻连续晃动会让宠物像弹力球一样摇晃着蹦几秒，落地后吐出一道彩虹；飞起来时倾斜手机可改变方向。无需用力摇。",13,false);
@@ -105,10 +111,10 @@ public final class MainActivity extends Activity {
         button("应用选择和大小",()->startPets("start"));
         button("试试贴贴 ♡",()->startPets("hug"));
         button("测试动作 / 功能展示",()->new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
-            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "功能展示：摇晃 → 吐彩虹 → 挂灵动岛"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-show"}[which])).show());
+            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "功能展示：摇晃 → 吐彩虹 → 挂灵动岛 → 天气"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-show"}[which])).show());
         text("贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫这一版先手动选花色。",13,false);
         text("第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。",13,false);
-        text("除了检查更新（只连 GitHub 上桌宠的发布页）以外不联网。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。",13,false);
+        text("只有检查更新（只连 GitHub 上桌宠的发布页）和打开天气后查天气（只发所选地点的经纬度）时联网。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。",13,false);
         text("更新",21,true);
         option("autoUpdate","自动检查更新（最多 12 小时一次）");
         button("检查更新",()->checkUpdate(true));
@@ -138,6 +144,34 @@ public final class MainActivity extends Activity {
         java.util.List<String> packages=new ArrayList<>(names.keySet());String[] labels=new String[packages.size()];boolean[] selected=new boolean[packages.size()];
         for(int i=0;i<labels.length;i++){labels[i]=names.get(packages.get(i));selected[i]=prefs.getBoolean("notify:"+packages.get(i),false);}
         new AlertDialog.Builder(this).setTitle("只显示选中应用的通知标题").setMultiChoiceItems(labels,selected,(d,i,on)->prefs.edit().putBoolean("notify:"+packages.get(i),on).apply()).setPositiveButton("完成",null).show();
+    }
+    // ---- 天气地点（Claude）：复用电脑版的省 → 市 → 区县，不申请定位权限 ----
+    private void updateWeatherStatus(){
+        if(weatherStatus==null)return;
+        String place=WeatherCompanion.place(prefs);
+        weatherStatus.setText(!prefs.getBoolean("weather",false)?"已关闭 · 地点："+place:"地点："+place+"\n现在："+prefs.getString("weatherNow","让桌宠出来后会去查天气")+" · 季节："+Weather.label(WeatherCompanion.season()));
+    }
+    private void chooseWeatherPlace(){
+        try{
+            org.json.JSONArray provinces=WeatherCompanion.regions(this);
+            String[] names=new String[provinces.length()];for(int i=0;i<names.length;i++)names[i]=provinces.getJSONArray(i).getString(0);
+            new AlertDialog.Builder(this).setTitle("选择省份").setItems(names,(d,pi)->{try{
+                org.json.JSONArray cities=provinces.getJSONArray(pi).getJSONArray(1);
+                String[] cityNames=new String[cities.length()];for(int i=0;i<cityNames.length;i++)cityNames[i]=cities.getJSONArray(i).getString(0);
+                new AlertDialog.Builder(this).setTitle(names[pi]).setItems(cityNames,(d2,ci)->{try{
+                    org.json.JSONArray counties=cities.getJSONArray(ci).getJSONArray(1);
+                    String[] countyNames=new String[counties.length()];for(int i=0;i<countyNames.length;i++)countyNames[i]=counties.getJSONArray(i).getString(0);
+                    new AlertDialog.Builder(this).setTitle(cityNames[ci]).setItems(countyNames,(d3,ki)->{try{
+                        org.json.JSONArray c=counties.getJSONArray(ki);
+                        String label=names[pi].equals(cityNames[ci])?names[pi]+" · "+countyNames[ki]:names[pi]+" · "+cityNames[ci]+" · "+countyNames[ki];
+                        prefs.edit().putString("weatherPlace",label).putFloat("weatherLat",(float)c.getDouble(1)).putFloat("weatherLon",(float)c.getDouble(2)).remove("weatherNow").apply();
+                        updateWeatherStatus();toast("地点已保存，桌宠出来时会重新查天气");
+                    }catch(org.json.JSONException e){toast("这个地点读不出来");}}).setNegativeButton("返回",null).show();
+                }catch(org.json.JSONException e){toast("这个城市读不出来");}}).setNegativeButton("返回",null).show();
+            }catch(org.json.JSONException e){toast("这个省读不出来");}}).setNeutralButton("恢复默认（长沙市中心）",(d,i)->{
+                prefs.edit().remove("weatherPlace").remove("weatherLat").remove("weatherLon").remove("weatherNow").apply();updateWeatherStatus();
+            }).setNegativeButton("取消",null).show();
+        }catch(Exception e){toast("地点列表没有加载成功");}
     }
     private void chooseIslandPet(){
         try{
@@ -197,7 +231,7 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if("update".equals(intent.getAction()))checkUpdate(true);}
     @Override protected void onPause(){super.onPause();poll.removeCallbacks(watchDownload);}
-    @Override protected void onResume(){super.onResume();
+    @Override protected void onResume(){super.onResume();updateWeatherStatus();
         if(pendingUrl!=null&&(Build.VERSION.SDK_INT<26||getPackageManager().canRequestPackageInstalls())){String v=pendingVersion,u=pendingUrl;pendingVersion=pendingUrl=null;startDownload(v,u);}
         poll.removeCallbacks(watchDownload);poll.post(watchDownload);
         if("update".equals(getIntent().getAction())){getIntent().setAction(null);checkUpdate(true);}

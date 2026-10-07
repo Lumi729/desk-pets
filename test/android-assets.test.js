@@ -42,3 +42,18 @@ test('Android ships the shake, rainbow and island clips plus the three pixel isl
     assert.deepEqual(catalog.island, island);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Android ships every weather and season idle that exists, plus the desktop regions (Claude)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-weather-'));
+  try {
+    const { pets } = prepare(dir);
+    const idles = ['待机_晴天', '待机_晴夜', '待机_多云', '待机_阴天', '待机_雾', '待机_毛毛雨', '待机_雨天', '待机_大雨', '待机_雷雨', '待机_下雪', '待机_降温', '待机_炎热', '待机_春', '待机_夏', '待机_秋', '待机_冬'];
+    for (const p of pets) {
+      const folder = path.join(__dirname, '..', '桌宠素材', p.skin ? `百变猫猫/${p.skin}` : p.name);
+      for (const idle of idles) assert.equal(!!p.clips[idle], fs.existsSync(path.join(folder, `${idle}.gif`)), `${p.label}: ${idle}`);
+    }
+    const regions = JSON.parse(fs.readFileSync(path.join(dir, 'regions.json'), 'utf8'));
+    const hunan = regions.find(([name]) => name === '湖南省');
+    assert.ok(hunan[1].find(([name]) => name === '长沙市'));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
