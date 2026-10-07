@@ -49,6 +49,22 @@ function prepare(out) {
       fs.copyFileSync(file, path.join(out, dest)); hugs[`${p.id}:${q.id}`] = dest;
     }
   }
+  // 特别剧情（和普通贴贴分开存）：哥哥狗狗扶起摔趴趴的宠物、给睡着的千千猫猫盖被子（Claude）
+  // stories.helpup[宠物 id] / stories.blanket[千千猫猫 id] = { file, dogLeft }，dogLeft：动画里哥哥狗狗在左边
+  const stories = { helpup: {}, blanket: {} };
+  fs.mkdirSync(path.join(out, 'stories'));
+  const DOG = '哥哥狗狗';
+  for (const p of pets) {
+    if (p.name === DOG) continue;
+    const key = rules.comboKey([p.name, DOG]);
+    for (const [kind, suffix] of [['helpup', '_扶起来'], ['blanket', '_盖被子']]) {
+      const file = path.join(source, '贴贴', p.skin ? `百变猫猫_${p.skin}` : '', `${key}${suffix}.gif`);
+      if (!fs.existsSync(file)) continue;
+      const dest = `stories/${kind}-${p.id}.gif`;
+      fs.copyFileSync(file, path.join(out, dest));
+      stories[kind][p.id] = { file: dest, dogLeft: key.startsWith(`${DOG}-`) };
+    }
+  }
   const island = {};
   fs.mkdirSync(path.join(out, 'island'));
   for (const [part, file] of Object.entries(ISLAND)) {
@@ -59,7 +75,7 @@ function prepare(out) {
   }
   // 天气地点：直接复用电脑版的「省 → 市 → 区县」（带中心点经纬度）
   fs.copyFileSync(path.join(root, 'lib', 'regions.json'), path.join(out, 'regions.json'));
-  const data = { pets, hugs, island };
+  const data = { pets, hugs, island, stories };
   fs.writeFileSync(path.join(out, 'catalog.json'), JSON.stringify(data));
   return data;
 }

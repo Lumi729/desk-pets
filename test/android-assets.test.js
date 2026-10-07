@@ -57,3 +57,22 @@ test('Android ships every weather and season idle that exists, plus the desktop 
     assert.ok(hunan[1].find(([name]) => name === '长沙市'));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Android packages 扶起来 / 盖被子 stories apart from hugs, with 哥哥狗狗 side (Claude)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-stories-'));
+  try {
+    const { pets, hugs, stories } = prepare(dir);
+    const byId = id => pets.find(p => p.id === id);
+    const cat = pets.find(p => p.name === '千千猫猫');
+    assert.ok(stories.helpup[cat.id] && stories.blanket[cat.id]);
+    assert.equal(stories.helpup[cat.id].dogLeft, false); // 千千猫猫-哥哥狗狗：狗狗在右边
+    assert.equal(stories.helpup[pets.find(p => p.name === '煤球猫猫').id].dogLeft, true);
+    assert.ok(pets.filter(p => p.skin).every(p => stories.helpup[p.id]), '百变猫猫五只都能被扶');
+    for (const kind of ['helpup', 'blanket']) for (const [id, { file }] of Object.entries(stories[kind])) {
+      assert.notEqual(byId(id).name, '哥哥狗狗');
+      assert.ok(fs.existsSync(path.join(dir, file)));
+      assert.ok(!Object.values(hugs).includes(file), '特别剧情不混进普通贴贴');
+    }
+    assert.deepEqual(Object.keys(stories.blanket), [cat.id]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
