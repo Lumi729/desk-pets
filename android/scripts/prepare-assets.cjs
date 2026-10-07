@@ -2,9 +2,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const rules = require('../../renderer/combos.js');
+const Teases = require('../../renderer/teases.js');
 const root = path.resolve(__dirname, '../..');
 const source = path.join(root, '桌宠素材');
-const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞', '吓一跳', '摇晃', '吐彩虹', '灵动岛',
+const actions = ['待机', '向左走', '向右走', '摸摸头', '开心蹦蹦', '掉落', '摔趴趴', '睡觉', '打招呼', '敲代码', '看视频', '跳舞', '吓一跳', '向左看', '向右看', '摇晃', '吐彩虹', '灵动岛',
   // 天气和四季换装的待机（和电脑版同名，没有的跳过）
   '待机_晴天', '待机_晴夜', '待机_多云', '待机_阴天', '待机_雾', '待机_毛毛雨', '待机_雨天', '待机_大雨', '待机_雷雨', '待机_下雪', '待机_降温', '待机_炎热',
   '待机_春', '待机_夏', '待机_秋', '待机_冬'];
@@ -32,11 +33,18 @@ function prepare(out) {
           fs.copyFileSync(file, path.join(out, dest)); clips[action] = dest;
         }
       }
+      // 挑衅 / 回应：整套照搬电脑版（文件名「挑衅_」「回应_」开头），只在挑衅剧情里用（Claude）
+      for (const file of fs.readdirSync(path.join(source, folder)).filter(f => /^(挑衅|回应)_.+\.gif$/.test(f)).sort()) {
+        const action = file.slice(0, -4), dest = `${id}/${action}.gif`;
+        fs.mkdirSync(path.join(out, id), { recursive: true });
+        fs.copyFileSync(path.join(source, folder, file), path.join(out, dest)); clips[action] = dest;
+      }
       if (!clips['待机']) throw new Error(`Missing idle: ${folder}`);
       pets.push({ id, name, label: skin ? `百变猫猫 · ${skin}` : name, skin, clips });
     }
   }
   const hugs = {};
+  const pairStories = { fight: {}, makeup: {} }; // 两个哥哥：贴贴完打架（_打架），冷静后再见面先和好（_和好）
   fs.mkdirSync(path.join(out, 'hugs'));
   for (let a = 0; a < pets.length; a++) for (let b = a + 1; b < pets.length; b++) {
     const p = pets[a], q = pets[b];
@@ -47,6 +55,12 @@ function prepare(out) {
     if (fs.existsSync(file)) {
       const dest = `hugs/${p.id}-${q.id}.gif`;
       fs.copyFileSync(file, path.join(out, dest)); hugs[`${p.id}:${q.id}`] = dest;
+      for (const [kind, suffix] of [['fight', '_打架'], ['makeup', '_和好']]) {
+        const extra = file.replace(/\.gif$/, `${suffix}.gif`);
+        if (!fs.existsSync(extra)) continue;
+        const to = `hugs/${p.id}-${q.id}${suffix}.gif`;
+        fs.copyFileSync(extra, path.join(out, to)); pairStories[kind][`${p.id}:${q.id}`] = to;
+      }
     }
   }
   // 特别剧情（和普通贴贴分开存）：哥哥狗狗扶起摔趴趴的宠物、给睡着的千千猫猫盖被子（Claude）
@@ -75,7 +89,14 @@ function prepare(out) {
   }
   // 天气地点：直接复用电脑版的「省 → 市 → 区县」（带中心点经纬度）
   fs.copyFileSync(path.join(root, 'lib', 'regions.json'), path.join(out, 'regions.json'));
-  const data = { pets, hugs, island, stories };
+  // 挑衅规则直接从电脑版 renderer/teases.js 生成；回应里的 { chase / hug / comfort } 写成 @chase / @hug / @comfort
+  const teases = { window: Teases.WINDOW, limit: Teases.LIMIT, pairs: {} };
+  for (const [teaser, { target, replies }] of Object.entries(Teases.PAIRS)) {
+    teases.pairs[teaser] = { target, replies: Object.fromEntries(Object.entries(replies).map(([tease, steps]) =>
+      [tease, steps.map(step => typeof step === 'string' ? step : `@${Object.keys(step)[0]}`)])) };
+  }
+  Object.assign(stories, pairStories);
+  const data = { pets, hugs, island, stories, teases };
   fs.writeFileSync(path.join(out, 'catalog.json'), JSON.stringify(data));
   return data;
 }

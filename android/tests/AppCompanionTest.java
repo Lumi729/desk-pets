@@ -115,6 +115,15 @@ public final class AppCompanionTest {
         equal(shown.contains("大文本：（没有）"),true);equal(shown.contains("常驻：是"),true);equal(shown.contains("进度条：有进度条 3 / 10"),true);
         equal(DeliveryRules.inspect("饿了么","12:00:01",null,null,null,null,false,0,0,true).contains("不确定进度"),true);
         equal(DeliveryRules.inspect("饿了么","12:00:01",null,null,null,null,false,0,0,false).contains("进度条：（没有）"),true);
+        // 挑衅（Claude）：和 teases.js 的 replyFor 一样，10 分钟里第 4 次就投降
+        java.util.Map<String,java.util.List<String>> replies=new java.util.LinkedHashMap<>();
+        replies.put("就这",java.util.List.of("委屈"));replies.put("来打我呀",java.util.List.of("跺脚","@chase"));
+        long min=60_000;
+        equal(TeaseRules.reply(replies,"晃小鱼",java.util.List.of(),0,600_000,3)==null,true);
+        equal(TeaseRules.reply(replies,"来打我呀",java.util.List.of(),0,600_000,3),java.util.List.of("跺脚","@chase"));
+        equal(TeaseRules.reply(replies,"就这",java.util.List.of(1*min,2*min),3*min,600_000,3),java.util.List.of("委屈"));
+        equal(TeaseRules.reply(replies,"就这",java.util.List.of(1*min,2*min,3*min),4*min,600_000,3),java.util.List.of("投降"));
+        equal(TeaseRules.reply(replies,"就这",java.util.List.of(1*min,2*min,3*min),12*min,600_000,3),java.util.List.of("委屈"));
         System.out.println("App classification, overrides, stale events, switch ordering and screen reset passed");
     }
 }

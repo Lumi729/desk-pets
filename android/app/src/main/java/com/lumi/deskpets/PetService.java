@@ -43,6 +43,19 @@ public final class PetService extends Service {
     private org.json.JSONObject storyInfo;
     private int storyPhase; // 0 等一下，1 哥哥狗狗走过去，2 两只一起播
     private long storyWaitUntil,storyGiveUp,storyEnd,nextBlanketCheck;
+    // 挑衅剧情（Claude）：照电脑版 renderer/teases.js 和 pets.js 的「挑衅」一节，一步一步演
+    private Actor sceneA,sceneB; // 挑衅的那只、被挑衅的哥哥
+    private final ArrayDeque<Step> sceneSteps=new ArrayDeque<>();
+    private Step sceneStep;
+    private long nextTease;
+    private final Map<String,List<Long>> teased=new HashMap<>();
+    private abstract static class Step{void start(long now){} abstract boolean update(long now,float dt);}
+    // 两个哥哥：贴贴完打架，冷静 3 分钟后再见面先和好
+    private int hugPhase; // 0 和好，1 贴贴，2 打架
+    private String hugClip="";
+    private final Set<String> needsMakeup=new HashSet<>();
+    private boolean fightDemo;
+    private static final long CALM_DOWN=180_000;
     private int weatherDemoStep=-1;
     private ShakeCompanion motion;
     private android.widget.TextView island;
@@ -99,7 +112,8 @@ public final class PetService extends Service {
         if(!Settings.canDrawOverlays(this)||catalog==null){stopSelf();return START_NOT_STICKY;}
         startForeground(7,notification());
         if(actors.isEmpty()||"start".equals(action)||"hug".equals(action)||(action!=null&&action.startsWith("test-")))
-            rebuild("test-helpup".equals(action)||"test-blanket".equals(action)||"test-show".equals(action)?Arrays.asList(CAT,DOG):Collections.<String>emptyList()); // 演示要的宠物自动放出来
+            rebuild("test-show".equals(action)?Arrays.asList(CAT,DOG,"梨梨哥哥"):"test-fight".equals(action)?Arrays.asList(DOG,"梨梨哥哥"):"test-tease".equals(action)?teaseDemoCast():
+                "test-helpup".equals(action)||"test-blanket".equals(action)?Arrays.asList(CAT,DOG):Collections.<String>emptyList()); // 演示要的宠物自动放出来
         if("start".equals(action)&&UpdateChecker.due(getSharedPreferences("pets",MODE_PRIVATE)))UpdateChecker.check(this,(version,url)->{ // 自动检查更新（默认关闭）
             if(version==null||destroyed)return;
             PendingIntent open=PendingIntent.getActivity(this,3,new Intent(this,MainActivity.class).setAction("update"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
@@ -108,7 +122,9 @@ public final class PetService extends Service {
         if("test-shake".equals(action))bounceParty();
         if("test-rainbow".equals(action)){long now=SystemClock.uptimeMillis();for(Actor a:actors)spitRainbow(a,now);}
         if("test-hang".equals(action))hangDemo();
-        if("test-show".equals(action)){bounceParty();clock.postDelayed(this::hangDemo,9000);clock.postDelayed(this::weatherDemoStart,18000);clock.postDelayed(this::helpUpDemo,68000);clock.postDelayed(this::blanketDemo,84000);}
+        if("test-show".equals(action)){bounceParty();clock.postDelayed(this::hangDemo,9000);clock.postDelayed(this::weatherDemoStart,18000);clock.postDelayed(this::helpUpDemo,68000);clock.postDelayed(this::blanketDemo,84000);clock.postDelayed(this::teaseDemo,100000);clock.postDelayed(this::fightDemoStart,116000);}
+        if("test-tease".equals(action))teaseDemo();
+        if("test-fight".equals(action))fightDemoStart();
         if("test-helpup".equals(action))helpUpDemo();
         if("test-inspect".equals(action))openInspector();
         if("test-blanket".equals(action))blanketDemo();
@@ -180,7 +196,7 @@ public final class PetService extends Service {
         }
         int nextFloor=state.keyboardTop<0?-1:Math.max(0,state.keyboardTop-originY);
         boolean changed=nextFloor!=keyboardFloor || !state.pkg.equals(surfaceApp);
-        if(changed){endHug();cancelStory();keyboardFloor=nextFloor;surfaceApp=state.pkg;}
+        if(changed){endHug();cancelStory();cancelScene();keyboardFloor=nextFloor;surfaceApp=state.pkg;}
         if(now>=demoUntil){
             List<Perch> local=new ArrayList<>();
             if(getSharedPreferences("pets",MODE_PRIVATE).getBoolean("perching",false))for(Perch p:state.perches){
@@ -216,11 +232,13 @@ public final class PetService extends Service {
         updateInspector();
         updateInterface(now);
         updateHanger(now,options);
-        if(hugA!=null&&now>=hugEnd)endHug();
+        if(hugA!=null&&now>=hugEnd)advanceHug(now);
+        if(sceneA!=null)runScene(now,dt);
+        else if(storyKind==null&&now>=nextTease){nextTease=now+120_000+random.nextInt(180_000);autoTease(now);}
         if(storyKind!=null)runStory(now,dt);else if(now>=nextBlanketCheck){nextBlanketCheck=now+30000;startBlanket(now,false);}
         for(Actor a:actors){
             if(a==hugA||a==hugB||a.dragging)continue;
-            if(a==storyPet||a==storyDog)continue; // 剧情里不随机走动、不贴贴
+            if(a==storyPet||a==storyDog||a==sceneA||a==sceneB)continue; // 剧情里不随机走动、不贴贴
             if(a.sleeping&&a.hang==0&&a.ballEnd==0)continue; // 盖着被子睡，摸一下才醒
             if(a.hang!=0){hang(a,now,dt);continue;}
             if(a.ballEnd>now){
@@ -272,22 +290,45 @@ public final class PetService extends Service {
         }
         if(hugA==null)for(int i=0;i<actors.size();i++)for(int j=i+1;j<actors.size();j++){
             Actor a=actors.get(i),b=actors.get(j);
-            if(!a.dragging&&!b.dragging&&!a.falling&&!b.falling&&a.hang==0&&b.hang==0&&!a.sleeping&&!b.sleeping&&a!=storyPet&&b!=storyPet&&a!=storyDog&&b!=storyDog&&now>a.cooldown&&now>b.cooldown&&now>a.until&&now>b.until&&Math.abs(a.x-b.x)<unit*.65f&&Math.abs(a.y-b.y)<unit*.25f){if(beginHug(a,b))return;}
+            if(!a.dragging&&!b.dragging&&!a.falling&&!b.falling&&a.hang==0&&b.hang==0&&!a.sleeping&&!b.sleeping&&!isStory(a)&&!isStory(b)&&!inScene(a)&&!inScene(b)&&now>a.cooldown&&now>b.cooldown&&now>a.until&&now>b.until&&Math.abs(a.x-b.x)<unit*.65f&&Math.abs(a.y-b.y)<unit*.25f){if(beginHug(a,b))return;}
         }
     }
     private boolean beginHug(Actor a,Actor b){
-        String clip=catalog.hug(a.pet,b.pet);if(clip.isEmpty()||hugA!=null||a.hang!=0||b.hang!=0||a.sleeping||b.sleeping||isStory(a)||isStory(b)||a.ballEnd!=0||b.ballEnd!=0||a.perch!=null||b.perch!=null||a.hopStart>0||b.hopStart>0)return false;
+        String clip=catalog.hug(a.pet,b.pet);if(clip.isEmpty()||hugA!=null||a.hang!=0||b.hang!=0||a.sleeping||b.sleeping||isStory(a)||isStory(b)||inScene(a)||inScene(b)||a.ballEnd!=0||b.ballEnd!=0||a.perch!=null||b.perch!=null||a.hopStart>0||b.hopStart>0)return false;
         hugA=a;hugB=b;a.direction=b.direction=0;a.falling=b.falling=false;a.dragging=b.dragging=false;
-        a.pos.width=Math.min(width,unit*2);a.x=(a.x+b.x)/2;a.y=a.floor();a.view.show(clip);b.view.setVisibility(View.GONE);b.view.animate(false);position(a);hugEnd=SystemClock.uptimeMillis()+5500;return true;
+        a.pos.width=Math.min(width,unit*2);a.x=(a.x+b.x)/2;a.y=a.floor();hugClip=clip;
+        String makeup=catalog.pairStory("makeup",a.pet,b.pet),key=pairKey(a,b);long now=SystemClock.uptimeMillis();
+        if(!makeup.isEmpty()&&needsMakeup.remove(key)){a.view.show(makeup);hugPhase=0;hugEnd=now+Math.max(1500,a.view.duration());} // 打完架冷静过了：先和好
+        else{a.view.show(clip);hugPhase=1;hugEnd=now+5500;}
+        b.view.setVisibility(View.GONE);b.view.animate(false);position(a);return true;
+    }
+    private String pairKey(Actor a,Actor b){return a.pet.id.compareTo(b.pet.id)<0?a.pet.id+":"+b.pet.id:b.pet.id+":"+a.pet.id;}
+    /** 贴贴播完：两个哥哥有「_打架」就接着打一架；和好播完接着贴贴。 */
+    private void advanceHug(long now){
+        Actor a=hugA,b=hugB;
+        if(hugPhase==0){a.view.show(hugClip);hugPhase=1;hugEnd=now+5500;return;}
+        String fight=hugPhase==1?catalog.pairStory("fight",a.pet,b.pet):"";
+        if(!fight.isEmpty()){
+            a.view.show(fight);hugPhase=2;hugEnd=now+Math.max(1500,a.view.duration());
+            if(!catalog.pairStory("makeup",a.pet,b.pet).isEmpty())needsMakeup.add(pairKey(a,b)); // 冷静过后再见面先和好
+            return;
+        }
+        endHug();
     }
     private void endHug(){
-        if(hugA==null)return;Actor a=hugA,b=hugB;hugA=hugB=null;a.pos.width=unit;a.play(idle(a),0);b.play(idle(b),0);a.cooldown=b.cooldown=SystemClock.uptimeMillis()+20000;
-        a.x=Math.min(a.x,Math.max(0,width-unit*2.1f));b.x=a.x+unit*1.05f;b.y=a.y;a.decision=b.decision=SystemClock.uptimeMillis()+2000;position(a);position(b);refreshVisibility();
+        if(hugA==null)return;Actor a=hugA,b=hugB;boolean fought=hugPhase==2;hugA=hugB=null;hugPhase=1;a.pos.width=unit;a.play(idle(a),0);b.play(idle(b),0);
+        long now=SystemClock.uptimeMillis();a.cooldown=b.cooldown=now+(fought?(fightDemo?4000:CALM_DOWN):20000);
+        a.x=Math.min(a.x,Math.max(0,width-unit*2.1f));b.x=a.x+unit*1.05f;b.y=a.y;a.decision=b.decision=now+2000;
+        if(fought){ // 打完朝两边走开
+            a.direction=-1;b.direction=1;a.play("向左走",0);b.play("向右走",0);a.decision=b.decision=now+3000+random.nextInt(1500);
+            if(fightDemo){fightDemo=false;clock.postDelayed(()->fightDemoAgain(a,b),6000);}
+        }
+        position(a);position(b);refreshVisibility();
     }
     private void jump(Actor a){
         if(a==hugA||a==hugB)endHug();
         if(a.hang!=0){a.hang=0;hangSkipUntil=Long.MAX_VALUE;}
-        if(isStory(a))cancelStory();a.sleeping=false;
+        if(isStory(a))cancelStory();if(inScene(a))cancelScene();a.sleeping=false;
         a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.direction=0;a.dragging=false;a.falling=true;a.bouncing=true;a.velocity=-unit*3.3f;a.play("开心蹦蹦",0);
     }
     private void setTouch(Actor a){
@@ -295,11 +336,11 @@ public final class PetService extends Service {
             if(a.lastTap!=0 && now-a.lastTap<=ViewConfiguration.getDoubleTapTimeout()){a.lastTap=0;jump(a);}
             else{a.lastTap=now;a.direction=0;a.play("摸摸头",2000);}
         });
-        a.view.setOnLongClickListener(v->{openSettings();return true;});
+        a.view.setOnLongClickListener(v->{longPressMenu(a);return true;});
         a.view.setOnTouchListener(new View.OnTouchListener(){float downX,downY,startX,startY;boolean moved,longPressed;final int slop=ViewConfiguration.get(PetService.this).getScaledTouchSlop();final Runnable hold=()->{longPressed=true;a.dragging=false;a.view.performLongClick();};
             public boolean onTouch(View v,MotionEvent e){switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
-                    if(a==hugA||a==hugB)endHug();if(isStory(a))cancelStory();a.sleeping=false;if(a.hang!=0){a.hang=0;hangSkipUntil=Long.MAX_VALUE;}a.rainbowAfter=false;downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
+                    if(a==hugA||a==hugB)endHug();if(isStory(a))cancelStory();if(inScene(a))cancelScene();a.sleeping=false;if(a.hang!=0){a.hang=0;hangSkipUntil=Long.MAX_VALUE;}a.rainbowAfter=false;downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
                 case MotionEvent.ACTION_MOVE:
                     float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.hypot(dx,dy)>slop){moved=true;a.lastTap=0;clock.removeCallbacks(hold);}if(moved&&!longPressed){a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
                 case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:
@@ -315,7 +356,7 @@ public final class PetService extends Service {
     private Actor byName(String name){for(Actor a:actors)if(a.pet.name.equals(name))return a;return null;}
     /** 能参加剧情：看得见、在地上、没在拖 / 掉 / 飞 / 挂 / 贴贴 / 别的剧情里。 */
     private boolean storyFree(Actor a){
-        return a!=null&&!paused&&a!=hugA&&a!=hugB&&!isStory(a)&&!a.dragging&&!a.falling&&a.hang==0&&a.ballEnd==0&&a.hopStart==0&&a.perch==null&&a.y>=a.floor()-1;
+        return a!=null&&!paused&&a!=hugA&&a!=hugB&&!isStory(a)&&!inScene(a)&&!a.dragging&&!a.falling&&a.hang==0&&a.ballEnd==0&&a.hopStart==0&&a.perch==null&&a.y>=a.floor()-1;
     }
     /** 有宠物落地摔趴趴：哥哥狗狗在、而且有这只的「_扶起来」就走过去扶。 */
     private void tryHelpUp(Actor fallen,long now){
@@ -400,9 +441,127 @@ public final class PetService extends Service {
         cat.x=Math.max(0,Math.min(maxX(cat),width/2f-unit*1.2f));dog.x=Math.min(maxX(dog),cat.x+unit*2.4f);position(cat);position(dog);
         startBlanket(now,true);
     }
+    // ---- 挑衅（Claude）：千千猫猫挑衅哥哥狗狗，梨梨兔兔挑衅梨梨哥哥 ----
+    private boolean inScene(Actor a){return a!=null&&(a==sceneA||a==sceneB);}
+    private Step faceStep(Actor pet,Actor other){return new Step(){long end;
+        void start(long now){pet.direction=0;pet.play(other.x<pet.x?"向左看":"向右看",0);end=now+700;}
+        boolean update(long now,float dt){return now>=end;}};}
+    private Step playStep(Actor pet,String clip,long min){return new Step(){
+        void start(long now){
+            if(!pet.pet.clips.has(clip)){pet.until=0;return;}
+            pet.direction=0;pet.play(clip,0);long d=Math.max(100,pet.view.duration());pet.until=now+d*Math.max(1,(min+d-1)/d); // 很短的动作重复几遍
+        }
+        boolean update(long now,float dt){return now>=pet.until;}};}
+    private Step approachStep(Actor pet,Actor other){return new Step(){long giveUp;
+        void start(long now){giveUp=now+6000;}
+        boolean update(long now,float dt){
+            float target=Math.max(0,Math.min(maxX(pet),other.x+(pet.x<other.x?-1:1)*unit*.9f)),dx=target-pet.x,step=unit*.6f*dt;
+            if(Math.abs(dx)<=Math.max(step,2)||now>giveUp){pet.play(idle(pet),0);return true;}
+            pet.x+=Math.signum(dx)*step;pet.play(dx<0?"向左走":"向右走",0);position(pet);return false;
+        }};}
+    private Step chaseStep(Actor chaser,Actor runner){return new Step(){long end;float dir;
+        void start(long now){end=now+3500;dir=Math.signum(runner.x-chaser.x);if(dir==0)dir=1;}
+        boolean update(long now,float dt){
+            runner.x+=dir*unit*.9f*dt;if(runner.x<=0||runner.x>=maxX(runner)){dir=-dir;runner.x=Math.max(0,Math.min(maxX(runner),runner.x));}
+            float dx=runner.x-chaser.x;chaser.x+=Math.signum(dx)*unit*1.1f*dt;
+            runner.play(dir<0?"向左走":"向右走",0);chaser.play(dx<0?"向左走":"向右走",0);position(runner);position(chaser);
+            if(now>=end||Math.abs(dx)<unit*.5f){runner.play(idle(runner),0);chaser.play(idle(chaser),0);return true;}
+            return false;
+        }};}
+    private Step hugStep(Actor a,Actor b){return new Step(){
+        boolean update(long now,float dt){Actor x=sceneA,y=sceneB;endScene();a.cooldown=b.cooldown=0;if(!beginHug(a,b)){x.play(idle(x),0);y.play(idle(y),0);}return true;}};}
+    private List<String> teaseDemoCast(){return teaseDemoTurn%2==0?Arrays.asList(CAT,DOG):Arrays.asList("梨梨兔兔","梨梨哥哥");}
+    private int teaseDemoTurn;
+    /** 挑衅：照 teases.js 的规则选回应，10 分钟里被挑衅超过 3 次就投降。forced 是指定的挑衅（可为 null）。 */
+    private boolean startTease(Actor teaser,String forced,long now){
+        Catalog.Tease pair=catalog.teases.get(teaser.pet.name);
+        Actor target=pair==null?null:byName(pair.target);
+        if(target==null||teaser==target)return false;
+        List<String> options=new ArrayList<>();for(String t:pair.replies.keySet())if(teaser.pet.clips.has("挑衅_"+t))options.add(t);
+        if(options.isEmpty())return false;
+        String tease=options.contains(forced)?forced:options.get(random.nextInt(options.size()));
+        List<Long> history=teased.computeIfAbsent(target.pet.name,k->new ArrayList<>());
+        history.removeIf(t->now-t>=catalog.teaseWindow);
+        List<String> reply=TeaseRules.reply(pair.replies,tease,history,now,catalog.teaseWindow,catalog.teaseLimit);
+        history.add(now);
+        if(reply==null)return false;
+        sceneA=teaser;sceneB=target;sceneSteps.clear();sceneStep=null;
+        for(Actor x:new Actor[]{teaser,target}){x.sleeping=false;x.direction=0;x.until=0;}
+        sceneSteps.add(faceStep(teaser,target));sceneSteps.add(playStep(teaser,"挑衅_"+tease,2000));sceneSteps.add(faceStep(target,teaser));
+        for(String step:reply){
+            if("@chase".equals(step))sceneSteps.add(chaseStep(target,teaser));
+            else if("@hug".equals(step)){sceneSteps.add(approachStep(target,teaser));sceneSteps.add(hugStep(teaser,target));}
+            else if("@comfort".equals(step)){sceneSteps.add(approachStep(target,teaser));sceneSteps.add(playStep(target,"回应_摸摸头",2000));sceneSteps.add(playStep(teaser,"开心蹦蹦",2000));sceneSteps.add(playStep(target,"回应_无语",2000));} // 装哭露馅了
+            else sceneSteps.add(playStep(target,"回应_"+step,2000));
+        }
+        return true;
+    }
+    private void runScene(long now,float dt){
+        if(!actors.contains(sceneA)||!actors.contains(sceneB)||paused||sceneA.dragging||sceneB.dragging||sceneA.falling||sceneB.falling){cancelScene();return;}
+        if(sceneStep==null){sceneStep=sceneSteps.poll();if(sceneStep==null){endScene();return;}sceneStep.start(now);}
+        if(sceneStep.update(now,dt))sceneStep=null;
+    }
+    private void endScene(){
+        Actor a=sceneA,b=sceneB;sceneA=sceneB=null;sceneSteps.clear();sceneStep=null;
+        for(Actor x:new Actor[]{a,b})if(x!=null&&x!=hugA&&x!=hugB){x.until=0;x.decision=SystemClock.uptimeMillis()+1500;}
+    }
+    private void cancelScene(){
+        if(sceneA==null)return;Actor a=sceneA,b=sceneB;endScene();
+        for(Actor x:new Actor[]{a,b})if(x!=null&&!x.dragging){x.play(idle(x),0);position(x);}
+    }
+    /** 平时偶尔：挑衅的那只和哥哥都在、都闲着、离得不远。 */
+    private void autoTease(long now){
+        List<String> names=new ArrayList<>(catalog.teases.keySet());Collections.shuffle(names,random);
+        for(String name:names){
+            Actor teaser=byName(name),target=byName(catalog.teases.get(name).target);
+            if(!storyFree(teaser)||!storyFree(target)||teaser.sleeping||target.sleeping||teaser.until>now||target.until>now)continue;
+            if(Math.abs(teaser.x-target.x)>unit*4)continue;
+            if(startTease(teaser,null,now))return;
+        }
+    }
+    /** 长按：千千猫猫 / 梨梨兔兔多一个「挑衅哥哥」。 */
+    private void longPressMenu(Actor a){
+        Catalog.Tease pair=catalog.teases.get(a.pet.name);
+        if(pair==null){openSettings();return;}
+        AlertDialog menu=new AlertDialog.Builder(this).setTitle(a.pet.label).setItems(new String[]{"😈 挑衅哥哥（"+pair.target+"）","打开设置"},(d,i)->{
+            if(i==1){openSettings();return;}
+            Actor target=byName(pair.target);
+            if(target==null){Toast.makeText(this,"要先让"+pair.target+"出来哦",Toast.LENGTH_SHORT).show();return;}
+            freeForScene(a);freeForScene(target);
+            if(!startTease(a,null,SystemClock.uptimeMillis()))Toast.makeText(this,"现在闹不起来，等一下再试哦",Toast.LENGTH_SHORT).show();
+        }).setNegativeButton("取消",null).create();
+        menu.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);menu.show();
+    }
+    /** 演示前把这只从别的事里拉出来，站回地上。 */
+    private void freeForScene(Actor a){
+        if(a==hugA||a==hugB)endHug();if(isStory(a))cancelStory();if(inScene(a))cancelScene();
+        a.hang=0;a.ballEnd=0;a.sleeping=false;a.perch=a.target=null;a.hopStart=0;a.falling=false;a.dragging=false;a.direction=0;a.until=0;a.y=a.floor();a.play(idle(a),0);position(a);
+    }
+    private void teaseDemo(){
+        List<String> cast=teaseDemoCast();teaseDemoTurn++;
+        Actor teaser=byName(cast.get(0)),target=byName(cast.get(1));
+        if(teaser==null||target==null){Toast.makeText(this,"要"+cast.get(0)+"和"+cast.get(1)+"一起出来哦",Toast.LENGTH_SHORT).show();return;}
+        freeForScene(teaser);freeForScene(target);
+        teaser.x=Math.max(0,Math.min(maxX(teaser),width/2f-unit*1.3f));target.x=Math.min(maxX(target),teaser.x+unit*2.2f);position(teaser);position(target);
+        startTease(teaser,null,SystemClock.uptimeMillis());
+    }
+    /** 演示：两个哥哥贴贴 → 打架 → 走开，过几秒再碰到先和好再贴贴。 */
+    private void fightDemoStart(){
+        Actor dog=byName(DOG),lili=byName("梨梨哥哥");
+        if(dog==null||lili==null){Toast.makeText(this,"要哥哥狗狗和梨梨哥哥一起出来哦",Toast.LENGTH_SHORT).show();return;}
+        freeForScene(dog);freeForScene(lili);needsMakeup.remove(pairKey(dog,lili));fightDemo=true;
+        dog.x=Math.max(0,Math.min(maxX(dog),width/2f-unit*.6f));lili.x=dog.x+unit*.5f;dog.cooldown=lili.cooldown=0;position(dog);position(lili);
+        if(!beginHug(dog,lili)){fightDemo=false;Toast.makeText(this,"这一对没有贴贴动画",Toast.LENGTH_SHORT).show();}
+    }
+    private void fightDemoAgain(Actor dog,Actor lili){
+        if(!actors.contains(dog)||!actors.contains(lili))return;
+        freeForScene(dog);freeForScene(lili);
+        dog.x=Math.max(0,Math.min(maxX(dog),width/2f-unit*.6f));lili.x=dog.x+unit*.5f;dog.cooldown=lili.cooldown=0;position(dog);position(lili);
+        beginHug(dog,lili); // 冷静过了：先和好再贴贴
+    }
     private void bounceParty(){
         if(!screenOn||paused||getSystemService(KeyguardManager.class).isKeyguardLocked())return;
-        endHug();cancelStory();long now=SystemClock.uptimeMillis();
+        endHug();cancelStory();cancelScene();long now=SystemClock.uptimeMillis();
         for(Actor a:actors){
             if(a.dragging)continue;
             a.sleeping=false;
@@ -497,7 +656,7 @@ public final class PetService extends Service {
             if(a==chosen){
                 if(a.hang==0&&!a.dragging){
                     if(a==hugA||a==hugB)endHug();
-                    if(isStory(a))cancelStory();a.sleeping=false;
+                    if(isStory(a))cancelStory();if(inScene(a))cancelScene();a.sleeping=false;
                     a.ballEnd=0;a.rainbowAfter=false;a.perch=a.target=null;a.hopStart=0;a.falling=false;a.bouncing=false;a.direction=0;
                     boolean grounded=a.y>=a.floor()-1;
                     a.hang=grounded?1:2;a.hangStart=now;a.hangFromX=a.x;a.hangFromY=a.y;
@@ -596,8 +755,8 @@ public final class PetService extends Service {
         if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}}
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
     private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();if(islandPanel!=null)islandPanel.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
-    private void clearActors(){hideIsland();hugA=hugB=null;storyKind=null;storyPet=storyDog=null;clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
-    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();endHug();cancelStory();InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.hang=0;a.rainbowAfter=false;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
+    private void clearActors(){hideIsland();hugA=hugB=null;storyKind=null;storyPet=storyDog=null;sceneA=sceneB=null;sceneSteps.clear();sceneStep=null;fightDemo=false;clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
+    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();endHug();cancelStory();cancelScene();InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.hang=0;a.rainbowAfter=false;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
     @Override public void onDestroy(){destroyed=true;closeInspector();if(islandPanel!=null)islandPanel.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent i){return null;}
 }

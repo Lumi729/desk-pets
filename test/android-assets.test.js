@@ -76,3 +76,25 @@ test('Android packages 扶起来 / 盖被子 stories apart from hugs, with 哥�
     assert.deepEqual(Object.keys(stories.blanket), [cat.id]);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Android tease rules come straight from teases.js, with every clip and the brothers\' fight / make-up (Claude)', () => {
+  const Teases = require('../renderer/teases.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-teases-'));
+  try {
+    const { pets, hugs, stories, teases } = prepare(dir);
+    assert.equal(teases.window, Teases.WINDOW); assert.equal(teases.limit, Teases.LIMIT);
+    const pet = name => pets.find(p => p.name === name);
+    for (const [teaser, { target, replies }] of Object.entries(Teases.PAIRS)) {
+      assert.equal(teases.pairs[teaser].target, target);
+      for (const [tease, steps] of Object.entries(replies)) {
+        assert.deepEqual(teases.pairs[teaser].replies[tease], steps.map(s => typeof s === 'string' ? s : `@${Object.keys(s)[0]}`));
+        assert.ok(pet(teaser).clips[`挑衅_${tease}`], `${teaser} 挑衅_${tease}`);
+        for (const step of steps) if (typeof step === 'string') assert.ok(pet(target).clips[`回应_${step}`], `${target} 回应_${step}`);
+      }
+      assert.ok(pet(target).clips['回应_投降']);
+    }
+    const dog = pet('哥哥狗狗'), lili = pet('梨梨哥哥'), key = `${dog.id}:${lili.id}`;
+    assert.ok(hugs[key] && stories.fight[key] && stories.makeup[key], '两个哥哥：贴贴、打架、和好');
+    assert.equal(Object.keys(stories.fight).length, 1);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
