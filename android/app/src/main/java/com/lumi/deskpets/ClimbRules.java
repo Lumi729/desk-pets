@@ -16,6 +16,9 @@ final class ClimbRules {
     static float top(int height){return Math.max(0,height*.22f);}
     /** 贴哪边：左边窗口左缘对齐屏幕左边，右边窗口右缘对齐屏幕右边（画布已经贴好边，不用再偏移）。 */
     static float edgeX(int side,int screenWidth,int windowWidth){return side<0?0:Math.max(0,screenWidth-windowWidth);}
+    /** 爬边速度（设置里 25%～300%，默认 100%）：每秒爬多少只宠物高。 */
+    static final int SPEED_MIN=25,SPEED_MAX=300,SPEED_STEP=25;
+    static float climbSpeed(int percent){return .45f*Math.max(SPEED_MIN,Math.min(SPEED_MAX,percent))/100f;}
     static String climbClip(int side){return side<0?"沿左边向上爬":"沿右边向上爬";}
     static String peekClip(int side){return side<0?"左边探头":"右边探头";}
 }

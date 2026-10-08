@@ -85,6 +85,12 @@ public final class MainActivity extends Activity {
         text("轻轻连续晃动会让宠物像弹力球一样摇晃着蹦几秒，落地后吐出一道彩虹；飞起来时倾斜手机可改变方向。无需用力摇。",13,false);
         option("climb","歪手机爬墙");
         button("住在地面 / 住在屏幕边",()->chooseHomes());
+        TextView speedLabel=text("",15,false);
+        SeekBar climbSpeed=new SeekBar(this);climbSpeed.setMax((ClimbRules.SPEED_MAX-ClimbRules.SPEED_MIN)/ClimbRules.SPEED_STEP);
+        int speedNow=Math.max(ClimbRules.SPEED_MIN,Math.min(ClimbRules.SPEED_MAX,prefs.getInt("climbSpeed",100)));
+        speedLabel.setText("沿屏幕边爬的速度："+speedNow+"%");climbSpeed.setProgress((speedNow-ClimbRules.SPEED_MIN)/ClimbRules.SPEED_STEP);page.addView(climbSpeed);
+        climbSpeed.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onStartTrackingTouch(SeekBar b){} public void onStopTrackingTouch(SeekBar b){}
+            public void onProgressChanged(SeekBar b,int value,boolean user){int percent=ClimbRules.SPEED_MIN+value*ClimbRules.SPEED_STEP;speedLabel.setText("沿屏幕边爬的速度："+percent+"%");if(user)prefs.edit().putInt("climbSpeed",percent).apply();}}); // 马上生效
         text("手机往左或往右歪一会儿，一只伙伴走到那一边，沿屏幕边爬到上半部分，然后藏在边外只露出头和爪子。不管它就一直趴着，拖出来才会掉回地上。同一时间只有一只去爬；贴贴、剧情、挂灵动岛时不爬。",13,false);
         text("「住在屏幕边」的伙伴平时贴在左边或右边探头，只露出头和爪子，时不时沿着边爬到别的高度，偶尔掉下来换到另一边；不挡状态栏、灵动岛和底部导航条，键盘弹出时会避开。摸它会缩回去再探出来，拖着放到边上能换高度，拖回地面就变回住在地面。住在边上的不参加贴贴和叠叠乐，灵动岛来通知时照样去挂着，挂完回原来的边上。默认都住在地面。",13,false);
         option("island","灵动提示条");

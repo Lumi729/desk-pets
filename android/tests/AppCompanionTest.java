@@ -208,6 +208,7 @@ public final class AppCompanionTest {
         equal(ClimbRules.side(-.5f),-1);equal(ClimbRules.side(.5f),1);equal(ClimbRules.side(.2f),0);equal(ClimbRules.side(-.24f),0);equal(ClimbRules.side(-.3f),-1);
         equal(ClimbRules.rearm(.1f),true);equal(ClimbRules.rearm(-.2f),false);
         equal(ClimbRules.edgeX(-1,1080,250),0f);equal(ClimbRules.edgeX(1,1080,250),830f);equal(ClimbRules.top(2000),440f);
+        equal(ClimbRules.climbSpeed(100),.45f);equal(ClimbRules.climbSpeed(200),.9f);equal(ClimbRules.climbSpeed(5),ClimbRules.climbSpeed(25));equal(ClimbRules.climbSpeed(999),ClimbRules.climbSpeed(300));
         equal(ClimbRules.climbClip(-1),"沿左边向上爬");equal(ClimbRules.climbClip(1),"沿右边向上爬");equal(ClimbRules.peekClip(-1),"左边探头");equal(ClimbRules.peekClip(1),"右边探头");
         // 住在屏幕边（Claude）：中间范围、避开键盘、下一个高度、拖到哪算贴边
         float[] band=EdgeRules.band(2000,-1,200);equal(band[0],400f);equal(band[1],1360f);

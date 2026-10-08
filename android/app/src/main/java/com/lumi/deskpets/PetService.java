@@ -1321,6 +1321,7 @@ public final class PetService extends Service {
         if(inspector==null||inspectorText==null||(inspectorShown==DeliveryCompanion.inspectedAt&&lyricStatus.equals(inspectorLyric)))return;
         inspectorShown=DeliveryCompanion.inspectedAt;inspectorLyric=lyricStatus;
         StringBuilder b=new StringBuilder("通知检查：外卖 / 音乐歌词（只显示在屏幕上，不保存不上传不写日志）\n");
+        if(getSharedPreferences("pets",MODE_PRIVATE).getBoolean("islandLyrics",false))b.append("\n【歌词】").append(lyricStatus).append("\n"); // 没连上也显示
         if(!DeliveryCompanion.connected()){
             if(!listenerAllowed())b.append("\n⚠ 通知使用权没开：在设置页点「允许音乐与通知访问」，给「外卖提示 · 梨间雪桌宠」打开，再点「刷新」。");
             else b.append("\n通知使用权开了，但还没连上，已经请系统重新连接，过几秒点「刷新」。");
@@ -1328,7 +1329,6 @@ public final class PetService extends Service {
             int total=DeliveryCompanion.scannedTotal;
             if(DeliveryCompanion.inspected.isEmpty())b.append("\n没找到外卖或音乐通知：通知栏里").append(total>=0?"的 "+total+" 条通知":"").append("没有美团 / 饿了么、网易云等音乐 App 的，也没有标题或正文包含「送达、骑手、取餐、配送、商家」的。有新的会自动出现，也可以点「刷新」。");
             else b.append("\n读了一遍通知栏").append(total>=0?"（共 "+total+" 条）":"").append("，找到这些（最新的在上面）：");
-            if(getSharedPreferences("pets",MODE_PRIVATE).getBoolean("islandLyrics",false))b.append("\n\n【歌词】").append(lyricStatus);
             java.util.List<String> list=new java.util.ArrayList<>(DeliveryCompanion.inspected.values());java.util.Collections.reverse(list);
             for(String t:list)b.append("\n\n").append(t);
         }
@@ -1597,7 +1597,7 @@ public final class PetService extends Service {
         }
         a.x=ClimbRules.edgeX(a.climbSide,width,a.pos.width);
         if(a.climb==2||a.climb==4){ // 沿边往上 / 往下爬
-            float step=unit*.45f*dt;
+            float step=unit*ClimbRules.climbSpeed(getSharedPreferences("pets",MODE_PRIVATE).getInt("climbSpeed",100))*dt; // 爬边速度可以在设置里调
             if(a.climb==2)a.y=Math.max(a.climbTo,a.y-step);else a.y=Math.min(a.climbTo,a.y+step);
             if(Math.abs(a.y-a.climbTo)<.5f){a.y=a.climbTo;peek(a,now);}
             position(a);return;
