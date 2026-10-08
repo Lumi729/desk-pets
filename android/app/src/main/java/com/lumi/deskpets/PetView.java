@@ -15,6 +15,8 @@ final class PetView extends View {
     private boolean playing=true;
     /** One loop of the current clip in ms (the rainbow clip already draws its own rainbow). */
     /** GIF 原图大小（叠叠乐要按它算窗口大小）。 */
+    /** 正在播的 GIF（分享表情用）。 */
+    String asset(){return path;}
     int gifWidth(){return movie==null?0:movie.width();}
     int gifHeight(){return movie==null?0:movie.height();}
     int duration(){return movie==null?0:Math.max(100,movie.duration());}

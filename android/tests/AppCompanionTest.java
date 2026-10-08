@@ -1,7 +1,7 @@
 package com.lumi.deskpets;
 import java.util.Map;
 public final class AppCompanionTest {
-    static void equal(Object actual,Object expected){if(!actual.equals(expected))throw new AssertionError(actual+" != "+expected);}
+    static void equal(Object actual,Object expected){if(!java.util.Objects.equals(actual,expected))throw new AssertionError(actual+" != "+expected);}
     public static void main(String[] args){
         Perch upper=new Perch(80,300,230),lower=new Perch(80,500,230),side=new Perch(250,200,390);
         java.util.List<Perch> platforms=java.util.List.of(lower,side,upper);
@@ -129,6 +129,20 @@ public final class AppCompanionTest {
         equal(DeliveryRules.label("预计 12:00送达","骑手正在送餐",12*60+3),"🛵 预计 12:00 送达 · 骑手正在送餐");
         equal(DeliveryRules.label("订单已送达","预计 12:00送达",11*60),"");equal(DeliveryRules.label("骑手正赶往商家","商家正在备餐",11*60),"");
         equal(DeliveryRules.distance("骑手距您 800 米"),"800米");equal(DeliveryRules.distance("还有 5 分钟"),"");
+        // 过节、生日、纪念日、提醒、小窝（Claude）：和 lib/calendar.js、lib/diary.js 一样
+        equal(CalendarRules.festival(10,1,8,20,8,21),"国庆");equal(CalendarRules.festival(10,7,8,26,8,27),"国庆");equal(CalendarRules.festival(10,8,8,27,8,28),null);
+        equal(CalendarRules.festival(10,31,9,20,9,21),"万圣节");equal(CalendarRules.festival(12,24,11,4,11,5),"圣诞");equal(CalendarRules.festival(12,25,11,5,11,6),"圣诞");
+        equal(CalendarRules.festival(2,17,1,1,1,2),"春节");equal(CalendarRules.festival(2,23,1,7,1,8),"春节");equal(CalendarRules.festival(2,24,1,8,1,9),null);
+        equal(CalendarRules.festival(2,16,12,30,1,1),"春节");equal(CalendarRules.festival(3,1,0,3,0,4),null); // 除夕；闰月不算正月
+        equal(CalendarRules.normalizeBirthday("3/14"),"03-14");equal(CalendarRules.normalizeBirthday("3月14日"),"03-14");equal(CalendarRules.normalizeBirthday(" 12-01 "),"12-01");
+        equal(CalendarRules.normalizeBirthday("13-01"),"");equal(CalendarRules.normalizeBirthday("生日"),"");equal(CalendarRules.normalizeBirthday(null),"");
+        equal(CalendarRules.daysTogether(100,100),1L);equal(CalendarRules.daysTogether(100,106),7L);
+        for(long n:new long[]{7,30,100,200,365,730})equal(CalendarRules.isAnniversary(n),true);
+        for(long n:new long[]{1,8,99,364,366,500})equal(CalendarRules.isAnniversary(n),false);
+        equal(CalendarRules.nagNight(0),true);equal(CalendarRules.nagNight(4),true);equal(CalendarRules.nagNight(5),false);equal(CalendarRules.nagNight(23),false);
+        equal(CalendarRules.meal(11*60+49),-1);equal(CalendarRules.meal(12*60),0);equal(CalendarRules.meal(12*60+30),0);equal(CalendarRules.meal(18*60),1);equal(CalendarRules.meal(15*60),-1);
+        equal(CalendarRules.night(23),true);equal(CalendarRules.night(6),true);equal(CalendarRules.night(7),false);equal(CalendarRules.night(22),false);
+        equal(CalendarRules.nestOffset(0,1,100,300),0f);equal(CalendarRules.nestOffset(0,3,100,300),-42f);equal(CalendarRules.nestOffset(2,3,100,300),42f);
         // 挑衅（Claude）：和 teases.js 的 replyFor 一样，10 分钟里第 4 次就投降
         java.util.Map<String,java.util.List<String>> replies=new java.util.LinkedHashMap<>();
         replies.put("就这",java.util.List.of("委屈"));replies.put("来打我呀",java.util.List.of("跺脚","@chase"));

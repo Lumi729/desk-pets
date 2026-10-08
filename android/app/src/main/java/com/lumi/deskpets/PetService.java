@@ -67,6 +67,18 @@ public final class PetService extends Service {
     private final List<Actor> stack=new ArrayList<>();
     private long stackEnd;
     private static final String MULTI="百变猫猫";
+    // 第五批（Claude）：过节 / 生日 / 在一起多少天、时间提醒、小窝、番茄钟、分享表情
+    private static final String NICK="千千";
+    private String festivalToday,festivalDemo;
+    private final Set<String> birthdayNames=new HashSet<>();
+    private long nextDayCheck,lastBirthdayTell,lastNightNag,nextNestCheck,nestDemoUntil;
+    private final Set<String> mealsDone=new HashSet<>();
+    private String tellText="";
+    private long tellUntil;
+    private android.widget.ImageView nestBack,nestFront;
+    private int nestW,nestH;
+    private boolean focusing;
+    private long focusDemoUntil;
     private int weatherDemoStep=-1;
     private ShakeCompanion motion;
     private android.widget.TextView island;
@@ -87,7 +99,7 @@ public final class PetService extends Service {
     private boolean islandMediaShown; // 提示条正显示音乐 / 视频 / 一起摇摆这些：伙伴照常播看视频、跳舞，不挂
 
     private final BroadcastReceiver screen=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){screenOn=!Intent.ACTION_SCREEN_OFF.equals(i.getAction());refreshVisibility();}};
-    private final Runnable loop=new Runnable(){public void run(){if(destroyed)return;if(!Settings.canDrawOverlays(PetService.this)){stopSelf();return;}long now=SystemClock.uptimeMillis();float dt=Math.min(.05f,(now-lastFrame)/1000f);lastFrame=now;checkTimer();if(screenOn&&!paused)tick(now,dt);clock.postDelayed(this,screenOn&&!paused?50:1000);}};
+    private final Runnable loop=new Runnable(){public void run(){if(destroyed)return;if(!Settings.canDrawOverlays(PetService.this)){stopSelf();return;}long now=SystemClock.uptimeMillis();float dt=Math.min(.05f,(now-lastFrame)/1000f);lastFrame=now;checkTimer();checkFocus();if(screenOn&&!paused)tick(now,dt);clock.postDelayed(this,screenOn&&!paused?50:1000);}};
     private final class Actor {
         Catalog.Pet pet; // 百变猫猫换小猫时会换成另一只
         final PetView view;
@@ -104,6 +116,10 @@ public final class PetService extends Service {
         long dozeAt,nextHobby;
         String thenClip; // 这个动作播完接着播（g老师摔趴趴后假装没摔过）
         int catPhase; // 百变猫猫：0 平时，1 变身_出，2 变身_进
+        long nextCelebrate; // 过节 / 生日：下次什么时候播（0 = 今天不过）
+        int nest; // 小窝：0 平时，1 犯困走回窝，2 在窝里睡
+        long nestAfter; // 被摸醒以后过一会儿才会再回窝
+        boolean nightSleep; // 晚上睡的，早上才自己出来
         Catalog.Pet catNext;
         long nextCatSwitch;
         final List<Catalog.Pet> catBag=new ArrayList<>();
@@ -143,6 +159,14 @@ public final class PetService extends Service {
         if("test-rainbow".equals(action)){long now=SystemClock.uptimeMillis();for(Actor a:actors)spitRainbow(a,now);}
         if("test-hang".equals(action))hangDemo();
         if("test-show".equals(action))showcase();
+        if("focus-start".equals(action))startFocus();
+        if("focus-stop".equals(action))stopFocus();
+        if("test-festival".equals(action))festivalDemoStart();
+        if("test-birthday".equals(action))birthdayDemo();
+        if("test-anniversary".equals(action))anniversaryDemo();
+        if("test-remind".equals(action))remindDemo();
+        if("test-nest".equals(action))nestDemo();
+        if("test-focus".equals(action))focusDemo();
         if("test-tease".equals(action))teaseDemo();
         if("test-snack".equals(action))snackDemo();
         if("test-chase".equals(action))chaseDemo();
@@ -192,7 +216,7 @@ public final class PetService extends Service {
         PendingIntent open=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent toggle=PendingIntent.getService(this,1,new Intent(this,PetService.class).setAction("toggle"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent stop=PendingIntent.getService(this,2,new Intent(this,PetService.class).setAction("stop"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-        return new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setColor(0xFFEFA7C0).setLargeIcon(android.graphics.drawable.Icon.createWithResource(this,R.drawable.ic_qianqian_large)).setContentTitle(paused?"伙伴们休息中":"梨间雪的小伙伴陪着你").setContentText("点这里选宠 · 长按宠物也能打开设置").setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true).addAction(new Notification.Action.Builder(null,paused?"继续":"收起",toggle).build()).addAction(new Notification.Action.Builder(null,"全部回家",stop).build()).build();
+        return new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setColor(0xFFEFA7C0).setLargeIcon(android.graphics.drawable.Icon.createWithResource(this,R.drawable.ic_qianqian_large)).setContentTitle(paused?"伙伴们休息中":"梨间雪的小伙伴陪着你").setContentText("点这里选宠 · 长按宠物也能打开设置").setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true).addAction(new Notification.Action.Builder(null,paused?"继续":"收起",toggle).build()).addAction(new Notification.Action.Builder(null,focusing?"结束专注":"🍅 专注",PendingIntent.getService(this,4,new Intent(this,PetService.class).setAction(focusing?"focus-stop":"focus-start"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT)).build()).addAction(new Notification.Action.Builder(null,"全部回家",stop).build()).build();
     }
     @SuppressWarnings("deprecation") private void measure(){
         if(Build.VERSION.SDK_INT>=30){WindowMetrics m=windows.getCurrentWindowMetrics();android.graphics.Insets i=m.getWindowInsets().getInsetsIgnoringVisibility(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());width=m.getBounds().width()-i.left-i.right;height=m.getBounds().height()-i.top-i.bottom;}
@@ -216,6 +240,9 @@ public final class PetService extends Service {
     /** 平时的待机：特殊天气 > 季节 > 其它天气 > 普通待机（和电脑版一样）。 */
     private String idle(Actor a){
         if(weatherDemo!=null)return a.pet.clips.has(weatherDemo)?weatherDemo:"待机";
+        if(focusing){String f=a.pet.name.equals(G)&&a.pet.clips.has("互动_看书")?"互动_看书":"专注";if(a.pet.clips.has(f))return f;} // 专注时安静陪着（g老师看书）
+        String fest=festivalDemo!=null?festivalDemo:festivalToday;
+        if(fest!=null&&a.pet.clips.has(fest))return fest; // 过节当天的待机
         if(!getSharedPreferences("pets",MODE_PRIVATE).getBoolean("weather",false))return "待机";
         return Weather.pick(weather.idle(),WeatherCompanion.season(),a.pet.clips::has);
     }
@@ -266,11 +293,12 @@ public final class PetService extends Service {
         updateInspector();
         updateInterface(now);
         updateHanger(now,options);
+        checkDay(now,options);checkClock(now,options);updateNest(now,options);
         if(hugA!=null&&now>=hugEnd)advanceHug(now);
         if(sceneA!=null)runScene(now,dt);
-        else if(storyKind==null&&now>=nextTease){nextTease=now+120_000+random.nextInt(180_000);autoTease(now);}
+        else if(storyKind==null&&!focusing&&now>=nextTease){nextTease=now+120_000+random.nextInt(180_000);autoTease(now);}
         if(!stack.isEmpty()&&now>=stackEnd)scatter(now);
-        if(sceneA==null&&storyKind==null&&hugA==null)everyday(now);
+        if(sceneA==null&&storyKind==null&&hugA==null&&!focusing)everyday(now);
         for(Actor a:actors)if(a.pet.name.equals(MULTI))checkCat(a,now);
         processYawn(now);
         checkReading(now);
@@ -296,6 +324,7 @@ public final class PetService extends Service {
                 if(progress>=1){a.perch=a.target;a.target=null;a.hopStart=0;a.play(idle(a),0);a.nextHop=now+2000+random.nextInt(1500);}
                 continue;
             }
+            if(a.nest==1){walkToNest(a,now,dt);continue;} // 困了慢慢走回小窝
             if(a.falling){
                 float before=a.y;a.velocity+=unit*5*dt;a.y+=a.velocity*dt;
                 if(a.velocity>=0){Perch caught=Perch.catchFall(surfaces,a.x,before,a.y,unit,a.floor());if(caught!=null){a.perch=caught;a.y=caught.top-unit;a.nextHop=now+3000;}}
@@ -323,8 +352,9 @@ public final class PetService extends Service {
             if(a.perch!=null && !a.perch.canWalk(unit,width)){
                 a.direction=0;a.x=a.perch.x(unit,width);a.play(idle(a),0);position(a);continue;
             }
-            if(now>=a.decision&&a.perch==null&&maybeOwnThing(a,now))continue;
-            if(now>=a.decision){a.direction=walking?random.nextInt(3)-1:0;a.play(a.direction<0?"向左走":a.direction>0?"向右走":idle(a),0);a.decision=now+2500+random.nextInt(4000);}
+            if(maybeCelebrate(a,now))continue;
+            if(now>=a.decision&&a.perch==null&&!focusing&&maybeOwnThing(a,now))continue;
+            if(now>=a.decision){a.direction=walking&&!focusing?random.nextInt(3)-1:0;a.play(a.direction<0?"向左走":a.direction>0?"向右走":idle(a),0);a.decision=now+2500+random.nextInt(4000);}
             if(a.direction!=0){
                 float left=a.perch==null?0:a.perch.walkLeft(unit,width),right=a.perch==null?maxX(a):a.perch.walkRight(unit,width);
                 a.x=Math.max(left,Math.min(right,a.x+a.direction*unit*.22f*dt));
@@ -332,9 +362,9 @@ public final class PetService extends Service {
                 position(a);
             }
         }
-        if(hugA==null)for(int i=0;i<actors.size();i++)for(int j=i+1;j<actors.size();j++){
+        if(hugA==null&&!focusing)for(int i=0;i<actors.size();i++)for(int j=i+1;j<actors.size();j++){
             Actor a=actors.get(i),b=actors.get(j);
-            if(!a.dragging&&!b.dragging&&!a.falling&&!b.falling&&a.hang==0&&b.hang==0&&!a.sleeping&&!b.sleeping&&!isStory(a)&&!isStory(b)&&!inScene(a)&&!inScene(b)&&!stack.contains(a)&&!stack.contains(b)&&a.catPhase==0&&b.catPhase==0&&!a.pet.name.equals(G)&&!b.pet.name.equals(G)&&now>a.cooldown&&now>b.cooldown&&now>a.until&&now>b.until&&Math.abs(a.x-b.x)<unit*.65f&&Math.abs(a.y-b.y)<unit*.25f){if(beginHug(a,b))return;}
+            if(!a.dragging&&!b.dragging&&!a.falling&&!b.falling&&a.hang==0&&b.hang==0&&!a.sleeping&&!b.sleeping&&!isStory(a)&&!isStory(b)&&!inScene(a)&&!inScene(b)&&!stack.contains(a)&&!stack.contains(b)&&a.catPhase==0&&b.catPhase==0&&a.nest==0&&b.nest==0&&!a.pet.name.equals(G)&&!b.pet.name.equals(G)&&now>a.cooldown&&now>b.cooldown&&now>a.until&&now>b.until&&Math.abs(a.x-b.x)<unit*.65f&&Math.abs(a.y-b.y)<unit*.25f){if(beginHug(a,b))return;}
         }
     }
     private boolean beginHug(Actor a,Actor b){
@@ -390,6 +420,7 @@ public final class PetService extends Service {
             public boolean onTouch(View v,MotionEvent e){switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
                     if(stack.contains(a))scatter(SystemClock.uptimeMillis());a.catPhase=0;
+                    if(a.nest!=0){a.nest=0;a.nestAfter=SystemClock.uptimeMillis()+600_000;arrangeNest();} // 被摸醒，从窝里出来
                     if(a==hugA||a==hugB)endHug();if(isStory(a))cancelStory();if(inScene(a))cancelScene();a.sleeping=false;a.reading=false;a.thenClip=null;yawnQueue.remove(a);if(a.hang!=0){a.hang=0;hangSkipUntil=Long.MAX_VALUE;}a.rainbowAfter=false;downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
                 case MotionEvent.ACTION_MOVE:
                     float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.hypot(dx,dy)>slop){moved=true;a.lastTap=0;clock.removeCallbacks(hold);}if(moved&&!longPressed){a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
@@ -407,7 +438,7 @@ public final class PetService extends Service {
     private Actor byName(String name){for(Actor a:actors)if(a.pet.name.equals(name))return a;return null;}
     /** 能参加剧情：看得见、在地上、没在拖 / 掉 / 飞 / 挂 / 贴贴 / 别的剧情里。 */
     private boolean storyFree(Actor a){
-        return a!=null&&!paused&&a!=hugA&&a!=hugB&&!isStory(a)&&!inScene(a)&&!stack.contains(a)&&a.catPhase==0&&!a.dragging&&!a.falling&&a.hang==0&&a.ballEnd==0&&a.hopStart==0&&a.perch==null&&a.y>=a.floor()-1;
+        return a!=null&&!paused&&a!=hugA&&a!=hugB&&!isStory(a)&&!inScene(a)&&!stack.contains(a)&&a.catPhase==0&&a.nest==0&&!a.dragging&&!a.falling&&a.hang==0&&a.ballEnd==0&&a.hopStart==0&&a.perch==null&&a.y>=a.floor()-1;
     }
     /** 有宠物落地摔趴趴：哥哥狗狗在、而且有这只的「_扶起来」就走过去扶。 */
     private boolean tryHelpUp(Actor fallen,long now){
@@ -574,15 +605,28 @@ public final class PetService extends Service {
     /** 长按：千千猫猫 / 梨梨兔兔多一个「挑衅哥哥」。 */
     private void longPressMenu(Actor a){
         Catalog.Tease pair=catalog.teases.get(a.pet.name);
-        if(pair==null){openSettings();return;}
-        AlertDialog menu=new AlertDialog.Builder(this).setTitle(a.pet.label).setItems(new String[]{"😈 挑衅哥哥（"+pair.target+"）","打开设置"},(d,i)->{
-            if(i==1){openSettings();return;}
+        List<String> items=new ArrayList<>();List<Runnable> picks=new ArrayList<>();
+        if(pair!=null){items.add("😈 挑衅哥哥（"+pair.target+"）");picks.add(()->{
             Actor target=byName(pair.target);
             if(target==null){Toast.makeText(this,"要先让"+pair.target+"出来哦",Toast.LENGTH_SHORT).show();return;}
             freeForScene(a);freeForScene(target);
             if(!startTease(a,null,SystemClock.uptimeMillis()))Toast.makeText(this,"现在闹不起来，等一下再试哦",Toast.LENGTH_SHORT).show();
-        }).setNegativeButton("取消",null).create();
+        });}
+        items.add("📤 分享这个表情");picks.add(()->shareExpression(a));
+        items.add("打开设置");picks.add(this::openSettings);
+        AlertDialog menu=new AlertDialog.Builder(this).setTitle(a.pet.label).setItems(items.toArray(new String[0]),(d,i)->picks.get(i).run()).setNegativeButton("取消",null).create();
         menu.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);menu.show();
+    }
+    /** 分享表情（Claude）：把它现在播的 GIF 用系统分享发出去（电脑版的「复制这个表情」）。 */
+    private void shareExpression(Actor a){
+        String asset=a.view.asset();
+        if(asset==null||asset.isEmpty()){Toast.makeText(this,"这个表情还没加载好",Toast.LENGTH_SHORT).show();return;}
+        try{
+            android.net.Uri uri=ShareProvider.copy(this,asset,a.pet.name+"_"+a.action);
+            Intent send=new Intent(Intent.ACTION_SEND).setType("image/gif").putExtra(Intent.EXTRA_STREAM,uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            send.setClipData(android.content.ClipData.newRawUri(a.pet.name,uri));
+            startActivity(Intent.createChooser(send,"分享这个表情").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        }catch(java.io.IOException|RuntimeException e){Toast.makeText(this,"分享没成功，再试一次吧",Toast.LENGTH_SHORT).show();}
     }
     /** 演示前把这只从别的事里拉出来，站回地上。 */
     private void freeForScene(Actor a){
@@ -851,8 +895,9 @@ public final class PetService extends Service {
     private void showcase(){
         show.removeCallbacksAndMessages(null);
         Runnable[] steps={this::bounceParty,this::hangDemo,this::weatherDemoStart,this::helpUpDemo,this::blanketDemo,this::teaseDemo,this::fightDemoStart,
-            this::snackDemo,this::chaseDemo,this::yawnDemo,this::readDemo,this::watchDemo,this::catchDemo,this::swapDemo,this::hobbyDemo,this::tailsDemo,this::tailquiltDemo,this::stackDemo,this::catDemo};
-        long[] at={0,9000,18000,68000,84000,100000,116000,140000,158000,170000,184000,204000,220000,232000,244000,272000,284000,300000,316000};
+            this::snackDemo,this::chaseDemo,this::yawnDemo,this::readDemo,this::watchDemo,this::catchDemo,this::swapDemo,this::hobbyDemo,this::tailsDemo,this::tailquiltDemo,this::stackDemo,this::catDemo,
+            this::festivalDemoStart,this::birthdayDemo,this::anniversaryDemo,this::remindDemo,this::nestDemo,this::focusDemo};
+        long[] at={0,9000,18000,68000,84000,100000,116000,140000,158000,170000,184000,204000,220000,232000,244000,272000,284000,300000,316000,330000,350000,358000,366000,380000,410000};
         for(int i=0;i<steps.length;i++)show.postDelayed(steps[i],at[i]);
     }
     // ---- 叠叠乐（Claude）：照电脑版 tryStack / scatter ----
@@ -947,7 +992,7 @@ public final class PetService extends Service {
         endHug();cancelStory();cancelScene();long now=SystemClock.uptimeMillis();if(!stack.isEmpty())scatter(now);
         for(Actor a:actors){
             if(a.dragging)continue;
-            a.sleeping=false;
+            a.sleeping=false;if(a.nest!=0){a.nest=0;a.nestAfter=now+600_000;}
             a.perch=a.target=null;a.hopStart=0;a.falling=false;a.direction=0;a.nextHop=now+8000;
             a.hang=0;a.rainbowAfter=false;
             a.ballEnd=now+4500;a.ballX=(random.nextBoolean()?1:-1)*unit*3;a.ballY=-unit*5;
@@ -978,16 +1023,19 @@ public final class PetService extends Service {
             if(now>=nextLiveCheck){nextLiveCheck=now+60000;DeliveryCompanion.refreshLive();}
             delivery=DeliveryCompanion.liveLabel(DeliveryCompanion.nowMinute());
         }else if(DeliveryCompanion.live!=null)DeliveryCompanion.live=null;
+        if(label.isEmpty()&&now<tellUntil)label=tellText; // 伙伴说的话（提醒、过节、纪念日、专注）
         boolean live=label.isEmpty()&&!delivery.isEmpty();
         if(live)label=delivery;
         long remaining=prefs.getLong("timerEnd",0)-System.currentTimeMillis();
         if(SystemClock.elapsedRealtime()<timerFinishedUntil)label="⏱ 时间到啦";
         else if(label.isEmpty()&&remaining>0)label=String.format(java.util.Locale.ROOT,"⏱ %02d:%02d",remaining/60000,(remaining/1000)%60);
+        long focusLeft=prefs.getLong("focusEnd",0)-System.currentTimeMillis();
+        if(label.isEmpty()&&focusing&&focusLeft>0)label="🍅 专注中 · 还剩 "+((focusLeft+59_999)/60_000)+" 分钟";
         boolean mediaLabel=false;
         if(label.isEmpty()&&prefs.getBoolean("islandMedia",false)&&!media.title.isEmpty()){label=(media.playing?"♫ ":"Ⅱ ")+media.title;mediaLabel=true;}
         if(label.isEmpty()&&prefs.getBoolean("islandBattery",false))label=batteryLabel;
         if(label.isEmpty()&&prefs.getBoolean("island",false)){
-            if(prefs.getBoolean("companion",false)&&Perch.typing(now,InterfaceCompanion.snapshot.input))label="🐾 陪你打字中";
+            if(prefs.getBoolean("companion",false)&&Perch.typing(now,InterfaceCompanion.snapshot.input)){label="🐾 陪你打字中";mediaLabel=true;} // 打字时照常播敲代码，不挂
             else if("video".equals(companionMode)){label="🐾 陪你看视频";mediaLabel=true;}
             else if("music".equals(companionMode)){label="♫ 一起摇摆";mediaLabel=true;}
         }
@@ -1038,8 +1086,10 @@ public final class PetService extends Service {
     /** 选好的伙伴（默认第一只出来的）在通知提示条出现时挂上去；提示条消失或换成别的内容就落回地面。 */
     private void updateHanger(long now,android.content.SharedPreferences prefs){
         // 提示条一出现（通知、充电、计时、音乐、陪伴状态都算）就挂上去，提示条消失再掉下来
-        // 听音乐、看视频时（提示条在放音乐 / 陪看视频，或应用联动正在看视频、跳舞）不挂，照常陪着播动作；别的提示都挂
-        boolean media=!islandMessage.startsWith("演示")&&(islandMediaShown||"video".equals(companionMode)||"music".equals(companionMode));
+        // 听音乐、看视频、打字时（提示条在放音乐 / 陪看视频，或应用联动正在看视频、跳舞）不挂，照常陪着播动作；别的提示都挂
+        // 打字时也一样：照常播敲代码，不挂（Claude，2026-10-08）
+        boolean typing=now<typingDemoUntil||(prefs.getBoolean("companion",false)&&Perch.typing(now,InterfaceCompanion.snapshot.input));
+        boolean media=!islandMessage.startsWith("演示")&&(islandMediaShown||typing||"video".equals(companionMode)||"music".equals(companionMode));
         boolean want=island!=null&&island.isLaidOut()&&now>=hangSkipUntil&&!media
             &&(prefs.getBoolean("islandHang",false)||islandMessage.startsWith("演示"));
         Actor chosen=null;
@@ -1175,9 +1225,221 @@ public final class PetService extends Service {
     private void hideIsland(){hangSkipUntil=0; // 下次提示条出来又可以挂
         if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}}
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
-    private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();if(islandPanel!=null)islandPanel.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
-    private void clearActors(){hideIsland();hugA=hugB=null;storyKind=null;storyPet=storyDog=null;sceneA=sceneB=null;sceneSteps.clear();sceneStep=null;fightDemo=false;stack.clear();clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
-    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();endHug();cancelStory();cancelScene();if(!stack.isEmpty())scatter(SystemClock.uptimeMillis());InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.hang=0;a.rainbowAfter=false;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
-    @Override public void onDestroy(){destroyed=true;closeInspector();show.removeCallbacksAndMessages(null);if(islandPanel!=null)islandPanel.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
+    private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();hideNest();if(islandPanel!=null)islandPanel.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
+    private void clearActors(){hideIsland();hideNest();hugA=hugB=null;storyKind=null;storyPet=storyDog=null;sceneA=sceneB=null;sceneSteps.clear();sceneStep=null;fightDemo=false;stack.clear();clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
+    @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();hideNest();for(Actor a:actors){if(a.nest!=0){a.nest=0;a.sleeping=false;}}endHug();cancelStory();cancelScene();if(!stack.isEmpty())scatter(SystemClock.uptimeMillis());InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.hang=0;a.rainbowAfter=false;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
+    @Override public void onDestroy(){destroyed=true;closeInspector();hideNest();show.removeCallbacksAndMessages(null);if(islandPanel!=null)islandPanel.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent i){return null;}
+
+    // ---- 过节 / 生日 / 在一起多少天（Claude）：照电脑版 lib/calendar.js、lib/diary.js、pets.js 的 maybeCelebrate ----
+    /** 农历的 {月, 日}；闰月算 0（不算正月）。 */
+    private static int[] lunar(long millis){
+        try{android.icu.util.ChineseCalendar c=new android.icu.util.ChineseCalendar();c.setTimeInMillis(millis);
+            boolean leap=c.get(android.icu.util.ChineseCalendar.IS_LEAP_MONTH)==1;
+            return new int[]{leap?0:c.get(android.icu.util.Calendar.MONTH)+1,c.get(android.icu.util.Calendar.DAY_OF_MONTH)};}
+        catch(RuntimeException e){return new int[]{0,0};}
+    }
+    /** 每分钟看一次今天是什么日子；开关「过节、生日、纪念日」默认关闭。 */
+    private void checkDay(long now,android.content.SharedPreferences prefs){
+        if(now<nextDayCheck)return;nextDayCheck=now+60_000;
+        long today=java.time.LocalDate.now().toEpochDay();
+        if(!prefs.contains("firstDay"))prefs.edit().putLong("firstDay",today).apply(); // 第一次打开的日子
+        boolean on=prefs.getBoolean("celebrate",false);
+        java.util.Calendar c=java.util.Calendar.getInstance();
+        int month=c.get(java.util.Calendar.MONTH)+1,day=c.get(java.util.Calendar.DAY_OF_MONTH);
+        int[] lt=lunar(c.getTimeInMillis()),ln=lunar(c.getTimeInMillis()+86_400_000L);
+        String fest=on?CalendarRules.festival(month,day,lt[0],lt[1],ln[0],ln[1]):null;
+        Set<String> born=new HashSet<>();
+        if(on){String md=CalendarRules.monthDay(month,day);for(Catalog.Pet pet:catalog.pets)if(md.equals(prefs.getString("birthday:"+pet.name,"")))born.add(pet.name);}
+        boolean changed=!java.util.Objects.equals(fest,festivalToday)||!born.equals(birthdayNames);
+        festivalToday=fest;birthdayNames.clear();birthdayNames.addAll(born);
+        if(changed)for(Actor a:actors)a.nextCelebrate=fest!=null||!born.isEmpty()?now+2000+random.nextInt(6000):0;
+        long days=CalendarRules.daysTogether(prefs.getLong("firstDay",today),today);
+        if(on&&CalendarRules.isAnniversary(days)&&prefs.getLong("celebratedDays",0)!=days){
+            prefs.edit().putLong("celebratedDays",days).apply();clock.postDelayed(()->celebrateTogether(days),3000);
+        }
+    }
+    /** 过节 / 生日当天时不时播一下（3～6 分钟一次），过生日的那只六成机会播「生日」。 */
+    private boolean maybeCelebrate(Actor a,long now){
+        if(focusing||a.nextCelebrate==0||now<a.nextCelebrate)return false;
+        boolean birthday=birthdayNames.contains(a.pet.name)&&a.pet.clips.has("生日");
+        String fest=festivalToday!=null&&a.pet.clips.has(festivalToday)?festivalToday:null;
+        if(!birthday&&fest==null){a.nextCelebrate=0;return false;}
+        a.nextCelebrate=now+180_000+random.nextInt(180_000);
+        String clip=birthday&&(fest==null||random.nextFloat()<.6f)?"生日":fest;
+        a.direction=0;a.play(clip,4000);
+        if("生日".equals(clip)&&now-lastBirthdayTell>60_000){lastBirthdayTell=now;tell(NICK+"，今天是"+a.pet.name+"的生日 🎂",6000);}
+        return true;
+    }
+    private void celebrateTogether(long days){
+        long now=SystemClock.uptimeMillis();
+        for(Actor a:actors)if(storyFree(a)&&!a.sleeping&&a.pet.clips.has("纪念日")){a.direction=0;a.play("纪念日",4000);}
+        tell(NICK+"，我们在一起第 "+days+" 天啦",8000);
+    }
+    /** 手机上没有气泡：伙伴说的话显示在提示条上。 */
+    private void tell(String text,long ms){tellText=text;tellUntil=SystemClock.uptimeMillis()+ms;islandDismissed=0;}
+    // ---- 时间提醒（Claude）：0～5 点每 20 分钟催睡觉，12 点、18 点左右提醒吃饭；默认关闭，专注时不打扰 ----
+    private void checkClock(long now,android.content.SharedPreferences prefs){
+        if(!prefs.getBoolean("timeRemind",false))return;
+        java.util.Calendar c=java.util.Calendar.getInstance();
+        int hour=c.get(java.util.Calendar.HOUR_OF_DAY),minute=hour*60+c.get(java.util.Calendar.MINUTE);
+        if(CalendarRules.nagNight(hour)){
+            if(lastNightNag==0||now-lastNightNag>=CalendarRules.NIGHT_EVERY){lastNightNag=now;if(!focusing)remind("睡觉",NICK+"，该睡觉啦",6000);}
+        }else lastNightNag=0;
+        int meal=CalendarRules.meal(minute);
+        if(meal>=0&&mealsDone.add(java.time.LocalDate.now()+"-"+meal)&&!focusing)remind("吃饭",NICK+"，该吃饭啦",4000);
+    }
+    /** 提醒：能动的伙伴都做个动作，话写在提示条上；窝里睡着的不吵它。 */
+    private void remind(String clip,String text,long ms){
+        for(Actor a:actors)if(storyFree(a)&&!a.sleeping){a.direction=0;a.play(a.pet.clips.has(clip)?clip:"开心蹦蹦",ms);}
+        tell(text,8000);
+    }
+    // ---- 小窝（Claude）：屏幕左下角两层图（后层在伙伴下面、前层盖在上面）；晚上 11 点后困了回窝挤着睡，早上 7 点后或被摸醒出来 ----
+    private void updateNest(long now,android.content.SharedPreferences prefs){
+        boolean on=(prefs.getBoolean("nest",false)||now<nestDemoUntil)&&catalog.nest!=null&&screenOn&&!paused;
+        if(on&&nestBack==null)showNest();else if(!on&&nestBack!=null){for(Actor a:actors)if(a.nest!=0){a.nest=0;a.sleeping=false;a.play(idle(a),0);}hideNest();}
+        if(nestBack==null||now<nextNestCheck||now<nestDemoUntil)return;
+        nextNestCheck=now+30_000;
+        int hour=java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+        if(CalendarRules.night(hour)){
+            if(focusing)return;
+            for(Actor a:actors)if(a.nest==0&&now>=a.nestAfter&&free(a)&&random.nextFloat()<("芝麻".equals(a.pet.skin)?.5f:.25f))goToNest(a); // 芝麻困得快
+        }else{
+            int i=0;for(Actor a:actors)if(a.nest==2&&a.nightSleep){Actor x=a;clock.postDelayed(()->leaveNest(x),i++*1500L);} // 早上一个一个出来
+        }
+    }
+    private android.widget.ImageView nestImage(String part) throws java.io.IOException {
+        try(java.io.InputStream in=getAssets().open(catalog.nest.optString(part))){
+            android.graphics.drawable.BitmapDrawable art=new android.graphics.drawable.BitmapDrawable(getResources(),android.graphics.BitmapFactory.decodeStream(in));
+            art.setFilterBitmap(false); // 像素图整像素放大
+            android.widget.ImageView view=new android.widget.ImageView(this);view.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);view.setImageDrawable(art);return view;
+        }
+    }
+    @android.annotation.SuppressLint("RtlHardcoded")
+    private WindowManager.LayoutParams nestParams(){
+        WindowManager.LayoutParams p=new WindowManager.LayoutParams(nestW,nestH,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,PixelFormat.TRANSLUCENT);
+        p.gravity=Gravity.TOP|Gravity.LEFT;p.x=nestLeft();p.y=Math.max(0,height-nestH);return p;
+    }
+    private int nestLeft(){return Math.round(8*getResources().getDisplayMetrics().density);}
+    private float nestCenter(){return nestLeft()+nestW/2f;}
+    /** 后层先放，伙伴的窗口重新放一遍（叠在后层上面），最后放前层。 */
+    private void showNest(){
+        nestW=Math.min(width,Math.round(unit*460f/300f));nestH=Math.round(nestW*120f/460f);
+        try{
+            nestBack=nestImage("back");nestFront=nestImage("front");
+            windows.addView(nestBack,nestParams());
+            for(Actor a:actors)if(a.view.isAttachedToWindow()){windows.removeView(a.view);windows.addView(a.view,a.pos);}
+            windows.addView(nestFront,nestParams());
+        }catch(java.io.IOException|RuntimeException e){hideNest();}
+        refreshPetsShown();
+    }
+    private void refreshPetsShown(){for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB&&!(stack.contains(a)&&a!=stack.get(0));a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
+    private void hideNest(){
+        for(android.widget.ImageView v:new android.widget.ImageView[]{nestBack,nestFront})if(v!=null&&v.isAttachedToWindow())try{windows.removeView(v);}catch(RuntimeException ignored){}
+        nestBack=nestFront=null;
+    }
+    private void goToNest(Actor a){
+        if(nestBack==null||a.nest!=0)return;
+        a.nest=1;a.direction=0;a.until=0;a.reading=false;a.thenClip=null;yawnQueue.remove(a);
+    }
+    private void walkToNest(Actor a,long now,float dt){
+        float goal=nestCenter()-a.pos.width/2f,d=goal-a.x;
+        if(Math.abs(d)<unit*.05f){settleNest(a);return;}
+        int dir=d<0?-1:1;String clip=dir<0?"犯困向左走":"犯困向右走";if(!a.pet.clips.has(clip))clip=dir<0?"向左走":"向右走";
+        if(!a.action.equals(clip))a.play(clip,0);
+        a.x+=dir*Math.min(Math.abs(d),unit*.35f*dt);position(a);
+    }
+    private void settleNest(Actor a){
+        a.nest=2;a.sleeping=true;a.direction=0;a.until=0;
+        a.nightSleep=CalendarRules.night(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY));
+        a.play("睡觉",0);arrangeNest();
+    }
+    /** 窝里睡的挤在一起。 */
+    private void arrangeNest(){
+        List<Actor> sleepers=new ArrayList<>();for(Actor a:actors)if(a.nest==2)sleepers.add(a);
+        for(int i=0;i<sleepers.size();i++){Actor a=sleepers.get(i);a.perch=null;a.x=nestCenter()-a.pos.width/2f+CalendarRules.nestOffset(i,sleepers.size(),unit,nestW);a.y=a.floor();position(a);}
+    }
+    private void leaveNest(Actor a){
+        if(a.nest!=2)return;
+        a.nest=0;a.sleeping=false;a.until=0;a.direction=walking?1:0;a.play(a.direction>0?"向右走":idle(a),0);a.decision=SystemClock.uptimeMillis()+3000;arrangeNest();
+    }
+    // ---- 番茄钟（Claude）：专注 25 分钟、休息 5 分钟；专注时伙伴安静陪着，结束提醒休息 ----
+    private static final long FOCUS_MS=25*60_000L,REST_MS=5*60_000L;
+    private void startFocus(){
+        getSharedPreferences("pets",MODE_PRIVATE).edit().putLong("focusEnd",System.currentTimeMillis()+FOCUS_MS).putLong("restEnd",0).apply();
+        getSystemService(NotificationManager.class).cancel(10);
+        applyFocus(true);tell("🍅 开始专注 25 分钟，大家安静陪着你",5000);
+    }
+    private void stopFocus(){
+        getSharedPreferences("pets",MODE_PRIVATE).edit().remove("focusEnd").remove("restEnd").apply();
+        applyFocus(false);
+    }
+    private void applyFocus(boolean on){
+        if(focusing==on)return;
+        focusing=on;
+        if(on){cancelScene();yawnQueue.clear();}
+        for(Actor a:actors)if(storyFree(a)&&!a.sleeping){a.direction=0;a.until=0;a.play(idle(a),0);}
+        if(!destroyed)getSystemService(NotificationManager.class).notify(7,notification());
+    }
+    /** 每次循环都看一下（息屏也看）：专注到点 → 叫你休息；休息到点 → 问要不要继续。 */
+    private void checkFocus(){
+        android.content.SharedPreferences p=getSharedPreferences("pets",MODE_PRIVATE);
+        long end=p.getLong("focusEnd",0),wall=System.currentTimeMillis();
+        boolean should=end>wall||SystemClock.uptimeMillis()<focusDemoUntil;
+        if(focusing&&!should&&end>0){p.edit().remove("focusEnd").putLong("restEnd",wall+REST_MS).apply();applyFocus(false);focusDone(true);}
+        else if(should!=focusing)applyFocus(should);
+        long rest=p.getLong("restEnd",0);
+        if(rest>0&&wall>=rest){p.edit().remove("restEnd").apply();tell("休息好啦～",6000);focusNotice("🍅 休息好啦","继续专注吗？点「继续专注」",true);}
+    }
+    private void focusDone(boolean notify){
+        for(Actor a:actors)if(storyFree(a)&&!a.sleeping){a.direction=0;a.play("开心蹦蹦",3000);}
+        tell(NICK+"，专注结束啦，休息一下吧",8000);
+        if(notify)focusNotice("🍅 专注结束啦","休息 5 分钟吧",false);
+    }
+    private void focusNotice(String title,String text,boolean again){
+        Notification.Builder b=new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setColor(0xFFEFA7C0).setLargeIcon(android.graphics.drawable.Icon.createWithResource(this,R.drawable.ic_qianqian_large)).setContentTitle(title).setContentText(text).setAutoCancel(true);
+        if(again)b.addAction(new Notification.Action.Builder(null,"继续专注",PendingIntent.getService(this,5,new Intent(this,PetService.class).setAction("focus-start"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT)).build());
+        getSystemService(NotificationManager.class).notify(10,b.build());
+    }
+    // ---- 第五批的演示（Claude） ----
+    private static final List<String> FIFTH_CAST=Arrays.asList(CAT,DOG,BUNNY);
+    private void festivalDemoStart(){
+        if(!ensureCast(FIFTH_CAST,1.3f))return;
+        String[] list={"国庆","万圣节","圣诞","春节"};
+        for(int i=0;i<=list.length;i++){int k=i;show.postDelayed(()->{
+            festivalDemo=k<list.length?list[k]:null;
+            for(Actor a:actors)if(storyFree(a)&&!a.sleeping){a.direction=0;a.until=0;a.play(idle(a),0);}
+            if(k<list.length)tell("演示：过节 · "+list[k]+"（"+(k+1)+"/"+list.length+"）",3200);
+        },i*3500L);}
+    }
+    private void birthdayDemo(){
+        if(!ensureCast(FIFTH_CAST,1.3f))return;
+        long now=SystemClock.uptimeMillis();
+        for(Actor a:actors)if(a.pet.clips.has("生日")){a.direction=0;a.play("生日",4000);}
+        tell("演示：在设置「宠物生日」里设好，那天会过生日 🎂",5000);lastBirthdayTell=now;
+    }
+    private void anniversaryDemo(){
+        if(!ensureCast(FIFTH_CAST,1.3f))return;
+        android.content.SharedPreferences p=getSharedPreferences("pets",MODE_PRIVATE);
+        long today=java.time.LocalDate.now().toEpochDay();
+        celebrateTogether(CalendarRules.daysTogether(p.getLong("firstDay",today),today));
+    }
+    private void remindDemo(){
+        if(!ensureCast(FIFTH_CAST,1.3f))return;
+        remind("睡觉","演示："+NICK+"，该睡觉啦（0～5 点每 20 分钟）",4000);
+        show.postDelayed(()->remind("吃饭","演示："+NICK+"，该吃饭啦（12 点、18 点左右）",4000),5000);
+    }
+    private void nestDemo(){
+        if(!ensureCast(FIFTH_CAST,1.6f))return;
+        long now=SystemClock.uptimeMillis();nestDemoUntil=now+26_000;
+        updateNest(now,getSharedPreferences("pets",MODE_PRIVATE));
+        tell("演示：晚上 11 点后困了就回小窝睡",5000);
+        int i=0;for(Actor a:actors){Actor x=a;show.postDelayed(()->goToNest(x),300+i++*700L);}
+        show.postDelayed(()->{tell("演示：早上 7 点后（或者摸一下）就出来",5000);int k=0;for(Actor a:actors){Actor x=a;show.postDelayed(()->leaveNest(x),k++*1500L);}},16_000);
+    }
+    private void focusDemo(){
+        if(!ensureCast(Arrays.asList(CAT,G,DOG),1.3f))return;
+        focusDemoUntil=SystemClock.uptimeMillis()+9000;applyFocus(true);tell("演示：🍅 专注时大家安静陪着你（g老师看书）",5000);
+        show.postDelayed(()->{if(getSharedPreferences("pets",MODE_PRIVATE).getLong("focusEnd",0)>System.currentTimeMillis())return;focusDemoUntil=0;applyFocus(false);focusDone(false);},9100);
+    }
 }

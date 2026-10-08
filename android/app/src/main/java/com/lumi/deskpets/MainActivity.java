@@ -68,6 +68,18 @@ public final class MainActivity extends Activity {
         weatherStatus=text("",14,false);
         button("选择天气地点",()->chooseWeatherPlace());
         text("和电脑版一样：下雨、下雪、起雾、打雷、很热、降温时换成对应的待机，平时按春夏秋冬换装，晚上晴天是晴夜。不申请定位权限：地点自己选省、市、区县，只把那里的经纬度发给天气服务 open-meteo，开着桌宠时最多 30 分钟查一次；查不到就用普通待机。只换平时的待机，不打断摸摸、拖动、贴贴和陪打字。",13,false);
+        text("过节、提醒、小窝和番茄钟",21,true);
+        long today=java.time.LocalDate.now().toEpochDay();
+        if(!prefs.contains("firstDay"))prefs.edit().putLong("firstDay",today).apply(); // 第一次打开的日子，第 1 天
+        option("celebrate","过节、生日、在一起的纪念日");
+        text("和千千在一起第 "+CalendarRules.daysTogether(prefs.getLong("firstDay",today),today)+" 天",14,false);
+        button("宠物生日",()->chooseBirthday());
+        option("timeRemind","时间提醒（半夜催睡觉、饭点提醒吃饭）");
+        option("nest","小窝（晚上困了回窝挤着睡）");
+        LinearLayout focusRow=new LinearLayout(this);page.addView(focusRow);
+        smallButton(focusRow,"🍅 开始专注 25 分钟",()->startPets("focus-start"));
+        smallButton(focusRow,"结束专注",()->startPets("focus-stop"));
+        text("和电脑版一样：国庆、万圣节、圣诞、春节当天伙伴换上节日动画，时不时庆祝一下；设好生日的伙伴那天会过生日；从第一次打开算起，第 7、30、100、200 天和每满一年大家一起庆祝。时间提醒在 0～5 点每 20 分钟催你睡觉，12 点、18 点左右提醒吃饭，话写在顶部提示条上。小窝放在屏幕左下角，晚上 11 点后困了的伙伴走回窝里挤着睡，早上 7 点后或者被摸醒就出来。番茄钟也能从通知栏的「🍅 专注」开始：专注时伙伴安静陪着（g老师看书），25 分钟后提醒休息 5 分钟，休息完问要不要继续。长按伙伴可以「分享这个表情」。这些都默认关闭。",13,false);
         text("摇一摇和灵动提示",21,true);
         option("motion","重力与摇晃互动");
         text("轻轻连续晃动会让宠物像弹力球一样摇晃着蹦几秒，落地后吐出一道彩虹；飞起来时倾斜手机可改变方向。无需用力摇。",13,false);
@@ -83,7 +95,7 @@ public final class MainActivity extends Activity {
                 long minutes=new long[]{1,5,15,25,0}[i];prefs.edit().putLong("timerEnd",minutes==0?0:System.currentTimeMillis()+minutes*60000).apply();startPets("start");}).show());
         text("提示条出现时（通知、充电、计时都算；听音乐、看视频时不挂，照常陪你看视频、跳舞），选好的伙伴会跑到提示条下面挂着，提示条消失后再落回地面；默认是第一只出来的伙伴。点顶部提示条可展开音乐控制和计时器。音乐与通知来源需要下方的通知访问授权；通知仅显示你选中应用的标题。计时器不是系统闹钟，桌宠被强制关闭后不能保证准时提醒。",13,false);
         option("delivery","外卖通知提示（灵动岛显示预计送达倒计时）");
-        text("外卖提示需单独授予通知访问权限。只在本机临时匹配美团/美团外卖/饿了么的取餐通知标题和正文，不保存或上传，不读取其他应用通知。仅转述通知，不能查询订单或保证外卖真的送达。",13,false);
+        text("外卖提示需单独授予通知访问权限。只在本机内存里读美团 / 饿了么的通知，或标题、正文里带送达、骑手、取餐、配送、商家的通知；读到「预计 HH:mm 送达」才显示倒计时，不保存、不上传、不写日志。仅转述通知，不能查询订单或保证外卖真的送达。",13,false);
         button("允许音乐与通知访问",()->{
             stopService(new Intent(this,PetService.class));pendingStart=true;
             try{startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));}catch(ActivityNotFoundException e){toast("请在系统设置中搜索通知使用权");}
@@ -112,11 +124,11 @@ public final class MainActivity extends Activity {
         button("应用选择和大小",()->startPets("start"));
         button("试试贴贴 ♡",()->startPets("hug"));
         button("测试动作 / 功能展示",()->new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
-            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "外卖通知检查（看通知里能读到什么）", "挑衅哥哥（千千猫猫 / 梨梨兔兔轮流）", "两个哥哥打架和好", "送零食（千千猫猫 / 梨梨兔兔轮流）", "煤球猫猫追着玩", "打哈欠会传染", "g老师看书 + 哥哥批改作业", "g老师看书睡着被围观", "g老师摔倒接眼镜", "哥哥和g老师换眼镜", "沙漠狐的小爱好", "两只狐狸比尾巴", "两只狐狸尾巴被子", "叠叠乐（拖一只放到另一只头上）", "百变猫猫换一只", "功能展示：从摇晃到叠叠乐、百变猫猫全部演一遍"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-inspect","test-tease","test-fight","test-snack","test-chase","test-yawn","test-read","test-watch","test-catch","test-swap","test-hobby","test-tails","test-tailquilt","test-stack","test-cat","test-show"}[which])).show());
+            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "外卖通知检查（看通知里能读到什么）", "挑衅哥哥（千千猫猫 / 梨梨兔兔轮流）", "两个哥哥打架和好", "送零食（千千猫猫 / 梨梨兔兔轮流）", "煤球猫猫追着玩", "打哈欠会传染", "g老师看书 + 哥哥批改作业", "g老师看书睡着被围观", "g老师摔倒接眼镜", "哥哥和g老师换眼镜", "沙漠狐的小爱好", "两只狐狸比尾巴", "两只狐狸尾巴被子", "叠叠乐（拖一只放到另一只头上）", "百变猫猫换一只", "过节（国庆 / 万圣节 / 圣诞 / 春节）", "过生日", "在一起的纪念日", "时间提醒（睡觉、吃饭）", "回小窝睡觉 → 早上出来", "番茄钟专注", "功能展示：从摇晃到小窝、番茄钟全部演一遍"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-inspect","test-tease","test-fight","test-snack","test-chase","test-yawn","test-read","test-watch","test-catch","test-swap","test-hobby","test-tails","test-tailquilt","test-stack","test-cat","test-festival","test-birthday","test-anniversary","test-remind","test-nest","test-focus","test-show"}[which])).show());
         text("哥哥狗狗和电脑版一样会照顾大家：有伙伴摔趴趴，它会走过去扶起来；晚上 11 点到早上 6 点，千千猫猫睡着时，它会过去盖被子（一晚一次），盖好后两只一起睡，摸一下才醒。演示会自动把千千猫猫和哥哥狗狗放出来。",13,false);
         text("和电脑版一样会闹：千千猫猫离哥哥狗狗近时偶尔挑衅它，梨梨兔兔也会挑衅梨梨哥哥，10 分钟里被挑衅超过 3 次哥哥直接投降；长按千千猫猫或梨梨兔兔也能叫它去挑衅。哥哥狗狗和梨梨哥哥贴贴完会打一架，冷静大约 3 分钟后再碰到先和好再贴贴。拖动、摸摸随时能打断。",13,false);
         text("平时还会：千千猫猫和梨梨兔兔互相送零食；煤球猫猫突然冲过去追着玩；一只打哈欠，旁边的跟着打；g老师偶尔看书，有伙伴挨过来就一起看（哥哥狗狗来是批改作业），看着看着会打瞌睡被围观，摔倒时旁边的伙伴帮忙接眼镜，偶尔和哥哥狗狗换眼镜；沙漠狐玩自己的小爱好，和 99狐狐 比尾巴，晚上两只一起睡时用尾巴当被子。",13,false);
-        text("贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫这一版先手动选花色。",13,false);
+        text("贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫会自动轮换，双击换下一只，也能在上面锁定一只。",13,false);
         text("第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。",13,false);
         text("只有检查更新（只连 GitHub 上桌宠的发布页）和打开天气后查天气（只发所选地点的经纬度）时联网。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。",13,false);
         text("更新",21,true);
@@ -189,6 +201,27 @@ public final class MainActivity extends Activity {
             }).setNegativeButton("返回",null).show();
         }catch(Exception e){toast("素材没有加载成功");}
     }
+    /** 宠物生日（Claude）：选一只，填「3-14」「3/14」「3月14日」都行，空着就是清除。 */
+    private void chooseBirthday(){
+        try{
+            Catalog catalog=new Catalog(this);
+            java.util.List<String> names=new ArrayList<>();
+            for(Catalog.Pet pet:catalog.pets)if(!names.contains(pet.name))names.add(pet.name);
+            String[] labels=new String[names.size()];
+            for(int i=0;i<names.size();i++){String b=prefs.getString("birthday:"+names.get(i),"");labels[i]=names.get(i)+(b.isEmpty()?"（没设）":"（"+b+"）");}
+            new AlertDialog.Builder(this).setTitle("宠物生日").setItems(labels,(d,i)->{
+                String name=names.get(i);android.widget.EditText input=new android.widget.EditText(this);
+                input.setHint("比如 3-14");input.setText(prefs.getString("birthday:"+name,""));input.setSingleLine(true);
+                new AlertDialog.Builder(this).setTitle(name+"的生日").setView(input).setPositiveButton("保存",(d2,w)->{
+                    String raw=input.getText().toString().trim();
+                    if(raw.isEmpty()){prefs.edit().remove("birthday:"+name).apply();toast("清除好啦");return;}
+                    String md=CalendarRules.normalizeBirthday(raw);
+                    if(md.isEmpty()){toast("没看懂这个日期，写成 3-14 试试");return;}
+                    prefs.edit().putString("birthday:"+name,md).apply();toast(name+"的生日是 "+md+" 🎂");
+                }).setNegativeButton("取消",null).show();
+            }).setNegativeButton("返回",null).show();
+        }catch(Exception e){toast("素材没有加载成功");}
+    }
     private void chooseIslandPet(){
         try{
             Catalog catalog=new Catalog(this);
@@ -214,7 +247,7 @@ public final class MainActivity extends Activity {
             try{startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName())));}catch(ActivityNotFoundException e){pendingStart=false;toast("请在系统设置中允许桌宠显示悬浮窗");}return;
         }
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},3);
-        try{startForegroundService(new Intent(this,PetService.class).setAction(action));toast(action.equals("hug")?"让伙伴们试试贴贴":"可以回到桌面看伙伴啦");}catch(RuntimeException e){toast("暂时无法开启，请回到应用再试一次");}
+        try{startForegroundService(new Intent(this,PetService.class).setAction(action));toast(action.equals("hug")?"让伙伴们试试贴贴":action.equals("focus-start")?"开始专注啦 🍅":action.equals("focus-stop")?"专注结束啦":"可以回到桌面看伙伴啦");}catch(RuntimeException e){toast("暂时无法开启，请回到应用再试一次");}
     }
     // ---- 更新（Claude）：查 GitHub 上的安卓发布页，有新版就问要不要下载，下载好打开系统安装界面 ----
     private String pendingVersion,pendingUrl;

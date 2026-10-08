@@ -139,3 +139,19 @@ test('Android 叠叠乐 only stacks allowed pets, at most three high, with share
     assert.ok(new Set(Object.values(stacks)).size < keys.length, '同一个动画只打包一份');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Android ships festival, birthday, anniversary, focus and sleepy clips plus the two nest layers (Claude)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-batch5-'));
+  try {
+    const { pets, nest } = prepare(dir);
+    for (const p of pets) {
+      const folder = path.join(__dirname, '..', '桌宠素材', p.skin ? `${p.name}/${p.skin}` : p.name);
+      for (const clip of ['国庆', '万圣节', '圣诞', '春节', '生日', '纪念日', '专注', '犯困向左走', '犯困向右走', '睡觉', '吃饭']) {
+        if (fs.existsSync(path.join(folder, `${clip}.gif`))) assert.ok(p.clips[clip], `${p.label} ${clip}`);
+      }
+    }
+    for (const name of ['千千猫猫', '哥哥狗狗', '梨梨兔兔']) for (const clip of ['生日', '纪念日', '专注']) assert.ok(pets.find(p => p.name === name).clips[clip], `${name} ${clip}`);
+    assert.ok(pets.find(p => p.name === '灰鸮g老师').clips['互动_看书'], 'g老师专注时看书');
+    for (const part of ['back', 'front']) assert.ok(fs.existsSync(path.join(dir, nest[part])), `小窝 ${part}`);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

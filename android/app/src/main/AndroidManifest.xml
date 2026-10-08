@@ -19,6 +19,8 @@
         <service android:name=".DeliveryCompanion" android:label="外卖提示 · 梨间雪桌宠" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true">
             <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
         </service>
+        <!-- 分享表情：只在分享时临时授权给你选的应用读这一张 GIF -->
+        <provider android:name=".ShareProvider" android:authorities="com.lumi.deskpets.share" android:exported="false" android:grantUriPermissions="true" />
         <service android:name=".PetService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started interactive floating desktop pets; visible across apps until the user pauses or stops them." />
         </service>

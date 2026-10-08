@@ -16,6 +16,7 @@ final class Catalog {
     final List<Pet> pets = new ArrayList<>();
     final JSONObject hugs;
     final JSONObject island; // 灵动岛三段像素图（旧素材包没有就是 null）
+    final JSONObject nest; // 小窝前后两层（Claude）
     final JSONObject stacks; // 叠叠乐：「下>中>上」的 id → 文件
     final JSONObject stories; // 特别剧情：helpup / blanket → 宠物 id → { file, dogLeft }；fight / makeup → 「id:id」→ 文件
     // 挑衅（从电脑版 teases.js 生成）：挑衅的那只 → 被挑衅的哥哥和每种挑衅的回应步骤
@@ -31,7 +32,7 @@ final class Catalog {
             JSONArray items=root.getJSONArray("pets");
             for(int i=0;i<items.length();i++) pets.add(new Pet(items.getJSONObject(i)));
             hugs=root.getJSONObject("hugs");
-            island=root.optJSONObject("island");
+            island=root.optJSONObject("island");nest=root.optJSONObject("nest");
             JSONObject sk=root.optJSONObject("stacks");stacks=sk==null?new JSONObject():sk;
             JSONObject st=root.optJSONObject("stories");stories=st==null?new JSONObject():st;
             JSONObject t=root.optJSONObject("teases");
