@@ -4,9 +4,9 @@ package com.lumi.deskpets;
 final class ClimbRules {
     private ClimbRules(){}
     /** 歪过这个程度才算（ShakeCompanion.tilt 是 -1～1，负数是往左歪）。 */
-    static final float TILT=.35f;
+    static final float TILT=.25f; // 大约歪 15 度（Claude，2026-10-08 从 .35 调低：真机上不容易触发）
     /** 摆回这个程度以内，才能再触发下一次。 */
-    static final float REARM=.15f;
+    static final float REARM=.12f;
     /** 一直歪着这么久才去爬，手抖不算。 */
     static final long HOLD=1200;
     /** -1 往左歪，1 往右歪，0 没歪够。 */

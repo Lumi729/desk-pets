@@ -136,6 +136,7 @@ public final class PetService extends Service {
         boolean nightSleep; // 晚上睡的，早上才自己出来
         int climb; // 歪手机爬墙：0 平时，1 走到边上，2 沿边往上爬，3 在边上探头（不管就一直趴着，拖出来才掉下去）
         int climbSide; // -1 左边，1 右边
+        int climbAfter; // 歪手机时在台阶上 / 半空中：先落地，再去爬这一边
         int home; // 住在屏幕边：0 住在地面，-1 住左边，1 住右边（climb 4 = 沿边往下爬）
         float climbTo; // 爬到的高度（窗口顶边）
         long edgeNext; // 住在边上的下次换位置
@@ -353,8 +354,10 @@ public final class PetService extends Service {
             if(a.nest==1){walkToNest(a,now,dt);continue;} // 困了慢慢走回小窝
             if(a.falling){
                 float before=a.y;a.velocity+=unit*5*dt;a.y+=a.velocity*dt;
-                if(a.velocity>=0){Perch caught=Perch.catchFall(surfaces,a.x,before,a.y,unit,a.floor());if(caught!=null){a.perch=caught;a.y=caught.top-unit;a.nextHop=now+3000;}}
-                if(a.y>=a.landing()){a.y=a.landing();a.falling=false;if(a.home!=0){a.bouncing=false;a.rainbowAfter=false;a.climb=1;a.climbSide=a.home;position(a);continue;} // 住在边上的落地后走回去爬上去
+                if(a.velocity>=0&&a.climbAfter==0){Perch caught=Perch.catchFall(surfaces,a.x,before,a.y,unit,a.floor());if(caught!=null){a.perch=caught;a.y=caught.top-unit;a.nextHop=now+3000;}}
+                if(a.y>=a.landing()){a.y=a.landing();a.falling=false;
+                    if(a.climbAfter!=0&&a.perch==null){a.climb=1;a.climbSide=a.climbAfter;a.climbAfter=0;a.bouncing=false;a.rainbowAfter=false;position(a);continue;} // 落地了就去爬墙
+                    if(a.home!=0){a.bouncing=false;a.rainbowAfter=false;a.climb=1;a.climbSide=a.home;position(a);continue;} // 住在边上的落地后走回去爬上去
                     if(a.rainbowAfter)spitRainbow(a,now);else if(a.bouncing)a.play("开心蹦蹦",1400);else{a.play("摔趴趴",1400);if(!tryHelpUp(a,now))afterGFall(a,now);}a.bouncing=false;}
                 position(a);continue;
             }
@@ -444,7 +447,7 @@ public final class PetService extends Service {
         a.view.setOnTouchListener(new View.OnTouchListener(){float downX,downY,startX,startY;boolean moved,longPressed;final IslandHang.Touch hangTouch=new IslandHang.Touch();final int slop=ViewConfiguration.get(PetService.this).getScaledTouchSlop();final Runnable hold=()->{longPressed=true;a.dragging=false;a.view.performLongClick();};
             public boolean onTouch(View v,MotionEvent e){switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
-                    hangTouch.begin(a.hang!=0);a.view.animate().cancel();a.view.setTranslationX(0);
+                    hangTouch.begin(a.hang!=0);a.climbAfter=0;a.view.animate().cancel();a.view.setTranslationX(0);
                     if(stack.contains(a))scatter(SystemClock.uptimeMillis());a.catPhase=0;
                     if(a.nest!=0){a.nest=0;a.nestAfter=SystemClock.uptimeMillis()+600_000;arrangeNest();} // 被摸醒，从窝里出来
                     if(a==hugA||a==hugB)endHug();if(isStory(a))cancelStory();if(inScene(a))cancelScene();a.sleeping=false;a.reading=false;a.thenClip=null;yawnQueue.remove(a);a.rainbowAfter=false;downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
@@ -1025,6 +1028,7 @@ public final class PetService extends Service {
         endHug();cancelStory();cancelScene();long now=SystemClock.uptimeMillis();if(!stack.isEmpty())scatter(now);
         for(Actor a:actors){
             if(a.dragging||a.climb!=0)continue; // 趴在墙上的只有拖出来才下来
+            a.climbAfter=0;
             a.sleeping=false;if(a.nest!=0){a.nest=0;a.nestAfter=now+600_000;}
             a.perch=a.target=null;a.hopStart=0;a.falling=false;a.direction=0;a.nextHop=now+8000;
             a.hang=0;a.rainbowAfter=false;
@@ -1042,8 +1046,12 @@ public final class PetService extends Service {
     }
     private String liveCompanionMode(long now,android.content.SharedPreferences prefs){
         InterfaceCompanion.Snapshot state=InterfaceCompanion.snapshot;
-        return now<typingDemoUntil?"type":AppCompanion.live(prefs.getBoolean("companion",false),
-            state.pkg,prefs.getAll(),companionMode,now,prefs.getBoolean("interface",false)?state.input:0);
+        if(now<typingDemoUntil)return "type";
+        boolean enabled=prefs.getBoolean("companion",false);
+        String mode=AppCompanion.live(enabled,state.pkg,prefs.getAll(),companionMode,now,prefs.getBoolean("interface",false)?state.input:0);
+        // 网易云等放在后台播放时也一起跳舞（Claude，2026-10-08）：前台没在打字 / 看视频，又没把前台 App 设成不联动，媒体会话正在播就算听音乐
+        if(enabled&&"none".equals(mode)&&media.playing&&!"none".equals(prefs.getAll().get("app:"+state.pkg)))return "music";
+        return mode;
     }
     private void updateIsland(long now,android.content.SharedPreferences prefs,boolean unlocked){
         if(!unlocked){hideIsland();return;}
@@ -1055,7 +1063,7 @@ public final class PetService extends Service {
         if(DeliveryCompanion.noticeAt>lastNotice && SystemClock.elapsedRealtime()-DeliveryCompanion.noticeAt<15000){
             lastNotice=DeliveryCompanion.noticeAt;islandFromNotice=true;islandMessage=DeliveryCompanion.notice;islandUntil=now+7000;islandDismissed=0;
         }
-        if(now>=nextMediaCheck){nextMediaCheck=now+1500;if(prefs.getBoolean("islandMedia",false)||prefs.getBoolean("islandLyrics",false))media.refresh();else media.clear();
+        if(now>=nextMediaCheck){nextMediaCheck=now+1500;if(prefs.getBoolean("islandMedia",false)||prefs.getBoolean("islandLyrics",false)||prefs.getBoolean("companion",false))media.refresh();else media.clear(); // 应用联动也要知道后台有没有在放歌
             batteryLabel="";
             if(prefs.getBoolean("islandBattery",false)){
                 Intent battery=registerReceiver(null,new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
@@ -1556,7 +1564,7 @@ public final class PetService extends Service {
         int side=ClimbRules.side(tilt);
         if(side==0||side!=tiltSide){tiltSide=side;tiltSince=side==0?0:now;return;}
         if(!tiltArmed||now-tiltSince<ClimbRules.HOLD)return;
-        for(Actor a:actors)if(a.climb!=0&&a.home==0)return; // 同一时间最多一只（住在边上的不算）
+        for(Actor a:actors)if((a.climb!=0&&a.home==0)||a.climbAfter!=0)return; // 同一时间最多一只（住在边上的不算）
         if(hugA!=null||storyKind!=null||sceneA!=null||!stack.isEmpty())return;
         for(Actor a:actors)if(a.hang!=0)return; // 挂灵动岛时不爬
         Actor best=null;
@@ -1564,9 +1572,15 @@ public final class PetService extends Service {
         if(best==null)return;
         tiltArmed=false;startClimb(best,side);
     }
-    private boolean canClimb(Actor a){return free(a)&&a.pet.clips.has(ClimbRules.climbClip(-1))&&a.pet.clips.has(ClimbRules.climbClip(1))&&a.pet.clips.has(ClimbRules.peekClip(-1))&&a.pet.clips.has(ClimbRules.peekClip(1));}
+    /** 能去爬墙：不在拖、贴贴、剧情、叠叠乐、挂灵动岛、弹力球、小窝里；在台阶上跳来跳去、走路、半空中掉落都可以（Claude，2026-10-08 放宽）。 */
+    private boolean canClimb(Actor a){return a!=null&&!paused&&!a.dragging&&a!=hugA&&a!=hugB&&!isStory(a)&&!inScene(a)&&!stack.contains(a)&&a.catPhase==0&&a.nest==0&&a.home==0&&a.climb==0&&a.climbAfter==0&&a.hang==0&&a.ballEnd==0&&!a.sleeping&&a.pet.clips.has(ClimbRules.climbClip(-1))&&a.pet.clips.has(ClimbRules.climbClip(1))&&a.pet.clips.has(ClimbRules.peekClip(-1))&&a.pet.clips.has(ClimbRules.peekClip(1));}
     private void startClimb(Actor a,int side){
-        a.climb=1;a.climbSide=side;a.direction=0;a.until=0;a.reading=false;a.thenClip=null;a.sleeping=false;yawnQueue.remove(a);
+        a.direction=0;a.until=0;a.reading=false;a.thenClip=null;a.sleeping=false;yawnQueue.remove(a);
+        if(a.perch!=null||a.target!=null||a.hopStart!=0||a.falling||a.y<a.floor()-1){ // 在台阶上：先掉回地面再去爬
+            a.climbAfter=side;if(!a.falling)startFall(a,SystemClock.uptimeMillis());else{a.perch=a.target=null;a.hopStart=0;}
+            return;
+        }
+        a.climb=1;a.climbSide=side;
     }
     private void climbStep(Actor a,long now,float dt){
         if(a.climb==1){ // 走到那一边
