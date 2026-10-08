@@ -23,6 +23,13 @@ final class IslandHang {
     }
     static float fraction(int position, int screen, int size) { return screen <= size ? 0 : limit(position, screen, size) / (float)(screen - size); }
     static boolean dragged(float dx, float dy, int slop) { return dx * dx + dy * dy > slop * slop; }
+    /** A down/cancel event is not consent to leave the island for the whole notification. */
+    static final class Touch {
+        private boolean beganHanging, moved;
+        void begin(boolean hanging) { beganHanging=hanging; moved=false; }
+        boolean move(float dx, float dy, int slop) { moved |= dragged(dx,dy,slop); return moved; }
+        boolean suppressAfterRelease(boolean cancelled) { return beganHanging && moved && !cancelled; }
+    }
     static int height(int block) { return block * 7; }
     /** Left/right caps are 40px wide (4 art blocks) and never stretch. */
     static int cap(int block) { return block * 4; }

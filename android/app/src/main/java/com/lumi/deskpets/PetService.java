@@ -414,16 +414,22 @@ public final class PetService extends Service {
                 else a.play("摸摸头",2000);}
         });
         a.view.setOnLongClickListener(v->{longPressMenu(a);return true;});
-        a.view.setOnTouchListener(new View.OnTouchListener(){float downX,downY,startX,startY;boolean moved,longPressed;final int slop=ViewConfiguration.get(PetService.this).getScaledTouchSlop();final Runnable hold=()->{longPressed=true;a.dragging=false;a.view.performLongClick();};
+        a.view.setOnTouchListener(new View.OnTouchListener(){float downX,downY,startX,startY;boolean moved,longPressed;final IslandHang.Touch hangTouch=new IslandHang.Touch();final int slop=ViewConfiguration.get(PetService.this).getScaledTouchSlop();final Runnable hold=()->{longPressed=true;a.dragging=false;a.view.performLongClick();};
             public boolean onTouch(View v,MotionEvent e){switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
+                    hangTouch.begin(a.hang!=0);
                     if(stack.contains(a))scatter(SystemClock.uptimeMillis());a.catPhase=0;
                     if(a.nest!=0){a.nest=0;a.nestAfter=SystemClock.uptimeMillis()+600_000;arrangeNest();} // 被摸醒，从窝里出来
-                    if(a==hugA||a==hugB)endHug();if(isStory(a))cancelStory();if(inScene(a))cancelScene();a.sleeping=false;a.reading=false;a.thenClip=null;yawnQueue.remove(a);if(a.hang!=0){a.hang=0;hangSkipUntil=Long.MAX_VALUE;}a.rainbowAfter=false;downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
+                    if(a==hugA||a==hugB)endHug();if(isStory(a))cancelStory();if(inScene(a))cancelScene();a.sleeping=false;a.reading=false;a.thenClip=null;yawnQueue.remove(a);a.rainbowAfter=false;downX=e.getRawX();downY=e.getRawY();startX=a.x;startY=a.y;moved=longPressed=false;a.ballEnd=0;a.perch=a.target=null;a.hopStart=0;a.nextHop=SystemClock.uptimeMillis()+4000;a.dragging=true;a.falling=false;a.bouncing=false;a.direction=0;clock.postDelayed(hold,600);return true;
                 case MotionEvent.ACTION_MOVE:
-                    float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.hypot(dx,dy)>slop){moved=true;a.lastTap=0;clock.removeCallbacks(hold);}if(moved&&!longPressed){a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
+                    if(longPressed)return true;
+                    float dx=e.getRawX()-downX,dy=e.getRawY()-downY;moved=hangTouch.move(dx,dy,slop);
+                    if(moved){a.hang=0;a.lastTap=0;clock.removeCallbacks(hold);a.x=startX+dx;a.y=startY+dy;a.view.show(a.pet.clip("掉落"));position(a);}return true;
                 case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:
                     clock.removeCallbacks(hold);a.dragging=false;
+                    // Only a completed real drag suppresses re-hanging. Taps and system cancellations do not.
+                    if(hangTouch.suppressAfterRelease(e.getActionMasked()==MotionEvent.ACTION_CANCEL))hangSkipUntil=Long.MAX_VALUE;
+                    if(a.hang!=0&&!moved){if(!longPressed&&e.getActionMasked()==MotionEvent.ACTION_UP)v.performClick();return true;}
                     if(moved&&e.getActionMasked()==MotionEvent.ACTION_UP&&tryStackDrop(a,SystemClock.uptimeMillis()))return true; // 松手落在别人头上 → 叠叠乐
                     if(moved||e.getActionMasked()==MotionEvent.ACTION_CANCEL||longPressed){a.falling=a.y<a.floor();a.velocity=0;if(a.falling)startFall(a,SystemClock.uptimeMillis());else a.play(idle(a),0);}
                     else{v.performClick();}return true;
@@ -1165,6 +1171,7 @@ public final class PetService extends Service {
                     a.ballEnd=0;a.rainbowAfter=false;a.perch=a.target=null;a.hopStart=0;a.falling=false;a.bouncing=false;a.direction=0;
                     boolean grounded=a.y>=a.floor()-1;
                     a.hang=grounded?1:2;a.hangStart=now;a.hangFromX=a.x;a.hangFromY=a.y;
+                    a.lastTap=0;
                     if(!grounded)a.play("开心蹦蹦",0);
                 }
             }else if(a.hang!=0){
@@ -1178,7 +1185,6 @@ public final class PetService extends Service {
         int[] at=new int[2];island.getLocationOnScreen(at);
         float tx=IslandHang.x(at[0]-originX,island.getWidth(),unit,width);
         float ty=IslandHang.y(at[1]-originY+island.getHeight(),a.view.contentTop(),Math.max(1,islandBlock));
-        a.lastTap=0;
         if(a.hang==1){ // 先在地上跑到提示条正下方
             float step=unit*1.6f*dt,dx=tx-a.x;
             if(Math.abs(dx)<=step){a.x=tx;a.hang=2;a.hangStart=now;a.hangFromX=a.x;a.hangFromY=a.y;a.play("开心蹦蹦",0);}
@@ -1188,7 +1194,7 @@ public final class PetService extends Service {
             a.x=a.hangFromX+(tx-a.hangFromX)*p;
             a.y=a.hangFromY+(ty-a.hangFromY)*p-unit*.6f*4*p*(1-p);
             if(p>=1){a.hang=3;a.play("灵动岛",0);bringToFront(a);}
-        }else{a.x=tx;a.y=ty;if(!"灵动岛".equals(a.action))a.play("灵动岛",0);}
+        }else{a.x=tx;a.y=ty;if(now>=a.until&&!"灵动岛".equals(a.action))a.play("灵动岛",0);}
         position(a);
     }
     /** 挂着时爪子要盖在提示条边上，所以把这只的窗口放到最上层。 */

@@ -3,6 +3,16 @@ import java.util.Map;
 public final class AppCompanionTest {
     static void equal(Object actual,Object expected){if(!java.util.Objects.equals(actual,expected))throw new AssertionError(actual+" != "+expected);}
     public static void main(String[] args){
+        IslandHang.Touch hangTouch=new IslandHang.Touch();
+        hangTouch.begin(true);equal(hangTouch.suppressAfterRelease(false),false); // tap while charging
+        equal(hangTouch.move(3,4,8),false);equal(hangTouch.suppressAfterRelease(false),false); // finger jitter
+        equal(hangTouch.suppressAfterRelease(true),false); // system cancelled the touch
+        hangTouch.begin(true);equal(hangTouch.move(9,0,8),true);
+        equal(hangTouch.move(0,0,8),true); // returning to start is still a real drag
+        equal(hangTouch.suppressAfterRelease(false),true);
+        equal(hangTouch.suppressAfterRelease(true),false); // cancelled drag may re-hang
+        hangTouch.begin(false);hangTouch.move(30,30,8);equal(hangTouch.suppressAfterRelease(false),false);
+        hangTouch.begin(true);equal(hangTouch.suppressAfterRelease(false),false); // no stale state from last gesture
         long checked=1_800_000_000_000L;
         equal(UpdateRules.due(false,checked,0),false);
         equal(UpdateRules.due(true,checked,0),true); // old swallowed failure must not keep the 12h lock
