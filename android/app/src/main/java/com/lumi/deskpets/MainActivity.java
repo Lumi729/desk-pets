@@ -84,7 +84,9 @@ public final class MainActivity extends Activity {
         option("motion","重力与摇晃互动");
         text("轻轻连续晃动会让宠物像弹力球一样摇晃着蹦几秒，落地后吐出一道彩虹；飞起来时倾斜手机可改变方向。无需用力摇。",13,false);
         option("climb","歪手机爬墙");
+        button("住在地面 / 住在屏幕边",()->chooseHomes());
         text("手机往左或往右歪一会儿，一只伙伴走到那一边，沿屏幕边爬到上半部分，然后藏在边外只露出头和爪子。不管它就一直趴着，拖出来才会掉回地上。同一时间只有一只去爬；贴贴、剧情、挂灵动岛时不爬。",13,false);
+        text("「住在屏幕边」的伙伴平时贴在左边或右边探头，只露出头和爪子，时不时沿着边爬到别的高度，偶尔掉下来换到另一边；不挡状态栏、灵动岛和底部导航条，键盘弹出时会避开。摸它会缩回去再探出来，拖着放到边上能换高度，拖回地面就变回住在地面。住在边上的不参加贴贴和叠叠乐，灵动岛来通知时照样去挂着，挂完回原来的边上。默认都住在地面。",13,false);
         option("island","灵动提示条");
         button("灵动岛位置、大小与拖动",()->IslandSettings.open(this,false,()->startPets("island-preview")));
         option("islandMedia","音乐状态与播放控制");
@@ -127,7 +129,7 @@ public final class MainActivity extends Activity {
         button("应用选择和大小",()->startPets("start"));
         button("试试贴贴 ♡",()->startPets("hug"));
         button("测试动作 / 功能展示",()->new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
-            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "外卖通知检查（看通知里能读到什么）", "挑衅哥哥（千千猫猫 / 梨梨兔兔轮流）", "两个哥哥打架和好", "送零食（千千猫猫 / 梨梨兔兔轮流）", "煤球猫猫追着玩", "打哈欠会传染", "g老师看书 + 哥哥批改作业", "g老师看书睡着被围观", "g老师摔倒接眼镜", "哥哥和g老师换眼镜", "沙漠狐的小爱好", "两只狐狸比尾巴", "两只狐狸尾巴被子", "叠叠乐（拖一只放到另一只头上）", "百变猫猫换一只", "过节（国庆 / 万圣节 / 圣诞 / 春节）", "过生日", "在一起的纪念日", "时间提醒（睡觉、吃饭）", "回小窝睡觉 → 早上出来", "番茄钟专注", "爬左边", "爬右边", "功能展示：从摇晃到小窝、番茄钟、爬墙全部演一遍"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-inspect","test-tease","test-fight","test-snack","test-chase","test-yawn","test-read","test-watch","test-catch","test-swap","test-hobby","test-tails","test-tailquilt","test-stack","test-cat","test-festival","test-birthday","test-anniversary","test-remind","test-nest","test-focus","test-climb-left","test-climb-right","test-show"}[which])).show());
+            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "外卖通知检查（看通知里能读到什么）", "挑衅哥哥（千千猫猫 / 梨梨兔兔轮流）", "两个哥哥打架和好", "送零食（千千猫猫 / 梨梨兔兔轮流）", "煤球猫猫追着玩", "打哈欠会传染", "g老师看书 + 哥哥批改作业", "g老师看书睡着被围观", "g老师摔倒接眼镜", "哥哥和g老师换眼镜", "沙漠狐的小爱好", "两只狐狸比尾巴", "两只狐狸尾巴被子", "叠叠乐（拖一只放到另一只头上）", "百变猫猫换一只", "过节（国庆 / 万圣节 / 圣诞 / 春节）", "过生日", "在一起的纪念日", "时间提醒（睡觉、吃饭）", "回小窝睡觉 → 早上出来", "番茄钟专注", "爬左边", "爬右边", "住到左边", "住到右边", "功能展示：从摇晃到小窝、番茄钟、爬墙、住在屏幕边全部演一遍"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-inspect","test-tease","test-fight","test-snack","test-chase","test-yawn","test-read","test-watch","test-catch","test-swap","test-hobby","test-tails","test-tailquilt","test-stack","test-cat","test-festival","test-birthday","test-anniversary","test-remind","test-nest","test-focus","test-climb-left","test-climb-right","test-edge-left","test-edge-right","test-show"}[which])).show());
         text("哥哥狗狗和电脑版一样会照顾大家：有伙伴摔趴趴，它会走过去扶起来；晚上 11 点到早上 6 点，千千猫猫睡着时，它会过去盖被子（一晚一次），盖好后两只一起睡，摸一下才醒。演示会自动把千千猫猫和哥哥狗狗放出来。",13,false);
         text("和电脑版一样会闹：千千猫猫离哥哥狗狗近时偶尔挑衅它，梨梨兔兔也会挑衅梨梨哥哥，10 分钟里被挑衅超过 3 次哥哥直接投降；长按千千猫猫或梨梨兔兔也能叫它去挑衅。哥哥狗狗和梨梨哥哥贴贴完会打一架，冷静大约 3 分钟后再碰到先和好再贴贴。拖动、摸摸随时能打断。",13,false);
         text("平时还会：千千猫猫和梨梨兔兔互相送零食；煤球猫猫突然冲过去追着玩；一只打哈欠，旁边的跟着打；g老师偶尔看书，有伙伴挨过来就一起看（哥哥狗狗来是批改作业），看着看着会打瞌睡被围观，摔倒时旁边的伙伴帮忙接眼镜，偶尔和哥哥狗狗换眼镜；沙漠狐玩自己的小爱好，和 99狐狐 比尾巴，晚上两只一起睡时用尾巴当被子。",13,false);
@@ -225,6 +227,25 @@ public final class MainActivity extends Activity {
                     if(md.isEmpty()){toast("没看懂这个日期，写成 3-14 试试");return;}
                     prefs.edit().putString("birthday:"+name,md).apply();toast(name+"的生日是 "+md+" 🎂");
                 }).setNegativeButton("取消",null).show();
+            }).setNegativeButton("返回",null).show();
+        }catch(Exception e){toast("素材没有加载成功");}
+    }
+    /** 住在地面 / 住在屏幕边（Claude）：每只伙伴选一个，默认住在地面。 */
+    private void chooseHomes(){
+        try{
+            Catalog catalog=new Catalog(this);
+            java.util.List<String> names=new ArrayList<>();
+            for(Catalog.Pet pet:catalog.pets)if(!names.contains(pet.name))names.add(pet.name);
+            Set<String> homes=new HashSet<>(prefs.getStringSet("edgePets",new HashSet<>()));
+            String[] labels=new String[names.size()];
+            for(int i=0;i<names.size();i++)labels[i]=names.get(i)+"："+(homes.contains(names.get(i))?"住在屏幕边":"住在地面");
+            new AlertDialog.Builder(this).setTitle("住在哪里").setItems(labels,(d,i)->{
+                String name=names.get(i);
+                new AlertDialog.Builder(this).setTitle(name).setSingleChoiceItems(new String[]{"住在地面","住在屏幕边"},homes.contains(name)?1:0,(d2,w)->{
+                    if(w==1)homes.add(name);else homes.remove(name);
+                    prefs.edit().putStringSet("edgePets",new HashSet<>(homes)).apply();d2.dismiss();
+                    toast(name+(w==1?"搬到屏幕边啦，点「应用选择和大小」就能看到":"回到地面啦"));
+                }).setNegativeButton("返回",null).show();
             }).setNegativeButton("返回",null).show();
         }catch(Exception e){toast("素材没有加载成功");}
     }

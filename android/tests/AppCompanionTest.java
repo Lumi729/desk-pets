@@ -209,6 +209,14 @@ public final class AppCompanionTest {
         equal(ClimbRules.rearm(.1f),true);equal(ClimbRules.rearm(-.3f),false);
         equal(ClimbRules.edgeX(-1,1080,250),0f);equal(ClimbRules.edgeX(1,1080,250),830f);equal(ClimbRules.top(2000),440f);
         equal(ClimbRules.climbClip(-1),"沿左边向上爬");equal(ClimbRules.climbClip(1),"沿右边向上爬");equal(ClimbRules.peekClip(-1),"左边探头");equal(ClimbRules.peekClip(1),"右边探头");
+        // 住在屏幕边（Claude）：中间范围、避开键盘、下一个高度、拖到哪算贴边
+        float[] band=EdgeRules.band(2000,-1,200);equal(band[0],400f);equal(band[1],1360f);
+        float[] kb=EdgeRules.band(2000,1200,200);equal(kb[1],960f);
+        float[] tight=EdgeRules.band(2000,500,200);equal(tight[1],tight[0]); // 键盘太高也不会爬到顶上去
+        equal(EdgeRules.clamp(100,band),400f);equal(EdgeRules.clamp(1900,band),1360f);
+        equal(EdgeRules.next(0,band,1000,200),400f);equal(EdgeRules.next(.625,band,1000,200),760f);equal(EdgeRules.next(1,band,1000,200),1360f); // 离得太近就换到对称的位置
+        equal(EdgeRules.dropSide(100,1080,200),-1);equal(EdgeRules.dropSide(1000,1080,200),1);equal(EdgeRules.dropSide(540,1080,200),0);
+        equal(EdgeRules.moveClip(-1,true,true),"沿左边向上爬");equal(EdgeRules.moveClip(1,false,true),"沿右边向下爬");equal(EdgeRules.moveClip(1,false,false),"沿右边向上爬");
         // 挑衅（Claude）：和 teases.js 的 replyFor 一样，10 分钟里第 4 次就投降
         java.util.Map<String,java.util.List<String>> replies=new java.util.LinkedHashMap<>();
         replies.put("就这",java.util.List.of("委屈"));replies.put("来打我呀",java.util.List.of("跺脚","@chase"));

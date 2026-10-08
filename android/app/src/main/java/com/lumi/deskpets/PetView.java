@@ -30,6 +30,8 @@ final class PetView extends View {
             if(next!=null) { movie=next; path=asset; started=SystemClock.uptimeMillis(); invalidate(); }
         } catch(IOException ignored) { /* Keep previous frame if an optional clip is unavailable. */ }
     }
+    /** 从第一帧重新播（住在屏幕边：缩回去再探出来）。 */
+    void restart(){started=SystemClock.uptimeMillis();invalidate();}
     void animate(boolean enabled) { playing=enabled; if(enabled) { started=SystemClock.uptimeMillis(); invalidate(); } }
     @Override public boolean performClick() { super.performClick(); return true; }
     @Override protected void onDraw(Canvas canvas) {
