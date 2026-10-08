@@ -78,6 +78,13 @@ public final class PetService extends Service {
     private android.widget.ImageView nestBack,nestFront;
     private int nestW,nestH;
     private boolean focusing;
+    // 灵动岛滚动歌词（Claude）：先用状态栏歌词，读不到再按歌名歌手查 LRC；只放内存
+    private LyricFetcher lyrics;
+    private boolean islandLyricMode;
+    private String islandShownLabel;
+    private android.animation.ValueAnimator islandSlide;
+    private String lyricTitle="";
+    private long lyricTitleAt,lyricDemoStart,lyricDemoUntil;
     private long tiltSince; // 往同一边歪了多久
     private int tiltSide;
     private boolean tiltArmed=true; // 爬过一次要先摆正手机才能再触发
@@ -154,6 +161,7 @@ public final class PetService extends Service {
         IntentFilter filter=new IntentFilter();filter.addAction(Intent.ACTION_SCREEN_OFF);filter.addAction(Intent.ACTION_SCREEN_ON);
         if(Build.VERSION.SDK_INT>=33)registerReceiver(screen,filter,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(screen,filter);
         weather=new WeatherCompanion(this);media=new IslandMedia(this);motion=new ShakeCompanion(this,()->{if(getSharedPreferences("pets",MODE_PRIVATE).getBoolean("motion",false))bounceParty();});usage=new UsageCompanion(this);usageThread=new HandlerThread("pet-app-companion");usageThread.start();usageClock=new Handler(usageThread.getLooper());usageClock.post(usageLoop);
+        lyrics=new LyricFetcher();
         try{catalog=new Catalog(this);}catch(Exception e){stopSelf();}
     }
     @Override public int onStartCommand(Intent intent,int flags,int startId){
@@ -180,6 +188,7 @@ public final class PetService extends Service {
         if("test-climb-right".equals(action))climbDemo(1);
         if("test-edge-left".equals(action))edgeDemo(-1);
         if("test-edge-right".equals(action))edgeDemo(1);
+        if("test-lyrics".equals(action))lyricDemo();
         if("test-tease".equals(action))teaseDemo();
         if("test-snack".equals(action))snackDemo();
         if("test-chase".equals(action))chaseDemo();
@@ -920,8 +929,8 @@ public final class PetService extends Service {
         show.removeCallbacksAndMessages(null);
         Runnable[] steps={this::bounceParty,()->{hangDemo();tell("灵动岛可在设置中调位置和大小，开启后可以拖动",8000);},this::weatherDemoStart,this::helpUpDemo,this::blanketDemo,this::teaseDemo,this::fightDemoStart,
             this::snackDemo,this::chaseDemo,this::yawnDemo,this::readDemo,this::watchDemo,this::catchDemo,this::swapDemo,this::hobbyDemo,this::tailsDemo,this::tailquiltDemo,this::stackDemo,this::catDemo,
-            this::festivalDemoStart,this::birthdayDemo,this::anniversaryDemo,this::remindDemo,this::nestDemo,this::focusDemo,()->climbDemo(-1),()->climbDemo(1),()->edgeDemo(-1),()->edgeDemo(1)};
-        long[] at={0,9000,18000,68000,84000,100000,116000,140000,158000,170000,184000,204000,220000,232000,244000,272000,284000,300000,316000,330000,350000,358000,366000,380000,410000,422000,436000,450000,475000};
+            this::festivalDemoStart,this::birthdayDemo,this::anniversaryDemo,this::remindDemo,this::nestDemo,this::focusDemo,()->climbDemo(-1),()->climbDemo(1),()->edgeDemo(-1),()->edgeDemo(1),this::lyricDemo};
+        long[] at={0,9000,18000,68000,84000,100000,116000,140000,158000,170000,184000,204000,220000,232000,244000,272000,284000,300000,316000,330000,350000,358000,366000,380000,410000,422000,436000,450000,475000,500000};
         for(int i=0;i<steps.length;i++)show.postDelayed(steps[i],at[i]);
     }
     // ---- 叠叠乐（Claude）：照电脑版 tryStack / scatter ----
@@ -1046,7 +1055,7 @@ public final class PetService extends Service {
         if(DeliveryCompanion.noticeAt>lastNotice && SystemClock.elapsedRealtime()-DeliveryCompanion.noticeAt<15000){
             lastNotice=DeliveryCompanion.noticeAt;islandFromNotice=true;islandMessage=DeliveryCompanion.notice;islandUntil=now+7000;islandDismissed=0;
         }
-        if(now>=nextMediaCheck){nextMediaCheck=now+1500;if(prefs.getBoolean("islandMedia",false))media.refresh();else media.clear();
+        if(now>=nextMediaCheck){nextMediaCheck=now+1500;if(prefs.getBoolean("islandMedia",false)||prefs.getBoolean("islandLyrics",false))media.refresh();else media.clear();
             batteryLabel="";
             if(prefs.getBoolean("islandBattery",false)){
                 Intent battery=registerReceiver(null,new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
@@ -1070,7 +1079,11 @@ public final class PetService extends Service {
         long focusLeft=prefs.getLong("focusEnd",0)-System.currentTimeMillis();
         if(label.isEmpty()&&focusing&&focusLeft>0)label="🍅 专注中 · 还剩 "+((focusLeft+59_999)/60_000)+" 分钟";
         boolean mediaLabel=false;
-        if(label.isEmpty()&&prefs.getBoolean("islandMedia",false)&&!media.title.isEmpty()){label=(media.playing?"♫ ":"Ⅱ ")+media.title;mediaLabel=true;}
+        // 歌词在通知、外卖、计时这些提示后面：提示结束再回到歌词（Claude）
+        String lyric=now<lyricDemoUntil?demoLyric(now):prefs.getBoolean("islandLyrics",false)?currentLyric():"";
+        boolean lyricShown=false;
+        if(label.isEmpty()&&!lyric.isEmpty()){label=lyric;mediaLabel=true;lyricShown=true;}
+        else if(label.isEmpty()&&(prefs.getBoolean("islandMedia",false)||prefs.getBoolean("islandLyrics",false))&&!media.title.isEmpty()){label=(media.playing?"♫ ":"Ⅱ ")+media.title;mediaLabel=true;}
         if(label.isEmpty()&&prefs.getBoolean("islandBattery",false))label=batteryLabel;
         if(label.isEmpty()&&prefs.getBoolean("island",false)){
             String mode=liveCompanionMode(now,prefs);
@@ -1080,7 +1093,7 @@ public final class PetService extends Service {
         }
         islandMediaShown=mediaLabel;
         if(label.isEmpty()||now<islandDismissed){hideIsland();islandNotice=false;}
-        else{showIsland(label);islandNotice=notice&&label.equals(islandMessage);}
+        else{lyricMode(lyricShown);showIsland(label);islandNotice=notice&&label.equals(islandMessage);}
         islandLive=live&&label.equals(delivery)&&now>=islandDismissed;
     }
     private void showIsland(String label){
@@ -1091,9 +1104,14 @@ public final class PetService extends Service {
             island.setOnTouchListener(this::touchIsland);
             WindowManager.LayoutParams p=new WindowManager.LayoutParams(1,1,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);
             p.gravity=Gravity.TOP|Gravity.LEFT;island.setLayoutParams(p);layoutIsland();
+            islandShownLabel=null;islandLyricMode=false;
             try{windows.addView(island,p);}catch(RuntimeException e){island=null;return;}
         }else if(!islandTouching)layoutIsland();
-        if(!label.contentEquals(island.getText()))island.setText(label);
+        if(!label.equals(islandShownLabel)){
+            boolean slide=islandLyricMode&&islandShownLabel!=null&&islandShownLabel.startsWith("♫")&&label.startsWith("♫")&&island.isLaidOut();
+            islandShownLabel=label;
+            if(slide)slideIsland(label);else{stopSlide();island.setText(label);}
+        }
     }
     private void layoutIsland(){
         if(island==null)return;
@@ -1292,13 +1310,13 @@ public final class PetService extends Service {
     private void updateInspector(){
         if(inspector==null||inspectorText==null||inspectorShown==DeliveryCompanion.inspectedAt)return;
         inspectorShown=DeliveryCompanion.inspectedAt;
-        StringBuilder b=new StringBuilder("外卖通知检查（只显示在屏幕上，不保存不上传不写日志）\n");
+        StringBuilder b=new StringBuilder("通知检查：外卖 / 音乐歌词（只显示在屏幕上，不保存不上传不写日志）\n");
         if(!DeliveryCompanion.connected()){
             if(!listenerAllowed())b.append("\n⚠ 通知使用权没开：在设置页点「允许音乐与通知访问」，给「外卖提示 · 梨间雪桌宠」打开，再点「刷新」。");
             else b.append("\n通知使用权开了，但还没连上，已经请系统重新连接，过几秒点「刷新」。");
         }else synchronized(DeliveryCompanion.inspected){
             int total=DeliveryCompanion.scannedTotal;
-            if(DeliveryCompanion.inspected.isEmpty())b.append("\n没找到外卖通知：通知栏里").append(total>=0?"的 "+total+" 条通知":"").append("没有美团 / 饿了么的，也没有标题或正文包含「送达、骑手、取餐、配送、商家」的。有新的会自动出现，也可以点「刷新」。");
+            if(DeliveryCompanion.inspected.isEmpty())b.append("\n没找到外卖或音乐通知：通知栏里").append(total>=0?"的 "+total+" 条通知":"").append("没有美团 / 饿了么、网易云等音乐 App 的，也没有标题或正文包含「送达、骑手、取餐、配送、商家」的。有新的会自动出现，也可以点「刷新」。");
             else b.append("\n读了一遍通知栏").append(total>=0?"（共 "+total+" 条）":"").append("，找到这些（最新的在上面）：");
             java.util.List<String> list=new java.util.ArrayList<>(DeliveryCompanion.inspected.values());java.util.Collections.reverse(list);
             for(String t:list)b.append("\n\n").append(t);
@@ -1310,12 +1328,12 @@ public final class PetService extends Service {
         if(inspector!=null){if(inspector.isAttachedToWindow())windows.removeView(inspector);inspector=null;inspectorText=null;}
     }
     private void hideIsland(){clock.removeCallbacks(islandLongPress);islandTouching=islandDragging=false;hangSkipUntil=0;hangDemoUntil=0; // 下次提示条出来又可以挂
-        if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}}
+        stopSlide();if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}islandShownLabel=null;islandLyricMode=false;}
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
     private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();hideNest();if(islandPanel!=null)islandPanel.dismiss();if(islandSettings!=null)islandSettings.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
     private void clearActors(){hideIsland();hideNest();hugA=hugB=null;storyKind=null;storyPet=storyDog=null;sceneA=sceneB=null;sceneSteps.clear();sceneStep=null;fightDemo=false;stack.clear();clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
     @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();hideNest();for(Actor a:actors){if(a.nest!=0){a.nest=0;a.sleeping=false;}a.climb=a.home!=0?1:0;a.climbSide=a.home;a.view.setTranslationX(0);}endHug();cancelStory();cancelScene();if(!stack.isEmpty())scatter(SystemClock.uptimeMillis());InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.hang=0;a.rainbowAfter=false;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
-    @Override public void onDestroy(){destroyed=true;closeInspector();hideNest();show.removeCallbacksAndMessages(null);if(islandPanel!=null)islandPanel.dismiss();if(islandSettings!=null)islandSettings.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
+    @Override public void onDestroy(){destroyed=true;if(lyrics!=null)lyrics.shutdown();closeInspector();hideNest();show.removeCallbacksAndMessages(null);if(islandPanel!=null)islandPanel.dismiss();if(islandSettings!=null)islandSettings.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent i){return null;}
 
     // ---- 过节 / 生日 / 在一起多少天（Claude）：照电脑版 lib/calendar.js、lib/diary.js、pets.js 的 maybeCelebrate ----
@@ -1636,5 +1654,61 @@ public final class PetService extends Service {
         if(pick==null){Toast.makeText(this,"出来的伙伴还没有爬墙动画",Toast.LENGTH_SHORT).show();return;}
         tell("演示：手机往"+(side<0?"左":"右")+"歪一会儿，伙伴就去爬"+(side<0?"左":"右")+"边；拖出来才下来",6000);
         startClimb(pick,side);
+    }
+
+    // ---- 灵动岛滚动歌词（Claude） ----
+    /** 现在这句歌词（带 ♫ / Ⅱ）；读不到、纯音乐、第一句还没开始都返回空，照旧显示歌名。 */
+    private String currentLyric(){
+        if(media.title.isEmpty())return "";
+        long t=SystemClock.elapsedRealtime();
+        if(!media.title.equals(lyricTitle)){lyricTitle=media.title;lyricTitleAt=t;} // 切歌：旧的状态栏歌词作废
+        String prefix=media.playing?"♫ ":"Ⅱ ";
+        // 路线一：音乐 App 的状态栏歌词（这首歌开始以后发来的才算）
+        if(media.pkg.equals(DeliveryCompanion.tickerPkg)&&!DeliveryCompanion.tickerLyric.isEmpty()&&DeliveryCompanion.tickerAt>=lyricTitleAt-1500)return prefix+DeliveryCompanion.tickerLyric;
+        // 路线二：按歌名、歌手查带时间轴的歌词，按播放进度找这句
+        LyricFetcher.Song song=lyrics.get(media.title,media.artist,media.duration);
+        if(song==null||song.lines.isEmpty())return "";
+        int i=LyricRules.index(song.lines,media.now());
+        return i<0?"":prefix+song.lines.get(i).text;
+    }
+    /** 歌词用跑马灯：放不下的长句子慢慢滚过去；别的提示还是放不下就省略号。 */
+    private void lyricMode(boolean on){
+        if(island==null||on==islandLyricMode)return;
+        islandLyricMode=on;
+        if(on){island.setEllipsize(android.text.TextUtils.TruncateAt.MARQUEE);island.setMarqueeRepeatLimit(-1);island.setHorizontallyScrolling(true);island.setSelected(true);}
+        else{stopSlide();island.setSelected(false);island.setEllipsize(android.text.TextUtils.TruncateAt.END);}
+    }
+    /** 换句时：旧的一句往上滑走、淡出，新的一句从下面滑上来、淡入（只动文字，背景不动）。 */
+    private void slideIsland(String next){
+        stopSlide();
+        android.widget.TextView view=island;int half=Math.max(1,view.getHeight()/2);
+        android.animation.ValueAnimator out=android.animation.ValueAnimator.ofFloat(0,1);out.setDuration(160);
+        out.addUpdateListener(v->{float f=(float)v.getAnimatedValue();view.scrollTo(view.getScrollX(),Math.round(half*f));view.setTextColor(android.graphics.Color.argb(Math.round(255*(1-f)),255,255,255));});
+        out.addListener(new android.animation.AnimatorListenerAdapter(){boolean cancelled;
+            @Override public void onAnimationCancel(android.animation.Animator a){cancelled=true;}
+            @Override public void onAnimationEnd(android.animation.Animator a){
+                if(cancelled||island!=view)return;
+                view.setText(next);
+                android.animation.ValueAnimator in=android.animation.ValueAnimator.ofFloat(1,0);in.setDuration(220);
+                in.addUpdateListener(v->{float f=(float)v.getAnimatedValue();view.scrollTo(view.getScrollX(),-Math.round(half*f));view.setTextColor(android.graphics.Color.argb(Math.round(255*(1-f)),255,255,255));});
+                islandSlide=in;in.start();
+            }});
+        islandSlide=out;out.start();
+    }
+    private void stopSlide(){
+        boolean running=islandSlide!=null;
+        if(running){islandSlide.cancel();islandSlide=null;}
+        if(island!=null&&running){island.scrollTo(island.getScrollX(),0);island.setTextColor(android.graphics.Color.WHITE);}
+    }
+    /** 演示用的假歌词（自己写的），按时间一句一句换，有一句特别长用来看跑马灯。 */
+    private static final long[] DEMO_TIMES={0,2600,5200,7800,15800,18400};
+    private static final String[] DEMO_LINES={"演示：灵动岛滚动歌词","小猫在屏幕边上探头","尾巴轻轻扫过通知栏","这一句特别特别长，长到灵动岛放不下，所以会像跑马灯一样慢慢地滚过去","哥哥狗狗跟着轻轻哼","（演示结束）"};
+    private String demoLyric(long now){
+        long t=now-lyricDemoStart;int i=0;
+        for(int k=0;k<DEMO_TIMES.length;k++)if(DEMO_TIMES[k]<=t)i=k;
+        return "♫ "+DEMO_LINES[i];
+    }
+    private void lyricDemo(){
+        lyricDemoStart=SystemClock.uptimeMillis();lyricDemoUntil=lyricDemoStart+21000;islandDismissed=0;
     }
 }

@@ -217,6 +217,21 @@ public final class AppCompanionTest {
         equal(EdgeRules.next(0,band,1000,200),400f);equal(EdgeRules.next(.625,band,1000,200),760f);equal(EdgeRules.next(1,band,1000,200),1360f); // 离得太近就换到对称的位置
         equal(EdgeRules.dropSide(100,1080,200),-1);equal(EdgeRules.dropSide(1000,1080,200),1);equal(EdgeRules.dropSide(540,1080,200),0);
         equal(EdgeRules.moveClip(-1,true,true),"沿左边向上爬");equal(EdgeRules.moveClip(1,false,true),"沿右边向下爬");equal(EdgeRules.moveClip(1,false,false),"沿右边向上爬");
+        // 滚动歌词（Claude）：LRC 解析、当前这句、播放进度、搜索结果挑选、状态栏歌词
+        java.util.List<LyricRules.Line> lrc=LyricRules.parse("[ar:某某]\n[ti:小猫]\n[00:01.50]第一句\n[00:05.2]第二句\n[00:10.123][00:20.00]重复的一句\n[00:12.00]\n不带时间的行\n[01:02:50]冒号写法");
+        equal(lrc.size(),5);equal(lrc.get(0),new LyricRules.Line(1500,"第一句"));equal(lrc.get(1),new LyricRules.Line(5200,"第二句"));
+        equal(lrc.get(2),new LyricRules.Line(10123,"重复的一句"));equal(lrc.get(3),new LyricRules.Line(20000,"重复的一句"));equal(lrc.get(4),new LyricRules.Line(62500,"冒号写法"));
+        equal(LyricRules.parse("[offset:500]\n[00:02.00]提前半秒").get(0).time,1500L);
+        equal(LyricRules.index(lrc,0),-1);equal(LyricRules.index(lrc,1500),0);equal(LyricRules.index(lrc,9999),1);equal(LyricRules.index(lrc,99999),4);
+        equal(LyricRules.instrumental(LyricRules.parse("[00:00.00]纯音乐，请欣赏")),true);equal(LyricRules.instrumental(LyricRules.parse("")),true);equal(LyricRules.instrumental(lrc),false);
+        equal(LyricRules.position(10000,5000,8000,1,true),13000L);equal(LyricRules.position(10000,5000,8000,1,false),10000L);equal(LyricRules.position(10000,5000,8000,2,true),16000L);
+        equal(LyricRules.score("晴天","周杰伦",269000,"晴天","周杰伦",269500),170);
+        equal(LyricRules.score("晴天 (Live)","周杰伦",0,"晴天","周杰伦",0)>0,true);
+        equal(LyricRules.score("晴天","周杰伦",0,"晴天","某翻唱",0)<LyricRules.score("晴天","周杰伦",0,"晴天","周杰伦",0),true);
+        equal(LyricRules.score("晴天","周杰伦",0,"七里香","周杰伦",0),-1);
+        equal(LyricRules.tickerLyric("故事的小黄花","晴天","周杰伦"),"故事的小黄花");equal(LyricRules.tickerLyric("晴天","晴天","周杰伦"),"");
+        equal(LyricRules.tickerLyric("晴天 - 周杰伦","晴天","周杰伦"),"");equal(LyricRules.tickerLyric(null,"晴天","周杰伦"),"");
+        equal(LyricRules.musicApp("com.netease.cloudmusic"),true);equal(LyricRules.musicApp("com.tencent.mobileqq"),false);
         // 挑衅（Claude）：和 teases.js 的 replyFor 一样，10 分钟里第 4 次就投降
         java.util.Map<String,java.util.List<String>> replies=new java.util.LinkedHashMap<>();
         replies.put("就这",java.util.List.of("委屈"));replies.put("来打我呀",java.util.List.of("跺脚","@chase"));
