@@ -98,7 +98,8 @@ public final class PetService extends Service {
     private IslandMedia media;
     private String batteryLabel="";
     private boolean islandFromNotice;
-    private AlertDialog islandPanel,islandSettings;
+    private AlertDialog islandSettings;
+    private IslandPanel islandPanel; // 灵动面板：照千千的设计稿画的像素面板（Claude，2026-10-08）
     private boolean islandDragging,islandLongPressed,islandTouching,islandMoved;
     private float islandDownX,islandDownY;
     private int islandStartX,islandStartY;
@@ -1271,14 +1272,25 @@ public final class PetService extends Service {
     }
     private void openIslandPanel(){
         if(islandPanel!=null)return;
-        islandPanel=new AlertDialog.Builder(this).setTitle("灵动面板").setItems(new String[]{"上一首","播放 / 暂停","下一首","取消计时器","隐藏提示 30 秒","位置、大小与拖动"},(d,i)->{
-            if(i<3 && getSharedPreferences("pets",MODE_PRIVATE).getBoolean("islandMedia",false))media.control(i);
-            if(i==3)getSharedPreferences("pets",MODE_PRIVATE).edit().putLong("timerEnd",0).apply();
-            if(i==5)openIslandSettings();
-            if(i==4){islandDismissed=SystemClock.uptimeMillis()+30000;hideIsland();}
-        }).setNegativeButton("关闭",null).create();
-        islandPanel.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
-        islandPanel.setOnDismissListener(d->islandPanel=null);islandPanel.show();
+        android.content.SharedPreferences prefs=getSharedPreferences("pets",MODE_PRIVATE);
+        islandPanel=new IslandPanel(this,windows,new IslandPanel.Host(){
+            public boolean mediaEnabled(){return prefs.getBoolean("islandMedia",false);}
+            public IslandMedia media(){return media;}
+            public long timerEnd(){return prefs.getLong("timerEnd",0);}
+            public void control(int action){if(prefs.getBoolean("islandMedia",false))media.control(action);}
+            public void cancelTimer(){prefs.edit().putLong("timerEnd",0).apply();}
+            public void hideTips(){islandDismissed=SystemClock.uptimeMillis()+30000;hideIsland();}
+            public void openSettings(){openIslandSettings();}
+            public String petClip(){ // 千千猫猫坐在顶边；没出来就是第一只看得见的伙伴
+                Actor pick=byName(CAT);
+                if(pick==null||pick==hugB)for(Actor a:actors)if(a!=hugB){pick=a;break;}
+                if(pick!=null)return pick.pet.clip("待机");
+                for(Catalog.Pet p:catalog.pets)if(p.name.equals(CAT))return p.clip("待机");
+                return null;
+            }
+            public void closed(){islandPanel=null;}
+        });
+        if(!islandPanel.show(width,height))islandPanel=null;
     }
     // ---- 外卖通知检查（Claude）：屏幕上一个小窗口，显示可能是外卖的通知能读到的字段；有「刷新」「关闭」 ----
     private android.widget.LinearLayout inspector;

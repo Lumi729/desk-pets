@@ -169,3 +169,15 @@ test('Android ships the edge climb up / down and peek clips for every pet and ca
     }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Android island panel ships its nine 11×11 pixel icons (Claude)', () => {
+  const dir = path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'res', 'drawable-nodpi');
+  for (const name of ['prev', 'play', 'pause', 'next', 'timer', 'hide', 'move', 'close', 'heart']) {
+    const file = path.join(dir, `ic_panel_${name}.png`);
+    assert.ok(fs.existsSync(file), name);
+    const png = fs.readFileSync(file);
+    const [w, h] = [png.readUInt32BE(16), png.readUInt32BE(20)];
+    assert.equal(w, h, `${name} 是正方形`);
+    assert.equal(w % 11, 0, `${name} 是 11 格的整数倍`);
+  }
+});
