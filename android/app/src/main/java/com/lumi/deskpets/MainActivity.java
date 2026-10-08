@@ -20,7 +20,7 @@ public final class MainActivity extends Activity {
     private TextView permission;
     private SeekBar size;
     private Switch walking;
-    private TextView usageStatus,interfaceStatus,weatherStatus;
+    private TextView usageStatus,interfaceStatus,weatherStatus,updateStatus;
     private boolean pendingStart;
     int dp(int value) { return Math.round(value*getResources().getDisplayMetrics().density); }
     @Override public void onCreate(Bundle state) {
@@ -133,7 +133,10 @@ public final class MainActivity extends Activity {
         text("第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。",13,false);
         text("只有检查更新（只连 GitHub 上桌宠的发布页）和打开天气后查天气（只发所选地点的经纬度）时联网。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。",13,false);
         text("更新",21,true);
-        option("autoUpdate","自动检查更新（最多 12 小时一次）");
+        Switch autoUpdate=new Switch(this);autoUpdate.setText("自动检查更新");autoUpdate.setChecked(prefs.getBoolean("autoUpdate",false));page.addView(autoUpdate);
+        autoUpdate.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("autoUpdate",on).apply();if(on)checkUpdate(false);});
+        text("打开后立即检查；设置页打开或桌宠在屏幕上运行时定时检查。检查成功后间隔 12 小时，失败后约 15 分钟重试；服务器限流时按提示等待。手动检查不受 12 小时间隔限制。安装仍需你确认。",13,false);
+        updateStatus=text(prefs.getString("updateStatus","还没有检查更新"),13,false);
         button("检查更新",()->checkUpdate(true));
         text("发现新版本会问你要不要下载；下载好后打开系统安装界面，由你点「安装」。第一次需要允许「安装未知应用」。只接受 GitHub 上桌宠发布页的安装包。",13,false);
     }
@@ -252,8 +255,13 @@ public final class MainActivity extends Activity {
     }
     // ---- 更新（Claude）：查 GitHub 上的安卓发布页，有新版就问要不要下载，下载好打开系统安装界面 ----
     private String pendingVersion,pendingUrl;
+    private boolean updateChecking;
     // 停在设置页时每 2 秒看一下下载好了没有（不注册系统广播）
     private final Handler poll=new Handler(Looper.getMainLooper());
+    private final Runnable watchUpdates=new Runnable(){public void run(){
+        if(UpdateChecker.due(prefs))checkUpdate(false);
+        poll.postDelayed(this,60000);
+    }};
     private final Runnable watchDownload=new Runnable(){public void run(){
         long id=prefs.getLong("updateDownload",-1);if(id==-1)return;
         int status=UpdateChecker.status(MainActivity.this,id);
@@ -262,14 +270,25 @@ public final class MainActivity extends Activity {
         else poll.postDelayed(this,2000);
     }};
     private void checkUpdate(boolean manual){
-        if(manual)toast("正在检查更新…");
-        UpdateChecker.check(this,(version,url)->{
-            if(isFinishing())return;
-            if(version==null){if(manual)toast("已经是最新版啦（也可能是网络不通）");return;}
-            new AlertDialog.Builder(this).setTitle("发现新版本 "+version).setMessage("现在是 "+UpdateChecker.current(this)+"。要下载并安装吗？设置会保留。")
-                .setPositiveButton("下载",(d,i)->startDownload(version,url)).setNegativeButton("以后再说",null).show();
+        if(updateChecking){if(manual)toast("正在检查更新，请稍等…");return;}
+        updateChecking=true;if(updateStatus!=null)updateStatus.setText("正在连接 GitHub 检查更新…");
+        UpdateChecker.check(this,result->{
+            updateChecking=false;if(isFinishing()||isDestroyed())return;
+            if(updateStatus!=null)updateStatus.setText(prefs.getString("updateStatus",""));
+            if(result.error!=null){
+                if(manual)new AlertDialog.Builder(this).setTitle("未能检查更新").setMessage(result.error+"\n当前安装："+UpdateChecker.current(this))
+                    .setPositiveButton("重试",(d,i)->checkUpdate(true)).setNeutralButton("打开发布页",(d,i)->openReleasePage()).setNegativeButton("关闭",null).show();
+                return;
+            }
+            if(result.version==null){if(manual)toast("已检查，当前是最新版 "+UpdateChecker.current(this));return;}
+            TextView details=new TextView(this);details.setPadding(dp(20),dp(12),dp(20),dp(12));
+            details.setText("现在是 "+UpdateChecker.current(this)+"。下载并安装后设置会保留。\n\n"+(result.notes.isEmpty()?"本次发布未附更新说明。":result.notes));
+            ScrollView notes=new ScrollView(this);notes.addView(details);
+            new AlertDialog.Builder(this).setTitle("发现新版本 "+result.version).setView(notes)
+                .setPositiveButton("下载",(d,i)->startDownload(result.version,result.url)).setNegativeButton("以后再说",null).show();
         });
     }
+    private void openReleasePage(){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(UpdateChecker.RELEASES)));}catch(ActivityNotFoundException e){toast("请用浏览器打开 github.com/Lumi729/desk-pets/releases");}}
     private void startDownload(String version,String url){
         if(Build.VERSION.SDK_INT>=26&&!getPackageManager().canRequestPackageInstalls()){
             pendingVersion=version;pendingUrl=url;
@@ -279,12 +298,15 @@ public final class MainActivity extends Activity {
         }
         UpdateChecker.download(this,version,url);toast("开始下载，好了会打开安装界面");poll.removeCallbacks(watchDownload);poll.postDelayed(watchDownload,2000);
     }
-    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if("update".equals(intent.getAction()))checkUpdate(true);}
-    @Override protected void onPause(){super.onPause();poll.removeCallbacks(watchDownload);}
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if("update".equals(intent.getAction())){intent.setAction(null);checkUpdate(true);}}
+    @Override protected void onPause(){super.onPause();poll.removeCallbacks(watchDownload);poll.removeCallbacks(watchUpdates);}
     @Override protected void onResume(){super.onResume();updateWeatherStatus();
         if(pendingUrl!=null&&(Build.VERSION.SDK_INT<26||getPackageManager().canRequestPackageInstalls())){String v=pendingVersion,u=pendingUrl;pendingVersion=pendingUrl=null;startDownload(v,u);}
         poll.removeCallbacks(watchDownload);poll.post(watchDownload);
         if("update".equals(getIntent().getAction())){getIntent().setAction(null);checkUpdate(true);}
-        else if(UpdateChecker.due(prefs))checkUpdate(false);updateUsageStatus();if(permission!=null)permission.setText(Settings.canDrawOverlays(this)?"✧ 悬浮窗已允许":"✧ 初次开启需允许悬浮窗");if(pendingStart && Settings.canDrawOverlays(this)){pendingStart=false;startPets("start");}}
+        else if(UpdateChecker.due(prefs))checkUpdate(false);
+        poll.removeCallbacks(watchUpdates);poll.postDelayed(watchUpdates,60000);
+        if(updateStatus!=null&&!updateChecking)updateStatus.setText(prefs.getString("updateStatus","还没有检查更新"));
+        updateUsageStatus();if(permission!=null)permission.setText(Settings.canDrawOverlays(this)?"✧ 悬浮窗已允许":"✧ 初次开启需允许悬浮窗");if(pendingStart && Settings.canDrawOverlays(this)){pendingStart=false;startPets("start");}}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
 }

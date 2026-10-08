@@ -3,6 +3,19 @@ import java.util.Map;
 public final class AppCompanionTest {
     static void equal(Object actual,Object expected){if(!java.util.Objects.equals(actual,expected))throw new AssertionError(actual+" != "+expected);}
     public static void main(String[] args){
+        long checked=1_800_000_000_000L;
+        equal(UpdateRules.due(false,checked,0),false);
+        equal(UpdateRules.due(true,checked,0),true); // old swallowed failure must not keep the 12h lock
+        long failedNext=UpdateRules.nextCheck(checked,false,0),successNext=UpdateRules.nextCheck(checked,true,0);
+        equal(failedNext,checked+15*60_000L);equal(successNext,checked+12*3600_000L);
+        equal(UpdateRules.due(true,failedNext-1,failedNext),false);
+        equal(UpdateRules.due(true,failedNext,failedNext),true);
+        equal(UpdateRules.due(true,failedNext,successNext),false);
+        equal(UpdateRules.due(true,successNext,successNext),true);
+        equal(UpdateRules.nextCheck(checked,false,checked+3600_000L),checked+3600_000L);
+        equal(UpdateRules.due(true,checked,checked+48*3600_000L),true); // recover after clock correction
+        equal(UpdateRules.newer("android-v0.13-preview","0.12-preview"),true);
+        equal(UpdateRules.newer("android-v0.14-preview","0.13-preview"),true);
         // Typing blocks both starting and continuing a hang, even with a notice/media/demo.
         for(boolean enabled:new boolean[]{false,true})for(boolean media:new boolean[]{false,true})
             for(long demoEnd:new long[]{0,999,1000,9000})

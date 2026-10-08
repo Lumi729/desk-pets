@@ -4,6 +4,14 @@ package com.lumi.deskpets;
 final class UpdateRules {
     private UpdateRules() {}
     static final String TAG_PREFIX = "android-v";
+    static final long SUCCESS_INTERVAL = 12 * 3600_000L, FAILURE_INTERVAL = 15 * 60_000L;
+    static boolean due(boolean enabled, long now, long nextCheck) {
+        return enabled && (nextCheck <= 0 || now >= nextCheck || nextCheck - now > 24 * 3600_000L);
+    }
+    static long nextCheck(long now, boolean success, long serverRetryAt) {
+        return Math.max(now + (success ? SUCCESS_INTERVAL : FAILURE_INTERVAL),
+            Math.min(serverRetryAt, now + 24 * 3600_000L));
+    }
     /** "0.5-preview" → {0,5}; anything unparsable → empty (never newer). */
     static int[] parse(String version) {
         if (version == null) return new int[0];

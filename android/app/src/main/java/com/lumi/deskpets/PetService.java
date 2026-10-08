@@ -20,7 +20,7 @@ public final class PetService extends Service {
     private int width,height,unit,keyboardFloor=-1,originX,originY;
     private String surfaceApp="";
     private List<Perch> surfaces=Collections.emptyList();
-    private long lastFrame,hugEnd,demoUntil,typingDemoUntil,hangDemoUntil;
+    private long lastFrame,hugEnd,demoUntil,typingDemoUntil,hangDemoUntil,nextUpdateCheck;
     private HandlerThread usageThread;
     private Handler usageClock;
     private UsageCompanion usage;
@@ -154,11 +154,6 @@ public final class PetService extends Service {
         startForeground(7,notification());
         if(actors.isEmpty()||"start".equals(action)||"hug".equals(action)||(action!=null&&action.startsWith("test-")))
             rebuild(castFor(action)); // 演示要的宠物自动放出来
-        if("start".equals(action)&&UpdateChecker.due(getSharedPreferences("pets",MODE_PRIVATE)))UpdateChecker.check(this,(version,url)->{ // 自动检查更新（默认关闭）
-            if(version==null||destroyed)return;
-            PendingIntent open=PendingIntent.getActivity(this,3,new Intent(this,MainActivity.class).setAction("update"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-            getSystemService(NotificationManager.class).notify(9,new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setColor(0xFFEFA7C0).setLargeIcon(android.graphics.drawable.Icon.createWithResource(this,R.drawable.ic_qianqian_large)).setContentTitle("桌宠有新版本 "+version).setContentText("点这里下载更新").setContentIntent(open).setAutoCancel(true).build());
-        });
         if("island-preview".equals(action))previewIsland();
         if("test-shake".equals(action))bounceParty();
         if("test-rainbow".equals(action)){long now=SystemClock.uptimeMillis();for(Actor a:actors)spitRainbow(a,now);}
@@ -293,6 +288,7 @@ public final class PetService extends Service {
     private void tick(long now,float dt){
         android.content.SharedPreferences options=getSharedPreferences("pets",MODE_PRIVATE);
         boolean unlocked=!getSystemService(KeyguardManager.class).isKeyguardLocked();
+        if(unlocked&&now>=nextUpdateCheck){nextUpdateCheck=now+60000;checkAutomaticUpdate(options);}
         motion.enabled(unlocked&&options.getBoolean("motion",false));
         updateIsland(now,options,unlocked);
         updateInspector();
@@ -1000,6 +996,14 @@ public final class PetService extends Service {
             a.ballEnd=now+4500;a.ballX=(random.nextBoolean()?1:-1)*unit*3;a.ballY=-unit*5;
             a.play("摇晃",0); // 弹力球飞动期间摇晃
         }
+    }
+    private void checkAutomaticUpdate(android.content.SharedPreferences prefs){
+        if(!UpdateChecker.due(prefs))return;
+        UpdateChecker.check(this,result->{
+            if(result.version==null||destroyed||!prefs.getBoolean("autoUpdate",false))return;
+            PendingIntent open=PendingIntent.getActivity(this,3,new Intent(this,MainActivity.class).setAction("update"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+            getSystemService(NotificationManager.class).notify(9,new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setColor(0xFFEFA7C0).setLargeIcon(android.graphics.drawable.Icon.createWithResource(this,R.drawable.ic_qianqian_large)).setContentTitle("桌宠有新版本 "+result.version).setContentText("点这里查看更新说明并下载").setContentIntent(open).setAutoCancel(true).build());
+        });
     }
     private String liveCompanionMode(long now,android.content.SharedPreferences prefs){
         InterfaceCompanion.Snapshot state=InterfaceCompanion.snapshot;
