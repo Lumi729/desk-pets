@@ -1,6 +1,6 @@
-# 梨间雪 · 安卓尝鲜版 0.12-preview
+# 梨间雪 · 安卓尝鲜版 0.13-preview
 
-安装包：[Android 0.12-preview 发布页](https://github.com/Lumi729/desk-pets/releases/tag/android-v0.12-preview)。本次发布署名：Codex（g老师），2026-10-08；包含 Claude 此前已完成的节日、小窝与番茄钟更新。
+安装包：[Android 0.13-preview 发布页](https://github.com/Lumi729/desk-pets/releases/tag/android-v0.13-preview)。本次发布署名：Codex（g老师 / ChatGPT），2026-10-08。修复打字仍挂灵动岛：通知和挂岛演示不再抢走敲键盘，演示结束不会残留；已挂着的先落稳再继续陪打字。回归测试覆盖演示中打字、演示过期和音乐/视频避让，实际输入法与悬浮窗效果待手机验证。
 
 原生 Android 悬浮桌宠，Android 8.0 及以上。安装 APK 后打开「梨间雪桌宠」，选择伙伴，点「让桌宠出来玩」，按照手机提示允许「显示在其他应用上层」，返回应用即可开启。通知权限用于显示收起和关闭按钮。
 

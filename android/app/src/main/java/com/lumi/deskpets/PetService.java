@@ -20,7 +20,7 @@ public final class PetService extends Service {
     private int width,height,unit,keyboardFloor=-1,originX,originY;
     private String surfaceApp="";
     private List<Perch> surfaces=Collections.emptyList();
-    private long lastFrame,hugEnd,demoUntil,typingDemoUntil;
+    private long lastFrame,hugEnd,demoUntil,typingDemoUntil,hangDemoUntil;
     private HandlerThread usageThread;
     private Handler usageClock;
     private UsageCompanion usage;
@@ -341,10 +341,7 @@ public final class PetService extends Service {
             if(a.catPhase==2)a.catPhase=0;
             a.reading=false;
             if(a.thenClip!=null){String next=a.thenClip;a.thenClip=null;a.direction=0;a.play(next,0);a.until=now+Math.max(1500,a.view.duration());continue;}
-            InterfaceCompanion.Snapshot state=InterfaceCompanion.snapshot;
-            android.content.SharedPreferences prefs=getSharedPreferences("pets",MODE_PRIVATE);
-            String mode=now<typingDemoUntil?"type":AppCompanion.live(prefs.getBoolean("companion",false),
-                state.pkg,prefs.getAll(),companionMode,now,prefs.getBoolean("interface",false)?state.input:0);
+            String mode=liveCompanionMode(now,options);
             String companionClip=AppCompanion.clip(mode);
             if(!companionClip.isEmpty()){a.direction=0;a.play(companionClip,0);continue;}
             String rest=idle(a);
@@ -1004,6 +1001,11 @@ public final class PetService extends Service {
             a.play("摇晃",0); // 弹力球飞动期间摇晃
         }
     }
+    private String liveCompanionMode(long now,android.content.SharedPreferences prefs){
+        InterfaceCompanion.Snapshot state=InterfaceCompanion.snapshot;
+        return now<typingDemoUntil?"type":AppCompanion.live(prefs.getBoolean("companion",false),
+            state.pkg,prefs.getAll(),companionMode,now,prefs.getBoolean("interface",false)?state.input:0);
+    }
     private void updateIsland(long now,android.content.SharedPreferences prefs,boolean unlocked){
         if(!unlocked){hideIsland();return;}
         if(islandTouching&&island!=null)return; // Finish the gesture before a short notification expires.
@@ -1041,9 +1043,10 @@ public final class PetService extends Service {
         if(label.isEmpty()&&prefs.getBoolean("islandMedia",false)&&!media.title.isEmpty()){label=(media.playing?"♫ ":"Ⅱ ")+media.title;mediaLabel=true;}
         if(label.isEmpty()&&prefs.getBoolean("islandBattery",false))label=batteryLabel;
         if(label.isEmpty()&&prefs.getBoolean("island",false)){
-            if(prefs.getBoolean("companion",false)&&Perch.typing(now,InterfaceCompanion.snapshot.input)){label="🐾 陪你打字中";mediaLabel=true;} // 打字时照常播敲代码，不挂
-            else if("video".equals(companionMode)){label="🐾 陪你看视频";mediaLabel=true;}
-            else if("music".equals(companionMode)){label="♫ 一起摇摆";mediaLabel=true;}
+            String mode=liveCompanionMode(now,prefs);
+            if("type".equals(mode)){label="🐾 陪你打字中";mediaLabel=true;}
+            else if("video".equals(mode)){label="🐾 陪你看视频";mediaLabel=true;}
+            else if("music".equals(mode)){label="♫ 一起摇摆";mediaLabel=true;}
         }
         islandMediaShown=mediaLabel;
         if(label.isEmpty()||now<islandDismissed){hideIsland();islandNotice=false;}
@@ -1135,16 +1138,15 @@ public final class PetService extends Service {
     }};
     private void hangDemo(){
         islandMessage="演示：挂在灵动岛上";islandFromNotice=false;islandUntil=SystemClock.uptimeMillis()+8000;islandDismissed=0;hangSkipUntil=0;showIsland(islandMessage);
+        hangDemoUntil=islandUntil;
     }
     /** 选好的伙伴（默认第一只出来的）在通知提示条出现时挂上去；提示条消失或换成别的内容就落回地面。 */
     private void updateHanger(long now,android.content.SharedPreferences prefs){
-        // 提示条一出现（通知、充电、计时、音乐、陪伴状态都算）就挂上去，提示条消失再掉下来
-        // 听音乐、看视频、打字时（提示条在放音乐 / 陪看视频，或应用联动正在看视频、跳舞）不挂，照常陪着播动作；别的提示都挂
-        // 打字时也一样：照常播敲代码，不挂（Claude，2026-10-08）
-        boolean typing=now<typingDemoUntil||(prefs.getBoolean("companion",false)&&Perch.typing(now,InterfaceCompanion.snapshot.input));
-        boolean media=!islandMessage.startsWith("演示")&&(islandMediaShown||typing||"video".equals(companionMode)||"music".equals(companionMode));
-        boolean want=island!=null&&island.isLaidOut()&&now>=hangSkipUntil&&!media
-            &&(prefs.getBoolean("islandHang",false)||islandMessage.startsWith("演示"));
+        // 和敲键盘动画使用同一份联动状态；任何提示或演示都不能抢走打字。
+        // 只有明确的挂岛演示临时绕过开关，不能根据残留的提示文字判断。
+        boolean want=island!=null&&island.isLaidOut()&&now>=hangSkipUntil
+            &&IslandHang.allowed(prefs.getBoolean("islandHang",false),now,hangDemoUntil,
+                liveCompanionMode(now,prefs),islandMediaShown);
         Actor chosen=null;
         if(want){
             String id=prefs.getString("islandPet","");
@@ -1276,7 +1278,7 @@ public final class PetService extends Service {
         DeliveryCompanion.stopInspect();
         if(inspector!=null){if(inspector.isAttachedToWindow())windows.removeView(inspector);inspector=null;inspectorText=null;}
     }
-    private void hideIsland(){clock.removeCallbacks(islandLongPress);islandTouching=islandDragging=false;hangSkipUntil=0; // 下次提示条出来又可以挂
+    private void hideIsland(){clock.removeCallbacks(islandLongPress);islandTouching=islandDragging=false;hangSkipUntil=0;hangDemoUntil=0; // 下次提示条出来又可以挂
         if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}}
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
     private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();hideNest();if(islandPanel!=null)islandPanel.dismiss();if(islandSettings!=null)islandSettings.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}

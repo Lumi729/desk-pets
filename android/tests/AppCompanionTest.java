@@ -3,6 +3,23 @@ import java.util.Map;
 public final class AppCompanionTest {
     static void equal(Object actual,Object expected){if(!java.util.Objects.equals(actual,expected))throw new AssertionError(actual+" != "+expected);}
     public static void main(String[] args){
+        // Typing blocks both starting and continuing a hang, even with a notice/media/demo.
+        for(boolean enabled:new boolean[]{false,true})for(boolean media:new boolean[]{false,true})
+            for(long demoEnd:new long[]{0,999,1000,9000})
+                equal(IslandHang.allowed(enabled,1000,demoEnd,"type",media),false);
+        equal(IslandHang.allowed(false,1000,9000,"none",false),true);
+        equal(IslandHang.allowed(false,9000,9000,"none",false),false); // demo expires exactly on time
+        equal(IslandHang.allowed(false,10000,9000,"none",false),false); // stale demo cannot enable hanging
+        equal(IslandHang.allowed(true,1000,0,"none",false),true); // normal notification
+        equal(IslandHang.allowed(true,1000,0,"none",true),false);
+        for(String mode:new String[]{"video","music"}){
+            equal(IslandHang.allowed(true,1000,0,mode,false),false);
+            equal(IslandHang.allowed(false,1000,9000,mode,false),true); // explicit demo remains available
+            equal(IslandHang.allowed(true,9000,9000,mode,false),false);
+        }
+        String liveTyping=AppCompanion.live(true,"notes.any",Map.of(),"none",1000,999);
+        equal(AppCompanion.clip(liveTyping),"敲代码");
+        equal(IslandHang.allowed(true,1000,9000,liveTyping,false),false);
         equal(IslandHang.percent(0),60);equal(IslandHang.percent(1000),140);
         equal(IslandHang.width(3,100,1080),810);equal(IslandHang.width(3,140,500),500);
         equal(IslandHang.scaledBlock(3,60,1920)<IslandHang.scaledBlock(3,100,1920),true);

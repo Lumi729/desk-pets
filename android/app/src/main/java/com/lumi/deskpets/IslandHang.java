@@ -1,8 +1,14 @@
 package com.lumi.deskpets;
 
-/** Pure geometry for the pixel island and the pet hanging under it (shared with JVM tests). */
+/** Pure hanging policy and geometry for the pixel island (shared with JVM tests). */
 final class IslandHang {
     private IslandHang() {}
+    /** Typing always wins, including during an explicit hanging demo. */
+    static boolean allowed(boolean enabled, long now, long demoUntil, String mode, boolean mediaShown) {
+        if ("type".equals(mode)) return false;
+        boolean demo = now < demoUntil;
+        return (enabled || demo) && (demo || !(mediaShown || "video".equals(mode) || "music".equals(mode)));
+    }
     /** Island art is 70px tall drawn in 10px blocks; pick a whole-pixel block so nearest scaling stays crisp. */
     static int block(float density) { return Math.max(1, Math.round(44 * density / 7f)); }
     static int percent(int value) { return Math.max(60, Math.min(140, value)); }
