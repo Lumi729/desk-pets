@@ -84,7 +84,8 @@ public final class PetService extends Service {
     private String islandShownLabel;
     private android.animation.ValueAnimator islandSlide;
     private String lyricTitle="";
-    private long lyricTitleAt,lyricDemoStart,lyricDemoUntil;
+    private long lyricTitleAt,lyricDemoStart,lyricDemoUntil,ownPosition,ownAt;
+    private volatile String lyricStatus="歌词开关还没打开"; // 通知检查里显示：现在用的哪条路、为什么只显示歌名
     private long tiltSince; // 往同一边歪了多久
     private int tiltSide;
     private boolean tiltArmed=true; // 爬过一次要先摆正手机才能再触发
@@ -1283,6 +1284,7 @@ public final class PetService extends Service {
     private android.widget.LinearLayout inspector;
     private android.widget.TextView inspectorText;
     private long inspectorShown=-1;
+    private String inspectorLyric="";
     private void openInspector(){
         DeliveryCompanion.inspecting=true;
         if(inspector==null){
@@ -1316,8 +1318,8 @@ public final class PetService extends Service {
         if(!DeliveryCompanion.connected()&&listenerAllowed())try{android.service.notification.NotificationListenerService.requestRebind(new android.content.ComponentName(this,DeliveryCompanion.class));}catch(RuntimeException ignored){}
     }
     private void updateInspector(){
-        if(inspector==null||inspectorText==null||inspectorShown==DeliveryCompanion.inspectedAt)return;
-        inspectorShown=DeliveryCompanion.inspectedAt;
+        if(inspector==null||inspectorText==null||(inspectorShown==DeliveryCompanion.inspectedAt&&lyricStatus.equals(inspectorLyric)))return;
+        inspectorShown=DeliveryCompanion.inspectedAt;inspectorLyric=lyricStatus;
         StringBuilder b=new StringBuilder("通知检查：外卖 / 音乐歌词（只显示在屏幕上，不保存不上传不写日志）\n");
         if(!DeliveryCompanion.connected()){
             if(!listenerAllowed())b.append("\n⚠ 通知使用权没开：在设置页点「允许音乐与通知访问」，给「外卖提示 · 梨间雪桌宠」打开，再点「刷新」。");
@@ -1326,6 +1328,7 @@ public final class PetService extends Service {
             int total=DeliveryCompanion.scannedTotal;
             if(DeliveryCompanion.inspected.isEmpty())b.append("\n没找到外卖或音乐通知：通知栏里").append(total>=0?"的 "+total+" 条通知":"").append("没有美团 / 饿了么、网易云等音乐 App 的，也没有标题或正文包含「送达、骑手、取餐、配送、商家」的。有新的会自动出现，也可以点「刷新」。");
             else b.append("\n读了一遍通知栏").append(total>=0?"（共 "+total+" 条）":"").append("，找到这些（最新的在上面）：");
+            if(getSharedPreferences("pets",MODE_PRIVATE).getBoolean("islandLyrics",false))b.append("\n\n【歌词】").append(lyricStatus);
             java.util.List<String> list=new java.util.ArrayList<>(DeliveryCompanion.inspected.values());java.util.Collections.reverse(list);
             for(String t:list)b.append("\n\n").append(t);
         }
@@ -1673,17 +1676,24 @@ public final class PetService extends Service {
     // ---- 灵动岛滚动歌词（Claude） ----
     /** 现在这句歌词（带 ♫ / Ⅱ）；读不到、纯音乐、第一句还没开始都返回空，照旧显示歌名。 */
     private String currentLyric(){
-        if(media.title.isEmpty())return "";
+        if(media.title.isEmpty()){lyricStatus="现在没有在放歌（或没开通知访问）";return "";}
         long t=SystemClock.elapsedRealtime();
-        if(!media.title.equals(lyricTitle)){lyricTitle=media.title;lyricTitleAt=t;} // 切歌：旧的状态栏歌词作废
-        String prefix=media.playing?"♫ ":"Ⅱ ";
+        if(!media.title.equals(lyricTitle)){lyricTitle=media.title;lyricTitleAt=t;ownPosition=0;ownAt=t;} // 切歌：旧的状态栏歌词作废，自己的计时从头算
+        if(media.playing)ownPosition+=t-ownAt;ownAt=t;
+        String prefix=media.playing?"♫ ":"Ⅱ ",song="《"+media.title+"》"+(media.artist.isEmpty()?"":" - "+media.artist);
         // 路线一：音乐 App 的状态栏歌词（这首歌开始以后发来的才算）
-        if(media.pkg.equals(DeliveryCompanion.tickerPkg)&&!DeliveryCompanion.tickerLyric.isEmpty()&&DeliveryCompanion.tickerAt>=lyricTitleAt-1500)return prefix+DeliveryCompanion.tickerLyric;
+        if(media.pkg.equals(DeliveryCompanion.tickerPkg)&&!DeliveryCompanion.tickerLyric.isEmpty()&&DeliveryCompanion.tickerAt>=lyricTitleAt-1500){
+            lyricStatus=song+"：用的是状态栏歌词";return prefix+DeliveryCompanion.tickerLyric;}
         // 路线二：按歌名、歌手查带时间轴的歌词，按播放进度找这句
-        LyricFetcher.Song song=lyrics.get(media.title,media.artist,media.duration);
-        if(song==null||song.lines.isEmpty())return "";
-        int i=LyricRules.index(song.lines,media.now());
-        return i<0?"":prefix+song.lines.get(i).text;
+        LyricFetcher.Song found=lyrics.get(media.title,media.artist,media.duration);
+        if(found==null||found.lines.isEmpty()){
+            lyricStatus=song+"："+(found==null||lyrics.pending(media.title,media.artist)&&found.failed?"正在查歌词…":found.status)+"（先显示歌名）";return "";}
+        // 有的 App 不报播放进度（-1）：就用切歌以后自己数的播放时间（Claude，2026-10-08）
+        boolean reported=media.position>=0&&media.lastUpdate>0;
+        long position=reported?media.now():ownPosition;
+        int i=LyricRules.index(found.lines,position);
+        lyricStatus=song+"："+found.status+"，进度 "+(position/60000)+":"+String.format(java.util.Locale.ROOT,"%02d",(position/1000)%60)+(reported?"（音乐 App 报的）":"（自己计时，可能有偏差）")+(i<0?"，第一句还没开始（先显示歌名）":"");
+        return i<0?"":prefix+found.lines.get(i).text;
     }
     /** 歌词用跑马灯：放不下的长句子慢慢滚过去；别的提示还是放不下就省略号。 */
     private void lyricMode(boolean on){
