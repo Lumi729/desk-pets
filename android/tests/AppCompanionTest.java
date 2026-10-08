@@ -3,6 +3,27 @@ import java.util.Map;
 public final class AppCompanionTest {
     static void equal(Object actual,Object expected){if(!java.util.Objects.equals(actual,expected))throw new AssertionError(actual+" != "+expected);}
     public static void main(String[] args){
+        equal(IslandHang.percent(0),60);equal(IslandHang.percent(1000),140);
+        equal(IslandHang.width(3,100,1080),810);equal(IslandHang.width(3,140,500),500);
+        equal(IslandHang.scaledBlock(3,60,1920)<IslandHang.scaledBlock(3,100,1920),true);
+        equal(IslandHang.height(IslandHang.scaledBlock(4,140,70))<=70,true);
+        equal(IslandHang.position(.5f,1080,810,0),135);
+        equal(IslandHang.position(-1,1920,140,36),36);
+        equal(IslandHang.position(Float.NaN,1920,140,36),36);
+        equal(IslandHang.position(2,1920,140,36),1780);
+        equal(IslandHang.limit(-50,1080,810),0);equal(IslandHang.limit(5000,1080,810),270);
+        equal(IslandHang.fraction(300,300,300),0f);
+        for(int screen:new int[]{320,1080,1920})for(int percent:new int[]{60,100,140})for(float fraction:new float[]{0,.25f,.5f,1}){
+            int size=IslandHang.width(3,percent,screen),pos=IslandHang.position(fraction,screen,size,0);
+            equal(pos>=0&&pos+size<=screen,true);
+            float saved=IslandHang.fraction(pos,screen,size);
+            equal(IslandHang.position(saved,screen,size,0),pos);
+            int rotatedSize=IslandHang.width(3,percent,720),rotated=IslandHang.position(saved,720,rotatedSize,0);
+            equal(rotated>=0&&rotated+rotatedSize<=720,true);
+        }
+        equal(IslandHang.dragged(3,4,8),false);equal(IslandHang.dragged(0,9,8),true);
+        equal(IslandHang.dragged(-9,0,8),true);
+
         Perch upper=new Perch(80,300,230),lower=new Perch(80,500,230),side=new Perch(250,200,390);
         java.util.List<Perch> platforms=java.util.List.of(lower,side,upper);
         equal(Perch.catchFall(platforms,100,100,450,100,700),upper);

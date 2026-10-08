@@ -9,8 +9,8 @@ android {
         applicationId 'com.lumi.deskpets'
         minSdk 26
         targetSdk 35
-        versionCode 11
-        versionName '0.11-preview'
+        versionCode 12
+        versionName '0.12-preview'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     signingConfigs {

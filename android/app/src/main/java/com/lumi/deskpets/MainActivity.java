@@ -83,7 +83,8 @@ public final class MainActivity extends Activity {
         text("摇一摇和灵动提示",21,true);
         option("motion","重力与摇晃互动");
         text("轻轻连续晃动会让宠物像弹力球一样摇晃着蹦几秒，落地后吐出一道彩虹；飞起来时倾斜手机可改变方向。无需用力摇。",13,false);
-        option("island","顶部灵动提示条");
+        option("island","灵动提示条");
+        button("灵动岛位置、大小与拖动",()->IslandSettings.open(this,false,()->startPets("island-preview")));
         option("islandMedia","音乐状态与播放控制");
         option("islandBattery","充电与电量提示");
         option("islandHang","伙伴挂在提示条下面");

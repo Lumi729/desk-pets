@@ -87,7 +87,11 @@ public final class PetService extends Service {
     private IslandMedia media;
     private String batteryLabel="";
     private boolean islandFromNotice;
-    private AlertDialog islandPanel;
+    private AlertDialog islandPanel,islandSettings;
+    private boolean islandDragging,islandLongPressed,islandTouching,islandMoved;
+    private float islandDownX,islandDownY;
+    private int islandStartX,islandStartY;
+    private final Runnable islandLongPress=()->{if(island!=null&&islandTouching&&!islandMoved){islandLongPressed=true;island.performLongClick();}};
     private long nextMediaCheck,lastNotice,timerFinishedUntil;
     // 灵动岛：像素胶囊背景；通知出现时一只伙伴挂在下面（「通知时挂在提示条下」开关默认关闭，演示除外）
     private IslandBackground islandArt;
@@ -155,6 +159,7 @@ public final class PetService extends Service {
             PendingIntent open=PendingIntent.getActivity(this,3,new Intent(this,MainActivity.class).setAction("update"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
             getSystemService(NotificationManager.class).notify(9,new Notification.Builder(this,"pets").setSmallIcon(R.drawable.ic_pet).setColor(0xFFEFA7C0).setLargeIcon(android.graphics.drawable.Icon.createWithResource(this,R.drawable.ic_qianqian_large)).setContentTitle("桌宠有新版本 "+version).setContentText("点这里下载更新").setContentIntent(open).setAutoCancel(true).build());
         });
+        if("island-preview".equals(action))previewIsland();
         if("test-shake".equals(action))bounceParty();
         if("test-rainbow".equals(action)){long now=SystemClock.uptimeMillis();for(Actor a:actors)spitRainbow(a,now);}
         if("test-hang".equals(action))hangDemo();
@@ -894,7 +899,7 @@ public final class PetService extends Service {
     /** 功能展示：按顺序把各种互动演一遍（用单独的时间表，换宠物时不会被打断）。 */
     private void showcase(){
         show.removeCallbacksAndMessages(null);
-        Runnable[] steps={this::bounceParty,this::hangDemo,this::weatherDemoStart,this::helpUpDemo,this::blanketDemo,this::teaseDemo,this::fightDemoStart,
+        Runnable[] steps={this::bounceParty,()->{hangDemo();tell("灵动岛可在设置中调位置和大小，开启后可以拖动",8000);},this::weatherDemoStart,this::helpUpDemo,this::blanketDemo,this::teaseDemo,this::fightDemoStart,
             this::snackDemo,this::chaseDemo,this::yawnDemo,this::readDemo,this::watchDemo,this::catchDemo,this::swapDemo,this::hobbyDemo,this::tailsDemo,this::tailquiltDemo,this::stackDemo,this::catDemo,
             this::festivalDemoStart,this::birthdayDemo,this::anniversaryDemo,this::remindDemo,this::nestDemo,this::focusDemo};
         long[] at={0,9000,18000,68000,84000,100000,116000,140000,158000,170000,184000,204000,220000,232000,244000,272000,284000,300000,316000,330000,350000,358000,366000,380000,410000};
@@ -1001,6 +1006,7 @@ public final class PetService extends Service {
     }
     private void updateIsland(long now,android.content.SharedPreferences prefs,boolean unlocked){
         if(!unlocked){hideIsland();return;}
+        if(islandTouching&&island!=null)return; // Finish the gesture before a short notification expires.
         if(prefs.getBoolean("delivery",false)&&DeliveryCompanion.hintAt>lastDelivery){
             lastDelivery=DeliveryCompanion.hintAt;islandFromNotice=false;
             if(SystemClock.elapsedRealtime()-lastDelivery<30000){islandMessage=DeliveryCompanion.hint;islandUntil=now+9000;islandDismissed=0;}
@@ -1046,19 +1052,66 @@ public final class PetService extends Service {
     }
     private void showIsland(String label){
         if(island==null){
-            island=new android.widget.TextView(this);island.setGravity(Gravity.CENTER);island.setTextColor(android.graphics.Color.WHITE);island.setTextSize(14);
-            float density=getResources().getDisplayMetrics().density;
-            // 像素胶囊：左右两段不拉伸、中间平铺，最近邻缩放；文字只放在中间段
-            islandBlock=IslandHang.block(density);
-            if(islandArt==null)islandArt=IslandBackground.load(this,catalog,islandBlock);
-            int islandHeight=islandArt==null?(int)(48*density):IslandHang.height(islandBlock);
-            if(islandArt!=null){island.setBackground(islandArt);int cap=islandArt.capWidth();island.setPadding(cap,0,cap,0);}
-            else{android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable();bg.setColor(0xEE302932);bg.setCornerRadius(100);island.setBackground(bg);island.setPadding(18,0,18,0);}
-            WindowManager.LayoutParams p=new WindowManager.LayoutParams(Math.min(width,(int)(270*density)),islandHeight,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);p.gravity=Gravity.TOP|Gravity.CENTER_HORIZONTAL;p.y=(int)(12*density);
-            island.setSingleLine(true);island.setEllipsize(android.text.TextUtils.TruncateAt.END);island.setOnClickListener(v->{if(!openNotice())openIslandPanel();});island.setOnLongClickListener(v->{openIslandPanel();return true;});
+            island=new android.widget.TextView(this);island.setGravity(Gravity.CENTER);island.setTextColor(android.graphics.Color.WHITE);
+            island.setSingleLine(true);island.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            island.setOnClickListener(v->{if(!openNotice())openIslandPanel();});island.setOnLongClickListener(v->{openIslandPanel();return true;});
+            island.setOnTouchListener(this::touchIsland);
+            WindowManager.LayoutParams p=new WindowManager.LayoutParams(1,1,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);
+            p.gravity=Gravity.TOP|Gravity.LEFT;island.setLayoutParams(p);layoutIsland();
             try{windows.addView(island,p);}catch(RuntimeException e){island=null;return;}
+        }else if(!islandTouching)layoutIsland();
+        if(!label.contentEquals(island.getText()))island.setText(label);
+    }
+    private void layoutIsland(){
+        if(island==null)return;
+        android.content.SharedPreferences prefs=getSharedPreferences("pets",MODE_PRIVATE);
+        float density=getResources().getDisplayMetrics().density;int scale=IslandHang.percent(prefs.getInt("islandScale",100));
+        int block=IslandHang.scaledBlock(density,scale,height);
+        if(island.getBackground()==null||block!=islandBlock){
+            islandBlock=block;islandArt=IslandBackground.load(this,catalog,block);
+            if(islandArt!=null){island.setBackground(islandArt);int cap=islandArt.capWidth();island.setPadding(cap,0,cap,0);}
+            else{android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable();bg.setColor(0xEE302932);bg.setCornerRadius(100);island.setBackground(bg);int pad=Math.round(18*density*scale/100f);island.setPadding(pad,0,pad,0);}
         }
-        island.setText(label);
+        float textSize=14*scale/100f;if(Math.abs(island.getTextSize()/getResources().getDisplayMetrics().scaledDensity-textSize)>.01f)island.setTextSize(textSize);
+        WindowManager.LayoutParams p=(WindowManager.LayoutParams)island.getLayoutParams();
+        int w=IslandHang.width(density,scale,width),h=Math.min(height,islandArt==null?Math.round(48*density*scale/100f):IslandHang.height(block));
+        int x=IslandHang.position(prefs.getFloat("islandX",.5f),width,w,(width-w)/2),y=IslandHang.position(prefs.getFloat("islandY",-1),height,h,Math.round(12*density));
+        if(p.width==w&&p.height==h&&p.x==x&&p.y==y)return;
+        p.width=w;p.height=h;p.x=x;p.y=y;
+        if(island.isAttachedToWindow())try{windows.updateViewLayout(island,p);}catch(RuntimeException ignored){}
+    }
+    private boolean touchIsland(View view,MotionEvent event){
+        WindowManager.LayoutParams p=(WindowManager.LayoutParams)view.getLayoutParams();
+        switch(event.getActionMasked()){
+            case MotionEvent.ACTION_DOWN:
+                islandTouching=true;islandDragging=islandMoved=islandLongPressed=false;
+                islandDownX=event.getRawX();islandDownY=event.getRawY();islandStartX=p.x;islandStartY=p.y;
+                clock.postDelayed(islandLongPress,ViewConfiguration.getLongPressTimeout());return true;
+            case MotionEvent.ACTION_MOVE:
+                if(!islandTouching||islandLongPressed)return true;
+                float dx=event.getRawX()-islandDownX,dy=event.getRawY()-islandDownY;
+                if(IslandHang.dragged(dx,dy,ViewConfiguration.get(this).getScaledTouchSlop())){islandMoved=true;clock.removeCallbacks(islandLongPress);}
+                if(islandMoved&&getSharedPreferences("pets",MODE_PRIVATE).getBoolean("islandDrag",false)){
+                    islandDragging=true;p.x=IslandHang.limit(islandStartX+Math.round(dx),width,p.width);p.y=IslandHang.limit(islandStartY+Math.round(dy),height,p.height);
+                    try{windows.updateViewLayout(view,p);}catch(RuntimeException ignored){}
+                }return true;
+            case MotionEvent.ACTION_UP:
+                clock.removeCallbacks(islandLongPress);
+                if(!islandTouching)return true;islandTouching=false;
+                if(islandDragging)getSharedPreferences("pets",MODE_PRIVATE).edit().putFloat("islandX",IslandHang.fraction(p.x,width,p.width)).putFloat("islandY",IslandHang.fraction(p.y,height,p.height)).apply();
+                else if(!islandMoved&&!islandLongPressed)view.performClick();
+                islandDragging=false;return true;
+            case MotionEvent.ACTION_POINTER_DOWN:case MotionEvent.ACTION_CANCEL:
+                clock.removeCallbacks(islandLongPress);islandTouching=islandDragging=false;islandMoved=true;layoutIsland();return true;
+            default:return true;
+        }
+    }
+    private void previewIsland(){
+        paused=false;refreshVisibility();islandMessage="演示：灵动岛位置与大小";islandFromNotice=false;islandUntil=SystemClock.uptimeMillis()+60000;islandDismissed=0;showIsland(islandMessage);
+    }
+    private void openIslandSettings(){
+        if(islandSettings!=null)return;
+        islandSettings=IslandSettings.open(this,true,this::previewIsland);islandSettings.setOnDismissListener(d->islandSettings=null);
     }
     private void checkTimer(){
         android.content.SharedPreferences p=getSharedPreferences("pets",MODE_PRIVATE);long end=p.getLong("timerEnd",0);
@@ -1158,9 +1211,10 @@ public final class PetService extends Service {
     }
     private void openIslandPanel(){
         if(islandPanel!=null)return;
-        islandPanel=new AlertDialog.Builder(this).setTitle("灵动面板").setItems(new String[]{"上一首","播放 / 暂停","下一首","取消计时器","隐藏提示 30 秒"},(d,i)->{
+        islandPanel=new AlertDialog.Builder(this).setTitle("灵动面板").setItems(new String[]{"上一首","播放 / 暂停","下一首","取消计时器","隐藏提示 30 秒","位置、大小与拖动"},(d,i)->{
             if(i<3 && getSharedPreferences("pets",MODE_PRIVATE).getBoolean("islandMedia",false))media.control(i);
             if(i==3)getSharedPreferences("pets",MODE_PRIVATE).edit().putLong("timerEnd",0).apply();
+            if(i==5)openIslandSettings();
             if(i==4){islandDismissed=SystemClock.uptimeMillis()+30000;hideIsland();}
         }).setNegativeButton("关闭",null).create();
         islandPanel.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
@@ -1222,13 +1276,13 @@ public final class PetService extends Service {
         DeliveryCompanion.stopInspect();
         if(inspector!=null){if(inspector.isAttachedToWindow())windows.removeView(inspector);inspector=null;inspectorText=null;}
     }
-    private void hideIsland(){hangSkipUntil=0; // 下次提示条出来又可以挂
+    private void hideIsland(){clock.removeCallbacks(islandLongPress);islandTouching=islandDragging=false;hangSkipUntil=0; // 下次提示条出来又可以挂
         if(island!=null){if(island.isAttachedToWindow())windows.removeView(island);island=null;}}
     private void openSettings(){try{startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP));}catch(RuntimeException ignored){}}
-    private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();hideNest();if(islandPanel!=null)islandPanel.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
+    private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();hideNest();if(islandPanel!=null)islandPanel.dismiss();if(islandSettings!=null)islandSettings.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
     private void clearActors(){hideIsland();hideNest();hugA=hugB=null;storyKind=null;storyPet=storyDog=null;sceneA=sceneB=null;sceneSteps.clear();sceneStep=null;fightDemo=false;stack.clear();clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
     @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();hideNest();for(Actor a:actors){if(a.nest!=0){a.nest=0;a.sleeping=false;}}endHug();cancelStory();cancelScene();if(!stack.isEmpty())scatter(SystemClock.uptimeMillis());InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.hang=0;a.rainbowAfter=false;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
-    @Override public void onDestroy(){destroyed=true;closeInspector();hideNest();show.removeCallbacksAndMessages(null);if(islandPanel!=null)islandPanel.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
+    @Override public void onDestroy(){destroyed=true;closeInspector();hideNest();show.removeCallbacksAndMessages(null);if(islandPanel!=null)islandPanel.dismiss();if(islandSettings!=null)islandSettings.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent i){return null;}
 
     // ---- 过节 / 生日 / 在一起多少天（Claude）：照电脑版 lib/calendar.js、lib/diary.js、pets.js 的 maybeCelebrate ----
