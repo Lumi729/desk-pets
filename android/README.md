@@ -1,6 +1,6 @@
-# 梨间雪 · 安卓尝鲜版 0.17-preview
+# 梨间雪 · 安卓尝鲜版 0.18-preview
 
-安装包：[Android 0.17-preview 发布页](https://github.com/Lumi729/desk-pets/releases/tag/android-v0.17-preview)。本次发布署名：Claude，2026-10-08。新增「住在屏幕边」（默认住在地面）；手机效果待实测。
+安装包：[Android 0.18-preview 发布页](https://github.com/Lumi729/desk-pets/releases/tag/android-v0.18-preview)。本次发布署名：Claude，2026-10-08。新增灵动岛滚动歌词（默认关闭）；网易云接口和状态栏歌词待真机确认。
 
 原生 Android 悬浮桌宠，Android 8.0 及以上。安装 APK 后打开「梨间雪桌宠」，选择伙伴，点「让桌宠出来玩」，按照手机提示允许「显示在其他应用上层」，返回应用即可开启。通知权限用于显示收起和关闭按钮。
 
