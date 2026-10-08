@@ -155,3 +155,17 @@ test('Android ships festival, birthday, anniversary, focus and sleepy clips plus
     for (const part of ['back', 'front']) assert.ok(fs.existsSync(path.join(dir, nest[part])), `小窝 ${part}`);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Android ships the four edge climb / peek clips for every pet and cat skin (Claude)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-climb-'));
+  try {
+    const { pets } = prepare(dir);
+    assert.equal(pets.length, 13);
+    for (const p of pets) for (const clip of ['沿左边向上爬', '沿右边向上爬', '左边探头', '右边探头']) {
+      assert.ok(p.clips[clip], `${p.label} ${clip}`);
+      const head = fs.readFileSync(path.join(dir, p.clips[clip])).subarray(0, 10);
+      assert.equal(head.toString('latin1', 0, 3), 'GIF');
+      assert.deepEqual([head.readUInt16LE(6), head.readUInt16LE(8)], [300, 250], `${p.label} ${clip} 300×250`);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

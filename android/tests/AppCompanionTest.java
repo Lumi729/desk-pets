@@ -204,6 +204,11 @@ public final class AppCompanionTest {
         equal(CalendarRules.meal(11*60+49),-1);equal(CalendarRules.meal(12*60),0);equal(CalendarRules.meal(12*60+30),0);equal(CalendarRules.meal(18*60),1);equal(CalendarRules.meal(15*60),-1);
         equal(CalendarRules.night(23),true);equal(CalendarRules.night(6),true);equal(CalendarRules.night(7),false);equal(CalendarRules.night(22),false);
         equal(CalendarRules.nestOffset(0,1,100,300),0f);equal(CalendarRules.nestOffset(0,3,100,300),-42f);equal(CalendarRules.nestOffset(2,3,100,300),42f);
+        // 歪手机爬墙（Claude）：歪够才算、摆正才能再来、贴边位置和动作名
+        equal(ClimbRules.side(-.5f),-1);equal(ClimbRules.side(.5f),1);equal(ClimbRules.side(.2f),0);equal(ClimbRules.side(-.34f),0);
+        equal(ClimbRules.rearm(.1f),true);equal(ClimbRules.rearm(-.3f),false);
+        equal(ClimbRules.edgeX(-1,1080,250),0f);equal(ClimbRules.edgeX(1,1080,250),830f);equal(ClimbRules.top(2000),440f);
+        equal(ClimbRules.climbClip(-1),"沿左边向上爬");equal(ClimbRules.climbClip(1),"沿右边向上爬");equal(ClimbRules.peekClip(-1),"左边探头");equal(ClimbRules.peekClip(1),"右边探头");
         // 挑衅（Claude）：和 teases.js 的 replyFor 一样，10 分钟里第 4 次就投降
         java.util.Map<String,java.util.List<String>> replies=new java.util.LinkedHashMap<>();
         replies.put("就这",java.util.List.of("委屈"));replies.put("来打我呀",java.util.List.of("跺脚","@chase"));
