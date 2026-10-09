@@ -84,7 +84,7 @@ public final class MainActivity extends Activity {
         walking=new Switch(this);walking.setChecked(prefs.getBoolean("walking",true));walking.setOnCheckedChangeListener((v,on)->{save();refreshAll();}); // 保存用的老开关（不显示），和下面的像素开关同步
         PixelUi.PixelSwitch walk=switchRow(pets,"让它们自己散步",null,null,walking.isChecked(),on->walking.setChecked(on));
         chips(pets,new String[]{"应用选择和大小","试试贴贴 ♡"},new Runnable[]{()->startPets("start"),()->startPets("hug")});
-        chips(pets,new String[]{"住在地面 / 屏幕边","百变猫猫","宠物生日"},new Runnable[]{this::chooseHomes,this::chooseCatLock,this::chooseBirthday});
+        chips(pets,new String[]{"住在哪里","百变猫猫","宠物生日"},new Runnable[]{this::chooseHomes,this::chooseCatLock,this::chooseBirthday});
         info(pets,"「住在屏幕边」的伙伴平时贴在左边或右边探头，只露出头和爪子，时不时沿着边爬到别的高度，偶尔掉下来换到另一边；不挡状态栏、灵动岛和底部导航条，键盘弹出时会避开。摸它会缩回去再探出来，拖着放到边上能换高度，拖回地面就变回住在地面。住在边上的不参加贴贴和叠叠乐，灵动岛来通知时照样去挂着，挂完回原来的边上。默认都住在地面。\n\n贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫会自动轮换，双击换下一只，也能锁定一只。\n\n哥哥狗狗和电脑版一样会照顾大家：有伙伴摔趴趴，它会走过去扶起来；晚上 11 点到早上 6 点，千千猫猫睡着时，它会过去盖被子（一晚一次），盖好后两只一起睡，摸一下才醒。演示会自动把千千猫猫和哥哥狗狗放出来。\n\n和电脑版一样会闹：千千猫猫离哥哥狗狗近时偶尔挑衅它，梨梨兔兔也会挑衅梨梨哥哥，10 分钟里被挑衅超过 3 次哥哥直接投降；长按千千猫猫或梨梨兔兔也能叫它去挑衅。哥哥狗狗和梨梨哥哥贴贴完会打一架，冷静大约 3 分钟后再碰到先和好再贴贴。拖动、摸摸随时能打断。\n\n平时还会：千千猫猫和梨梨兔兔互相送零食；煤球猫猫突然冲过去追着玩；一只打哈欠，旁边的跟着打；g老师偶尔看书，有伙伴挨过来就一起看（哥哥狗狗来是批改作业），看着看着会打瞌睡被围观，摔倒时旁边的伙伴帮忙接眼镜，偶尔和哥哥狗狗换眼镜；沙漠狐玩自己的小爱好，和 99狐狐 比尾巴，晚上两只一起睡时用尾巴当被子。");
         // ---- 陪你用手机 ----
         LinearLayout phone=card("phone","move","陪你用手机",()->onList(new String[]{"companion","应用联动","interface","界面互动","motion","摇晃","climb","爬墙"}));
@@ -299,8 +299,8 @@ public final class MainActivity extends Activity {
         header.addView(iconBox,new LinearLayout.LayoutParams(dp(40),dp(40)));
         LinearLayout words=new LinearLayout(this);words.setOrientation(LinearLayout.VERTICAL);words.setPadding(dp(12),0,0,0);header.addView(words,new LinearLayout.LayoutParams(0,-2,1));
         words.addView(label(title,18,cText,true));
-        TextView sum=label("",12,cSub,false);words.addView(sum);
-        View arrow=new View(this);header.addView(arrow,new LinearLayout.LayoutParams(block*6,block*5));
+        TextView sum=label("",12,cSub,false);sum.setSingleLine(true);sum.setEllipsize(android.text.TextUtils.TruncateAt.END);words.addView(sum); // 摘要只占一行，太长就省略号
+        View arrow=new View(this);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(block*6,block*5);ap.leftMargin=dp(8);header.addView(arrow,ap);
         LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(0,dp(8),0,0);box.addView(body);
         cards.put(key,new View[]{body,arrow,sum});
         header.setOnClickListener(v->{boolean open=body.getVisibility()!=View.VISIBLE;prefs.edit().putString("settingsOpen",open?key:"").apply();applyCards();});
@@ -329,7 +329,9 @@ public final class MainActivity extends Activity {
         LinearLayout row=null;
         for(int i=0;i<labels.length;i++){
             if(i%3==0){row=new LinearLayout(this);parent.addView(row,top(dp(8)));}
-            TextView b=label(labels[i],14,cText,true);b.setGravity(Gravity.CENTER);b.setPadding(dp(6),0,dp(6),0);b.setBackground(new IslandPanel.PixelBox(cCard,0,block,1));
+            TextView b=label(labels[i],14,cText,true);b.setGravity(Gravity.CENTER);b.setPadding(dp(6),0,dp(6),0);
+            b.setSingleLine(true);b.setEllipsize(android.text.TextUtils.TruncateAt.END); // 一排按钮都一样高：字太长就缩小，不换行
+            if(Build.VERSION.SDK_INT>=26)b.setAutoSizeTextTypeUniformWithConfiguration(10,14,1,android.util.TypedValue.COMPLEX_UNIT_SP);b.setBackground(new IslandPanel.PixelBox(cCard,0,block,1));
             Runnable a=actions[i];b.setOnClickListener(v->a.run());
             LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(44),1);p.leftMargin=i%3==0?0:dp(6);row.addView(b,p);
         }
