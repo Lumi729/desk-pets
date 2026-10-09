@@ -255,6 +255,11 @@ public final class AppCompanionTest {
         equal(TeaseRules.reply(replies,"就这",java.util.List.of(1*min,2*min),3*min,600_000,3),java.util.List.of("委屈"));
         equal(TeaseRules.reply(replies,"就这",java.util.List.of(1*min,2*min,3*min),4*min,600_000,3),java.util.List.of("投降"));
         equal(TeaseRules.reply(replies,"就这",java.util.List.of(1*min,2*min,3*min),12*min,600_000,3),java.util.List.of("委屈"));
+        equal(LyricRules.songKey("app","same","A").equals(LyricRules.songKey("app","same","B")),false);
+        equal(LyricRules.songKey("app","same","A").equals(LyricRules.songKey("other","same","A")),false);
+        equal(LyricRules.retryExhausted(true,4,3),true);
+        equal(LyricRules.retryExhausted(true,3,3),false);
+        equal(LyricRules.retryExhausted(false,4,3),false);
         System.out.println("App classification, overrides, stale events, switch ordering and screen reset passed");
     }
 }

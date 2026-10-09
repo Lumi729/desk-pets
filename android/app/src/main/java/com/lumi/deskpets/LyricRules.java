@@ -9,6 +9,8 @@ import java.util.regex.Pattern;
 /** 灵动岛滚动歌词（Claude）：解析带时间轴的 LRC、按播放进度找当前这句、挑搜索结果、认状态栏歌词，纯规则方便测试。 */
 final class LyricRules {
     private LyricRules(){}
+    static String songKey(String pkg,String title,String artist){return pkg+"\u0001"+title+"\u0001"+artist;}
+    static boolean retryExhausted(boolean failed,int tries,int limit){return failed&&tries>limit;}
     /** 一句歌词：从 time 毫秒开始。 */
     static final class Line{
         final long time;final String text;

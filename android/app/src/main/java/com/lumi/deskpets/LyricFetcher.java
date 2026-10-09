@@ -33,16 +33,31 @@ final class LyricFetcher {
     private final Map<String,Song> cache=new LinkedHashMap<String,Song>(8,.75f,true){
         @Override protected boolean removeEldestEntry(Map.Entry<String,Song> e){return size()>KEEP;}
     };
-    private final ExecutorService worker=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"pet-lyrics");t.setDaemon(true);return t;});
-    private volatile String pending="";
+    private final ExecutorService worker;
+    LyricFetcher(){this(Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"pet-lyrics");t.setDaemon(true);return t;}));}
+    LyricFetcher(ExecutorService worker){this.worker=worker;}
+    private final java.util.Set<String> pending=new java.util.HashSet<>();
+    private String selected="";
     static String key(String title,String artist){return title+"\u0001"+artist;}
+    /** Switching back gives an exhausted failure a new retry budget, not successful/no-lyrics results. */
+    void select(String title,String artist){
+        String key=key(title,artist);
+        synchronized(cache){
+            if(key.equals(selected))return;
+            selected=key;Song had=cache.get(key);
+            if(had!=null&&LyricRules.retryExhausted(had.failed,had.tries,RETRY.length))cache.remove(key);
+        }
+    }
     /** 有就直接给；没有（或上次网络失败、到了重试时间）就在后台查一次，这次先返回现有的结果或 null。 */
     Song get(String title,String artist,long duration){
+        select(title,artist);
         String key=key(title,artist);Song had;
-        synchronized(cache){had=cache.get(key);}
-        if(had!=null&&!(had.failed&&had.tries<=RETRY.length&&SystemClock.elapsedRealtime()>=had.retryAt))return had;
-        if(key.equals(pending))return had;
-        pending=key;int tries=had==null?0:had.tries;
+        synchronized(cache){
+            had=cache.get(key);
+            if(had!=null&&!(had.failed&&had.tries<=RETRY.length&&SystemClock.elapsedRealtime()>=had.retryAt))return had;
+            if(!pending.add(key))return had;
+        }
+        int tries=had==null?0:had.tries;
         worker.execute(()->{
             Song song;
             try{
@@ -54,14 +69,13 @@ final class LyricFetcher {
                 long wait=RETRY[Math.min(tries,RETRY.length-1)];
                 song=new Song(key,Collections.<LyricRules.Line>emptyList(),"查歌词失败（"+reason(e)+"），"+(tries<RETRY.length?(wait/1000)+" 秒后再试":"先不试了，切歌回来会再试"),true,tries+1,SystemClock.elapsedRealtime()+wait);
             }
-            synchronized(cache){cache.put(key,song);}
-            if(key.equals(pending))pending="";
+            synchronized(cache){cache.put(key,song);pending.remove(key);}
         });
         return had;
     }
     /** 正在查这首吗（通知检查里显示用）。 */
-    boolean pending(String title,String artist){return key(title,artist).equals(pending);}
-    void clear(){synchronized(cache){cache.clear();}pending="";}
+    boolean pending(String title,String artist){synchronized(cache){return pending.contains(key(title,artist));}}
+    void clear(){synchronized(cache){cache.clear();pending.clear();selected="";}}
     void shutdown(){worker.shutdownNow();clear();}
     private static String reason(Exception e){String m=e.getMessage();return e instanceof java.net.SocketTimeoutException?"网络超时":e instanceof java.net.UnknownHostException?"连不上网":m==null||m.isEmpty()?e.getClass().getSimpleName():m.length()>40?m.substring(0,40):m;}
     /** 返回 null 表示没找到对得上的歌（不重试）；网络或接口出错抛异常（会重试）。 */

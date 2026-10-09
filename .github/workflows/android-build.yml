@@ -37,6 +37,8 @@ jobs:
           java -cp /tmp/pet-tests com.lumi.deskpets.AppCompanionTest
           javac -encoding UTF-8 -cp /tmp/pet-tests -d /tmp/pet-tests android/app/src/main/java/com/lumi/deskpets/UpdateHttp.java android/tests/UpdateHttpTest.java
           java -cp /tmp/pet-tests com.lumi.deskpets.UpdateHttpTest
+          javac -encoding UTF-8 -cp "$ANDROID_HOME/platforms/android-35/android.jar:/tmp/pet-tests" -d /tmp/pet-tests android/tests/stubs/android/os/SystemClock.java android/app/src/main/java/com/lumi/deskpets/LyricFetcher.java android/tests/LyricFetcherTest.java
+          java -cp "/tmp/pet-tests:$ANDROID_HOME/platforms/android-35/android.jar" com.lumi.deskpets.LyricFetcherTest
       - name: 编译和检查安卓版
         working-directory: android
         run: gradle :app:assembleDebug :app:lintDebug

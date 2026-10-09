@@ -1696,7 +1696,9 @@ public final class PetService extends Service {
     private String currentLyric(){
         if(media.title.isEmpty()){lyricStatus="现在没有在放歌（或没开通知访问）";return "";}
         long t=SystemClock.elapsedRealtime();
-        if(!media.title.equals(lyricTitle)){lyricTitle=media.title;lyricTitleAt=t;ownPosition=0;ownAt=t;} // 切歌：旧的状态栏歌词作废，自己的计时从头算
+        String songKey=LyricRules.songKey(media.pkg,media.title,media.artist);
+        if(!songKey.equals(lyricTitle)){lyricTitle=songKey;lyricTitleAt=t;ownPosition=0;ownAt=t;} // 同名不同歌手或不同应用也算切歌
+        lyrics.select(media.title,media.artist);
         if(media.playing)ownPosition+=t-ownAt;ownAt=t;
         String prefix=media.playing?"♫ ":"Ⅱ ",song="《"+media.title+"》"+(media.artist.isEmpty()?"":" - "+media.artist);
         // 路线一：音乐 App 的状态栏歌词（这首歌开始以后发来的才算）
