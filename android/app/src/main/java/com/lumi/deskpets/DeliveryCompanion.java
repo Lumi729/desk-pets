@@ -138,14 +138,17 @@ public final class DeliveryCompanion extends NotificationListenerService {
         if(!delivery&&!chosen)return;
         if(System.currentTimeMillis()-sbn.getPostTime()>60000)return;
         Notification n=sbn.getNotification();
-        if((n.flags&Notification.FLAG_GROUP_SUMMARY)!=0)return;
+        // 用户选中的浏览器可能只发汇总卡片，仍显示其标题。
+        // 外卖判断不处理汇总，避免把多条订单混成一条。
+        boolean summary=(n.flags&Notification.FLAG_GROUP_SUMMARY)!=0;
+        if(summary&&!chosen)return;
         if(n.extras==null)return;
         if(chosen){
             CharSequence t=n.extras.getCharSequence(Notification.EXTRA_TITLE);
             String label=sbn.getPackageName();try{label=getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(label,0)).toString();}catch(android.content.pm.PackageManager.NameNotFoundException ignored){}
             notice=label+"："+(t==null?"有新通知":t.toString().substring(0,Math.min(80,t.length())));noticeIntent=n.contentIntent;noticePkg=sbn.getPackageName();noticeAt=SystemClock.elapsedRealtime();
         }
-        if(!delivery)return;
+        if(!delivery||summary)return;
         // Read only the delivery app's visible notification text, transiently in memory.
         CharSequence title=n.extras.getCharSequence(Notification.EXTRA_TITLE);
         CharSequence body=n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
