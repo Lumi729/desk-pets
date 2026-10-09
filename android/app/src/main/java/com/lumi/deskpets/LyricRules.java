@@ -79,8 +79,16 @@ final class LyricRules {
         String t=ticker.toString().trim();
         if(t.isEmpty()||t.length()>120)return "";
         if(t.equals(title)||t.equals(artist)||t.equals(title+" - "+artist)||t.equals(artist+" - "+title))return "";
+        if(generic(t))return "";
         return t;
     }
+    /** 音乐 App 平时的固定提示（比如「网易云音乐正在播放」），不是歌词（Claude，2026-10-09：千千真机上就是这句）。 */
+    static boolean generic(String t){
+        for(String w:new String[]{"正在播放","正在收听","播放中","已暂停","网易云音乐","QQ音乐","酷狗音乐","酷我音乐","音乐正在","点击查看","Now Playing","now playing"})if(t.contains(w))return true;
+        return false;
+    }
+    /** 状态栏歌词会一句一句变：同一首歌里看到过两句不一样的，才算真的在显示歌词。 */
+    static boolean changing(int distinctLines){return distinctLines>=2;}
     /** 常见音乐 App（状态栏歌词只看它们的通知）。 */
     static boolean musicApp(String pkg){
         return "com.netease.cloudmusic".equals(pkg)||"com.tencent.qqmusic".equals(pkg)||"com.kugou.android".equals(pkg)||"cn.kuwo.player".equals(pkg)||"com.miui.player".equals(pkg)||"com.heytap.music".equals(pkg)||"com.android.bbkmusic".equals(pkg)||"com.huawei.music".equals(pkg);

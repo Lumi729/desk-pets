@@ -81,7 +81,7 @@ public final class DeliveryCompanion extends NotificationListenerService {
                 shown=DeliveryRules.inspect(app,pkg,time,n.getChannelId(),n.category,sbn.isOngoing(),title,body,sub,big,
                     e.getInt(Notification.EXTRA_PROGRESS,0),e.getInt(Notification.EXTRA_PROGRESS_MAX,0),e.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE,false),String.join(", ",keys));
                 shown+="\nticker："+(n.tickerText==null||n.tickerText.toString().trim().isEmpty()?"（没有）":n.tickerText.toString().trim())+"\nextras 内容："+extrasValues(e,keys);
-                if(music){String lyric=lyricFrom(n,e);shown+="\n状态栏歌词："+(lyric.isEmpty()?"（读不到，会改用按歌名查的歌词）":lyric);}
+                if(music){String lyric=lyricFrom(n,e);shown+="\n状态栏歌词："+(lyric.isEmpty()?"（读不到，会改用按歌名查的歌词）":lyric+"（同一首歌里要一句一句变才当歌词用）");}
                 else{String island=DeliveryRules.label(title,text(e),nowMinute());
                 shown+="\n灵动岛会显示："+(island.isEmpty()?"（读不到预计送达时间，不显示）":island);}
             }
@@ -101,6 +101,9 @@ public final class DeliveryCompanion extends NotificationListenerService {
     // ---- 状态栏歌词（Claude）：网易云等打开「状态栏歌词」时，ticker 或 extras 里带 lyric 的字段就是当前这句（只在内存里） ----
     static volatile String tickerLyric="",tickerPkg="";
     static volatile long tickerAt;
+    // 同一首歌里看到过哪几句 ticker：只有一句一直不变的（比如固定提示）不当歌词（Claude，2026-10-09）
+    private static String tickerSong="";
+    private static final java.util.Set<String> tickerSeen=new java.util.HashSet<>();
     private static String lyricFrom(Notification n,android.os.Bundle e){
         CharSequence title=e.getCharSequence(Notification.EXTRA_TITLE),text=e.getCharSequence(Notification.EXTRA_TEXT);
         for(String k:e.keySet())if(k.toLowerCase(java.util.Locale.ROOT).contains("lyric")){Object v;try{v=e.get(k);}catch(RuntimeException x){continue;}
@@ -119,7 +122,12 @@ public final class DeliveryCompanion extends NotificationListenerService {
         android.content.SharedPreferences prefs=getSharedPreferences("pets",MODE_PRIVATE);
         if(prefs.getBoolean("islandLyrics",false)&&LyricRules.musicApp(sbn.getPackageName()))try{ // 状态栏歌词
             Notification n=sbn.getNotification();String lyric=n==null||n.extras==null?"":lyricFrom(n,n.extras);
-            if(!lyric.isEmpty()){tickerLyric=lyric;tickerPkg=sbn.getPackageName();tickerAt=SystemClock.elapsedRealtime();}
+            if(!lyric.isEmpty()){
+                CharSequence song=n.extras.getCharSequence(Notification.EXTRA_TITLE);String key=sbn.getPackageName()+"|"+str(song);
+                if(!key.equals(tickerSong)){tickerSong=key;tickerSeen.clear();tickerLyric="";} // 换歌了：重新看它会不会一句一句变
+                if(tickerSeen.size()<4)tickerSeen.add(lyric);
+                if(LyricRules.changing(tickerSeen.size())){tickerLyric=lyric;tickerPkg=sbn.getPackageName();tickerAt=SystemClock.elapsedRealtime();}
+            }
         }catch(RuntimeException ignored){}
         if(prefs.getBoolean("delivery",false)){ // 外卖进度：更新就跟着变，送达或不再有预计时间就收起
             Live found=liveFrom(sbn),l=live;
@@ -151,5 +159,5 @@ public final class DeliveryCompanion extends NotificationListenerService {
         seen.put(key,now);if(seen.size()>64)seen.remove(seen.keySet().iterator().next());
         hint=message;hintIntent=n.contentIntent;hintPkg=sbn.getPackageName();hintAt=now;
     }
-    @Override public void onListenerDisconnected(){current=null;live=null;tickerLyric="";tickerPkg="";tickerAt=0;hint="";hintAt=0;notice="";noticeAt=0;noticeIntent=hintIntent=null;noticePkg=hintPkg="";seen.clear();}
+    @Override public void onListenerDisconnected(){current=null;live=null;tickerLyric="";tickerSong="";tickerSeen.clear();tickerPkg="";tickerAt=0;hint="";hintAt=0;notice="";noticeAt=0;noticeIntent=hintIntent=null;noticePkg=hintPkg="";seen.clear();}
 }

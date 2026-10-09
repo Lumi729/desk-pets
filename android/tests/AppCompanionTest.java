@@ -232,7 +232,10 @@ public final class AppCompanionTest {
         equal(LyricRules.score("晴天","周杰伦",0,"七里香","周杰伦",0),-1);
         equal(LyricRules.tickerLyric("故事的小黄花","晴天","周杰伦"),"故事的小黄花");equal(LyricRules.tickerLyric("晴天","晴天","周杰伦"),"");
         equal(LyricRules.tickerLyric("晴天 - 周杰伦","晴天","周杰伦"),"");equal(LyricRules.tickerLyric(null,"晴天","周杰伦"),"");
-        equal(LyricRules.musicApp("com.netease.cloudmusic"),true);equal(LyricRules.musicApp("com.tencent.mobileqq"),false);
+        equal(LyricRules.tickerLyric("网易云音乐正在播放","Do U","失眠白翳 - Do U"),""); // 千千真机上的固定提示，不是歌词
+        equal(LyricRules.tickerLyric("I should enjoying be alone","Do U","失眠白翳 - Do U"),"I should enjoying be alone");
+        equal(LyricRules.changing(1),false);equal(LyricRules.changing(2),true);
+                equal(LyricRules.musicApp("com.netease.cloudmusic"),true);equal(LyricRules.musicApp("com.tencent.mobileqq"),false);
         // 挑衅（Claude）：和 teases.js 的 replyFor 一样，10 分钟里第 4 次就投降
         java.util.Map<String,java.util.List<String>> replies=new java.util.LinkedHashMap<>();
         replies.put("就这",java.util.List.of("委屈"));replies.put("来打我呀",java.util.List.of("跺脚","@chase"));
