@@ -23,6 +23,12 @@ final class IslandBackground extends Drawable {
         Bitmap l = read(c, catalog.island.optString("left")), m = read(c, catalog.island.optString("middle")), r = read(c, catalog.island.optString("right"));
         return l == null || m == null || r == null ? null : new IslandBackground(l, m, r, block);
     }
+    /** 美化主题里的三段灵动岛图（Claude）；缺图就返回 null，调用方退回素材包里的默认图。 */
+    static IslandBackground load(ThemeStore.Theme theme, int block) {
+        if (theme == null) return null;
+        Bitmap l = theme.bitmap("island_left.png"), m = theme.bitmap("island_middle.png"), r = theme.bitmap("island_right.png");
+        return l == null || m == null || r == null ? null : new IslandBackground(l, m, r, block);
+    }
     private static Bitmap read(Context c, String asset) {
         if (asset == null || asset.isEmpty()) return null;
         try (InputStream in = c.getAssets().open(asset)) { return BitmapFactory.decodeStream(in); } catch (Exception e) { return null; }

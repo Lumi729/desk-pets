@@ -181,3 +181,51 @@ test('Android island panel ships its nine 11×11 pixel icons (Claude)', () => {
     assert.equal(w % 11, 0, `${name} 是 11 格的整数倍`);
   }
 });
+
+// 读小 zip（只用中央目录，够测内置美化包）
+function readZip(file) {
+  const zlib = require('node:zlib');
+  const buf = fs.readFileSync(file);
+  const end = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  const count = buf.readUInt16LE(end + 10);
+  let at = buf.readUInt32LE(end + 16);
+  const files = {};
+  for (let i = 0; i < count; i++) {
+    const method = buf.readUInt16LE(at + 10), size = buf.readUInt32LE(at + 20);
+    const nameLen = buf.readUInt16LE(at + 28), extraLen = buf.readUInt16LE(at + 30), commentLen = buf.readUInt16LE(at + 32);
+    const local = buf.readUInt32LE(at + 42), name = buf.toString('utf8', at + 46, at + 46 + nameLen);
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const raw = buf.subarray(start, start + size);
+    files[name] = method === 8 ? zlib.inflateRawSync(raw) : raw;
+    at += 46 + nameLen + extraLen + commentLen;
+  }
+  return files;
+}
+
+test('Android built-in themes follow 美化包格式 v1 and ship with the APK assets (Claude)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-themes-'));
+  try {
+    const { themes } = prepare(dir);
+    assert.deepEqual(themes, ['themes/qianqian.zip', 'themes/lili-bunny.zip']);
+    const keys = ['background', 'panel', 'rim', 'card', 'accent', 'accentText', 'text', 'subtext', 'pageText', 'pageSubtext', 'track', 'icon'];
+    for (const rel of themes) {
+      const files = readZip(path.join(dir, rel));
+      const theme = JSON.parse(files['theme.json'].toString('utf8'));
+      assert.match(theme.id, /^[a-z0-9-]{1,40}$/);
+      assert.equal(`themes/${theme.id}.zip`, rel, '文件名就是 id');
+      assert.equal(theme.version, 1);
+      for (const key of keys) assert.match(theme.colors[key], /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/, `${theme.id} ${key}`);
+      const heights = ['island_left.png', 'island_middle.png', 'island_right.png'].map(name => {
+        const png = files[name];
+        assert.ok(png && png.subarray(1, 4).toString() === 'PNG', `${theme.id} ${name}`);
+        assert.ok(png.length <= 512 * 1024);
+        return png.readUInt32BE(20);
+      });
+      assert.equal(new Set(heights).size, 1, `${theme.id} 三段一样高`);
+      for (const name of Object.keys(files)) assert.ok(!name.includes('..') && !name.startsWith('/'), name);
+    }
+    const qq = JSON.parse(readZip(path.join(dir, themes[0]))['theme.json']);
+    assert.equal(qq.colors.background, '#241E26', '千千猫猫设置页深色底');
+    assert.equal(qq.mascot, '千千猫猫');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

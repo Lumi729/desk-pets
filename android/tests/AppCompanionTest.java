@@ -236,6 +236,16 @@ public final class AppCompanionTest {
         equal(LyricRules.tickerLyric("I should enjoying be alone","Do U","失眠白翳 - Do U"),"I should enjoying be alone");
         equal(LyricRules.changing(1),false);equal(LyricRules.changing(2),true);
                 equal(LyricRules.musicApp("com.netease.cloudmusic"),true);equal(LyricRules.musicApp("com.tencent.mobileqq"),false);
+        // 美化包（Claude）：白名单、路径安全、颜色格式、图标着色
+        equal(ThemeRules.validId("lili-bunny"),true);equal(ThemeRules.validId("Lili"),false);equal(ThemeRules.validId("a/b"),false);equal(ThemeRules.validId(""),false);
+        equal(ThemeRules.allowed("theme.json"),"theme.json");equal(ThemeRules.allowed("island_left.png"),"island_left.png");equal(ThemeRules.allowed("icons/play.png"),"icons/play.png");
+        equal(ThemeRules.allowed("icons/evil.png"),null);equal(ThemeRules.allowed("readme.txt"),null);equal(ThemeRules.allowed("classes.dex"),null);
+        equal(ThemeRules.unsafe("../theme.json"),true);equal(ThemeRules.unsafe("icons/../../x.png"),true);equal(ThemeRules.unsafe("/data/x"),true);equal(ThemeRules.unsafe("C:/x"),true);equal(ThemeRules.unsafe("a\\b"),true);
+        equal(ThemeRules.unsafe("icons/play.png"),false);equal(ThemeRules.allowed("../island_left.png"),null);
+        equal(ThemeRules.color("#EFA7C0"),0xFFEFA7C0);equal(ThemeRules.color("#80EFA7C0"),0x80EFA7C0);equal(ThemeRules.color("EFA7C0"),null);equal(ThemeRules.color("#EFA7C"),null);equal(ThemeRules.color("red"),null);
+        equal(ThemeRules.recolor(0xFFFFF7FA,0xFF2C2C2A),0xFF2C2C2A);equal(ThemeRules.recolor(0x80FFFFFF,0xFF2C2C2A),0x802C2C2A);
+        equal(ThemeRules.recolor(0xFFEFA7C0,0xFF2C2C2A),0xFFEFA7C0);equal(ThemeRules.recolor(0,0xFF2C2C2A),0); // 粉色和透明不动
+        equal(ThemeRules.COLOR_KEYS.length,ThemeRules.DEFAULT_COLORS.length);equal(ThemeRules.DEFAULT_COLORS[ThemeRules.index("accent")],0xFFEFA7C0);
         // 挑衅（Claude）：和 teases.js 的 replyFor 一样，10 分钟里第 4 次就投降
         java.util.Map<String,java.util.List<String>> replies=new java.util.LinkedHashMap<>();
         replies.put("就这",java.util.List.of("委屈"));replies.put("来打我呀",java.util.List.of("跺脚","@chase"));

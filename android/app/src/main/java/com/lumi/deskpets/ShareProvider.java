@@ -29,6 +29,8 @@ public final class ShareProvider extends ContentProvider {
         }
         return new Uri.Builder().scheme("content").authority(AUTHORITY).appendPath(file.getName()).build();
     }
+    /** 已经放在缓存 share/ 里的文件（导出美化包用）。 */
+    static Uri uriFor(File file){return new Uri.Builder().scheme("content").authority(AUTHORITY).appendPath(file.getName()).build();}
     private File file(Uri uri) throws FileNotFoundException {
         Context context=getContext();String name=uri.getLastPathSegment();
         if(context==null||name==null||name.contains("/")||name.startsWith("."))throw new FileNotFoundException();
@@ -37,7 +39,7 @@ public final class ShareProvider extends ContentProvider {
         return file;
     }
     @Override public boolean onCreate(){return true;}
-    @Override public String getType(Uri uri){return "image/gif";}
+    @Override public String getType(Uri uri){String n=uri.getLastPathSegment();return n!=null&&n.endsWith(".zip")?"application/zip":"image/gif";} // 导出的美化包是 .zip
     @Override public ParcelFileDescriptor openFile(Uri uri,String mode) throws FileNotFoundException {
         if(!"r".equals(mode))throw new FileNotFoundException("read only");
         return ParcelFileDescriptor.open(file(uri),ParcelFileDescriptor.MODE_READ_ONLY);

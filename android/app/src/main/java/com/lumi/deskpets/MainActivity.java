@@ -17,140 +17,136 @@ public final class MainActivity extends Activity {
     private final Map<String,CheckBox> choices=new LinkedHashMap<>();
     private android.content.SharedPreferences prefs;
     private LinearLayout page;
-    private TextView permission;
     private SeekBar size;
     private Switch walking;
     private TextView usageStatus,interfaceStatus,weatherStatus,updateStatus;
     private boolean pendingStart;
     int dp(int value) { return Math.round(value*getResources().getDisplayMetrics().density); }
+    // ---- 设置页（Claude，2026-10-09 照千千的设计稿重排）：顶部标题 / 权限提示 / 大按钮，其余收进 7 张可折叠卡片，颜色都来自美化主题 ----
+    private ThemeStore.Theme theme;
+    private int cBg,cPanel,cRim,cCard,cAccent,cAccentText,cText,cSub,cPageText,cPageSub,cTrack,block;
+    private LinearLayout permissionBar;
+    private TextView permissionText;
+    private final List<Runnable> refreshers=new ArrayList<>(); // 回到设置页时更新摘要、权限状态
+    private final Map<String,View[]> cards=new LinkedHashMap<>(); // key → {body, arrow}
+    private static final String P_OVERLAY="overlay",P_ACCESS="access",P_NOTIFY="notify",P_USAGE="usage";
+    private static final int IMPORT_THEME=41;
     @Override public void onCreate(Bundle state) {
         super.onCreate(state); prefs=getSharedPreferences("pets",MODE_PRIVATE);
-        ScrollView scroll=new ScrollView(this); scroll.setFillViewport(true); scroll.setBackgroundColor(Color.rgb(255,248,251));
-        page=new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); page.setPadding(dp(24),dp(20),dp(24),dp(28)); scroll.addView(page); setContentView(scroll);
+        theme=ThemeStore.current(this);int[] c=theme==null?ThemeRules.DEFAULT_COLORS:theme.colors;
+        cBg=c[ThemeRules.index("background")];cPanel=c[ThemeRules.index("panel")];cRim=c[ThemeRules.index("rim")];cCard=c[ThemeRules.index("card")];cAccent=c[ThemeRules.index("accent")];cAccentText=c[ThemeRules.index("accentText")];
+        cText=c[ThemeRules.index("text")];cSub=c[ThemeRules.index("subtext")];cPageText=c[ThemeRules.index("pageText")];cPageSub=c[ThemeRules.index("pageSubtext")];cTrack=c[ThemeRules.index("track")];
+        block=Math.max(2,Math.round(getResources().getDisplayMetrics().density*2.5f));
+        getWindow().setStatusBarColor(cBg);getWindow().setNavigationBarColor(cBg);
+        if(PixelUi.light(cBg))getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|(Build.VERSION.SDK_INT>=26?View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR:0));
+        ScrollView scroll=new ScrollView(this); scroll.setFillViewport(true); scroll.setBackgroundColor(cBg);
+        page=new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); page.setPadding(dp(18),dp(20),dp(18),dp(28)); scroll.addView(page); setContentView(scroll);
         if(Build.VERSION.SDK_INT>=30) scroll.setOnApplyWindowInsetsListener((v,insets)->{ android.graphics.Insets bars=insets.getInsets(android.view.WindowInsets.Type.systemBars()|android.view.WindowInsets.Type.displayCutout()); v.setPadding(bars.left,bars.top,bars.right,bars.bottom); return insets; });
         // Keep safe content padding on both gesture and three-button navigation.
         else scroll.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
-        text("✦  梨间雪",32,true); text("把小小的陪伴，装进口袋。",16,false);
-        text("安卓尝鲜版 · "+UpdateChecker.current(this),13,false);
-        permission=text("",14,false);
-        button("让桌宠出来玩",()->startPets("start"));
-        LinearLayout controls=new LinearLayout(this); page.addView(controls);
-        smallButton(controls,"收起 / 继续",()->startPets("toggle"));
-        smallButton(controls,"全部回家",()->{stopService(new Intent(this,PetService.class));toast("小动物回家啦");});
-        text("陪你用手机",21,true);
-        Switch companion=new Switch(this);companion.setText("应用联动");companion.setChecked(prefs.getBoolean("companion",false));page.addView(companion);
-        companion.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("companion",on).apply();updateUsageStatus();});
-        usageStatus=text("",14,false);
-        text("全手机陪打字：检测到实际输入就一起打字，不用逐个设置应用，停下约 1.6 秒后停下。需要开启界面互动；密码框和不提供输入事件的页面无法联动。",13,false);
-        button("允许识别当前应用",()->{
-            stopService(new Intent(this,PetService.class));pendingStart=true;
-            try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS,Uri.parse("package:"+getPackageName())));}
-            catch(ActivityNotFoundException e){try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));}catch(ActivityNotFoundException ignored){toast("请在系统设置中搜索使用情况访问权限");}}
-        });
-        button("设置每个应用的动作",()->chooseApp());
-        text("浏览器、便签、搜索框等也会尝试陪打字；某个应用设为「不联动」时会尊重这个设置。",13,false);
-        text("站到界面上",21,true);
-        Switch ui=new Switch(this);ui.setText("界面互动 · 输入与键盘避让");ui.setChecked(prefs.getBoolean("interface",false));page.addView(ui);
-        ui.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("interface",on).apply();InterfaceCompanion.clear();updateUsageStatus();});
-        Switch perch=new Switch(this);perch.setText("自动跳上页面台阶（测试）");perch.setChecked(prefs.getBoolean("perching",false));page.addView(perch);
-        perch.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean("perching",on).apply());
-        interfaceStatus=text("",14,false);
-        text("键盘弹出时站到键盘上沿，收起后落回屏幕。消息气泡、按钮、输入框、列表图片和卡片上沿都能尝试当小台阶，自己跳上去再逐级往下跳。不限 QQ；滑动后台阶消失会播放掉落和落地动画，落稳后再继续陪打字。应用提供的边界不同，识别不到就继续散步。",13,false);
-        text("需要你单独开启无障碍服务。只使用输入变化事件与控件边界，不获取聊天文字、输入内容或截图，不代点按钮，不联网。",13,false);
-        button("允许界面互动（无障碍）",()->{
-            stopService(new Intent(this,PetService.class));pendingStart=true;
-            try{startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));}
-            catch(ActivityNotFoundException e){toast("请在系统无障碍设置中开启「界面互动 · 梨间雪桌宠」");}
-        });
-        text("天气与四季",21,true);
-        Switch weatherSwitch=new Switch(this);weatherSwitch.setText("天气与季节换装");weatherSwitch.setChecked(prefs.getBoolean("weather",false));page.addView(weatherSwitch);
-        weatherSwitch.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("weather",on).apply();updateWeatherStatus();});
-        weatherStatus=text("",14,false);
-        button("选择天气地点",()->chooseWeatherPlace());
-        text("和电脑版一样：下雨、下雪、起雾、打雷、很热、降温时换成对应的待机，平时按春夏秋冬换装，晚上晴天是晴夜。不申请定位权限：地点自己选省、市、区县，只把那里的经纬度发给天气服务 open-meteo，开着桌宠时最多 30 分钟查一次；查不到就用普通待机。只换平时的待机，不打断摸摸、拖动、贴贴和陪打字。",13,false);
-        text("过节、提醒、小窝和番茄钟",21,true);
         long today=java.time.LocalDate.now().toEpochDay();
         if(!prefs.contains("firstDay"))prefs.edit().putLong("firstDay",today).apply(); // 第一次打开的日子，第 1 天
-        option("celebrate","过节、生日、在一起的纪念日");
-        text("和千千在一起第 "+CalendarRules.daysTogether(prefs.getLong("firstDay",today),today)+" 天",14,false);
-        button("宠物生日",()->chooseBirthday());
-        option("timeRemind","时间提醒（半夜催睡觉、饭点提醒吃饭）");
-        option("nest","小窝（晚上困了回窝挤着睡）");
-        LinearLayout focusRow=new LinearLayout(this);page.addView(focusRow);
-        smallButton(focusRow,"🍅 开始专注 25 分钟",()->startPets("focus-start"));
-        smallButton(focusRow,"结束专注",()->startPets("focus-stop"));
-        text("和电脑版一样：国庆、万圣节、圣诞、春节当天伙伴换上节日动画，时不时庆祝一下；设好生日的伙伴那天会过生日；从第一次打开算起，第 7、30、100、200 天和每满一年大家一起庆祝。时间提醒在 0～5 点每 20 分钟催你睡觉，12 点、18 点左右提醒吃饭，话写在顶部提示条上。小窝放在屏幕左下角，晚上 11 点后困了的伙伴走回窝里挤着睡，早上 7 点后或者被摸醒就出来。番茄钟也能从通知栏的「🍅 专注」开始：专注时伙伴安静陪着（g老师看书），25 分钟后提醒休息 5 分钟，休息完问要不要继续。长按伙伴可以「分享这个表情」。这些都默认关闭。",13,false);
-        text("摇一摇和灵动提示",21,true);
-        option("motion","重力与摇晃互动");
-        text("轻轻连续晃动会让宠物像弹力球一样摇晃着蹦几秒，落地后吐出一道彩虹；飞起来时倾斜手机可改变方向。无需用力摇。",13,false);
-        option("climb","歪手机爬墙");
-        button("住在地面 / 住在屏幕边",()->chooseHomes());
-        TextView speedLabel=text("",15,false);
-        SeekBar climbSpeed=new SeekBar(this);climbSpeed.setMax((ClimbRules.SPEED_MAX-ClimbRules.SPEED_MIN)/ClimbRules.SPEED_STEP);
+        Catalog catalog=null;try{catalog=new Catalog(this);}catch(Exception ignored){}
+        // ---- 顶部：标题和版本、权限提示、让桌宠出来玩、收起 / 继续、全部回家 ----
+        LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);page.addView(head);
+        LinearLayout titles=new LinearLayout(this);titles.setOrientation(LinearLayout.VERTICAL);head.addView(titles,new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout titleRow=new LinearLayout(this);titleRow.setGravity(Gravity.CENTER_VERTICAL);titles.addView(titleRow);
+        titleRow.addView(pixelIcon("heart",26,0));
+        TextView name=label("梨间雪",30,cPageText,true);name.setPadding(dp(10),0,0,0);titleRow.addView(name);
+        titles.addView(label("安卓尝鲜版 · "+UpdateChecker.current(this),13,cPageSub,false));
+        PetView mascot=new PetView(this);String mascotClip=mascotClip(catalog);if(mascotClip!=null)mascot.show(mascotClip);head.addView(mascot,new LinearLayout.LayoutParams(dp(64),dp(64)));
+        permissionBar=new LinearLayout(this);permissionBar.setGravity(Gravity.CENTER_VERTICAL);permissionBar.setBackground(new IslandPanel.PixelBox(PixelUi.light(cBg)?cCard:cPanel,0,block,1));permissionBar.setPadding(dp(12),dp(10),dp(12),dp(10));
+        permissionText=label("",13,cPageText,false);permissionBar.addView(permissionText,new LinearLayout.LayoutParams(0,-2,1));
+        TextView go=label("去开启",13,cAccent,true);go.setPadding(dp(10),0,0,0);permissionBar.addView(go);
+        permissionBar.setOnClickListener(v->{for(String p:new String[]{P_OVERLAY,P_ACCESS,P_NOTIFY,P_USAGE})if(!granted(p)){openPermission(p);return;}});
+        page.addView(permissionBar,top(dp(14)));
+        refreshers.add(this::updatePermissionBar);
+        TextView start=bigButton("让桌宠出来玩",()->startPets("start"));page.addView(start,top(dp(12)));
+        LinearLayout controls=new LinearLayout(this);page.addView(controls,top(dp(10)));
+        controls.addView(outlineButton("收起 / 继续",()->startPets("toggle")),weight(0,dp(4)));
+        controls.addView(outlineButton("全部回家",()->{stopService(new Intent(this,PetService.class));toast("小动物回家啦");}),weight(dp(4),0));
+        // ---- 伙伴 ----
+        LinearLayout pets=card("pets","heart","伙伴",()->Math.min(3,selected().size())+" 只在陪你 · 散步"+(prefs.getBoolean("walking",true)?"开":"关"));
+        info(pets,"最多同时 3 只；点一下摸摸，双击跳起来，拖动放手会落下，长按回到这里。");
+        Set<String> picked=prefs.getStringSet("selected",new HashSet<>(Arrays.asList("pet0","pet2")));
+        if(catalog==null)note(pets,"素材没有加载成功，请重新安装完整安装包。");
+        else for(Catalog.Pet pet:catalog.pets) {
+            LinearLayout row=new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL); row.setPadding(dp(8),dp(2),dp(8),dp(2));row.setBackground(new IslandPanel.PixelBox(cCard,0,block,1));
+            pets.addView(row,top(dp(6)));
+            PetView view=new PetView(this);view.show(pet.clip("待机"));row.addView(view,new LinearLayout.LayoutParams(dp(56),dp(56)));
+            CheckBox check=new CheckBox(this);check.setText(pet.label);check.setTextSize(15);check.setTextColor(cText);check.setButtonTintList(android.content.res.ColorStateList.valueOf(cAccent));check.setChecked(picked.contains(pet.id));row.addView(check,new LinearLayout.LayoutParams(0,-2,1)); choices.put(pet.id,check);
+            check.setOnCheckedChangeListener((b,on)->{if(on && selected().size()>3){b.setChecked(false);toast("手机上先让 3 只一起玩哦");} save();refreshAll();});
+            row.setOnClickListener(v->check.setChecked(!check.isChecked()));
+        }
+        TextView sizeLabel=label("",14,cText,false);sizeLabel.setPadding(0,dp(12),0,0);pets.addView(sizeLabel);
+        size=slider(pets,80,prefs.getInt("size",88)-56);sizeLabel.setText(getString(R.string.pet_size,size.getProgress()+56));
+        size.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onStartTrackingTouch(SeekBar b){} public void onStopTrackingTouch(SeekBar b){save();} public void onProgressChanged(SeekBar b,int value,boolean user){sizeLabel.setText(getString(R.string.pet_size,value+56));}});
+        walking=new Switch(this);walking.setChecked(prefs.getBoolean("walking",true));walking.setOnCheckedChangeListener((v,on)->{save();refreshAll();}); // 保存用的老开关（不显示），和下面的像素开关同步
+        PixelUi.PixelSwitch walk=switchRow(pets,"让它们自己散步",null,null,walking.isChecked(),on->walking.setChecked(on));
+        chips(pets,new String[]{"应用选择和大小","试试贴贴 ♡"},new Runnable[]{()->startPets("start"),()->startPets("hug")});
+        chips(pets,new String[]{"住在地面 / 屏幕边","百变猫猫","宠物生日"},new Runnable[]{this::chooseHomes,this::chooseCatLock,this::chooseBirthday});
+        info(pets,"「住在屏幕边」的伙伴平时贴在左边或右边探头，只露出头和爪子，时不时沿着边爬到别的高度，偶尔掉下来换到另一边；不挡状态栏、灵动岛和底部导航条，键盘弹出时会避开。摸它会缩回去再探出来，拖着放到边上能换高度，拖回地面就变回住在地面。住在边上的不参加贴贴和叠叠乐，灵动岛来通知时照样去挂着，挂完回原来的边上。默认都住在地面。\n\n贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫会自动轮换，双击换下一只，也能锁定一只。\n\n哥哥狗狗和电脑版一样会照顾大家：有伙伴摔趴趴，它会走过去扶起来；晚上 11 点到早上 6 点，千千猫猫睡着时，它会过去盖被子（一晚一次），盖好后两只一起睡，摸一下才醒。演示会自动把千千猫猫和哥哥狗狗放出来。\n\n和电脑版一样会闹：千千猫猫离哥哥狗狗近时偶尔挑衅它，梨梨兔兔也会挑衅梨梨哥哥，10 分钟里被挑衅超过 3 次哥哥直接投降；长按千千猫猫或梨梨兔兔也能叫它去挑衅。哥哥狗狗和梨梨哥哥贴贴完会打一架，冷静大约 3 分钟后再碰到先和好再贴贴。拖动、摸摸随时能打断。\n\n平时还会：千千猫猫和梨梨兔兔互相送零食；煤球猫猫突然冲过去追着玩；一只打哈欠，旁边的跟着打；g老师偶尔看书，有伙伴挨过来就一起看（哥哥狗狗来是批改作业），看着看着会打瞌睡被围观，摔倒时旁边的伙伴帮忙接眼镜，偶尔和哥哥狗狗换眼镜；沙漠狐玩自己的小爱好，和 99狐狐 比尾巴，晚上两只一起睡时用尾巴当被子。");
+        // ---- 陪你用手机 ----
+        LinearLayout phone=card("phone","move","陪你用手机",()->onList(new String[]{"companion","应用联动","interface","界面互动","motion","摇晃","climb","爬墙"}));
+        LinearLayout companionSub=toggle(phone,"companion","应用联动","全手机陪打字：检测到实际输入就一起打字，不用逐个设置应用，停下约 1.6 秒后停下。需要开启界面互动；密码框和不提供输入事件的页面无法联动。\n\n浏览器、便签、搜索框等也会尝试陪打字；某个应用设为「不联动」时会尊重这个设置。网易云等在后台放歌时也会一起跳舞（需要通知使用权）。",P_USAGE,on->updateUsageStatus());
+        usageStatus=note(companionSub,"");
+        chips(companionSub,new String[]{"设置每个应用的动作"},new Runnable[]{this::chooseApp});
+        LinearLayout uiSub=toggle(phone,"interface","界面互动 · 输入与键盘避让","键盘弹出时站到键盘上沿，收起后落回屏幕。消息气泡、按钮、输入框、列表图片和卡片上沿都能尝试当小台阶，自己跳上去再逐级往下跳。不限 QQ；滑动后台阶消失会播放掉落和落地动画，落稳后再继续陪打字。应用提供的边界不同，识别不到就继续散步。\n\n需要你单独开启无障碍服务。只使用输入变化事件与控件边界，不获取聊天文字、输入内容或截图，不代点按钮，不联网。",P_ACCESS,on->{InterfaceCompanion.clear();updateUsageStatus();});
+        toggle(uiSub,"perching","自动跳上页面台阶（测试）",null,null,null);
+        interfaceStatus=note(uiSub,"");
+        toggle(phone,"motion","重力与摇晃互动","轻轻连续晃动会让宠物像弹力球一样摇晃着蹦几秒，落地后吐出一道彩虹；飞起来时倾斜手机可改变方向。无需用力摇。熄屏或收起宠物时停止摇晃检测。",null,null);
+        LinearLayout climbSub=toggle(phone,"climb","歪手机爬墙","手机往左或往右歪一会儿，一只伙伴走到那一边，沿屏幕边爬到上半部分，然后藏在边外只露出头和爪子。不管它就一直趴着，拖出来才会掉回地上。同一时间只有一只去爬；贴贴、剧情、挂灵动岛时不爬。",null,null);
+        TextView speedLabel=label("",14,cText,false);climbSub.addView(speedLabel);
         int speedNow=Math.max(ClimbRules.SPEED_MIN,Math.min(ClimbRules.SPEED_MAX,prefs.getInt("climbSpeed",100)));
-        speedLabel.setText("沿屏幕边爬的速度："+speedNow+"%");climbSpeed.setProgress((speedNow-ClimbRules.SPEED_MIN)/ClimbRules.SPEED_STEP);page.addView(climbSpeed);
+        speedLabel.setText("沿屏幕边爬的速度："+speedNow+"%");
+        SeekBar climbSpeed=slider(climbSub,(ClimbRules.SPEED_MAX-ClimbRules.SPEED_MIN)/ClimbRules.SPEED_STEP,(speedNow-ClimbRules.SPEED_MIN)/ClimbRules.SPEED_STEP);
         climbSpeed.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onStartTrackingTouch(SeekBar b){} public void onStopTrackingTouch(SeekBar b){}
             public void onProgressChanged(SeekBar b,int value,boolean user){int percent=ClimbRules.SPEED_MIN+value*ClimbRules.SPEED_STEP;speedLabel.setText("沿屏幕边爬的速度："+percent+"%");if(user)prefs.edit().putInt("climbSpeed",percent).apply();}}); // 马上生效
-        text("手机往左或往右歪一会儿，一只伙伴走到那一边，沿屏幕边爬到上半部分，然后藏在边外只露出头和爪子。不管它就一直趴着，拖出来才会掉回地上。同一时间只有一只去爬；贴贴、剧情、挂灵动岛时不爬。",13,false);
-        text("「住在屏幕边」的伙伴平时贴在左边或右边探头，只露出头和爪子，时不时沿着边爬到别的高度，偶尔掉下来换到另一边；不挡状态栏、灵动岛和底部导航条，键盘弹出时会避开。摸它会缩回去再探出来，拖着放到边上能换高度，拖回地面就变回住在地面。住在边上的不参加贴贴和叠叠乐，灵动岛来通知时照样去挂着，挂完回原来的边上。默认都住在地面。",13,false);
-        option("island","灵动提示条");
-        button("灵动岛位置、大小与拖动",()->IslandSettings.open(this,false,()->startPets("island-preview")));
-        option("islandMedia","音乐状态与播放控制");
-        option("islandLyrics","灵动岛滚动歌词（网易云等）");
-        text("打开后放歌时灵动岛显示正在唱的那句，长句子会像跑马灯一样滚过去，换句时滑到下一句；暂停就停住，切歌重新找。先读音乐 App 的「状态栏歌词」（网易云在它的设置里打开「状态栏歌词」）；读不到就把歌名和歌手发给网易云音乐网页接口查带时间轴的歌词，别的信息都不发。查不到或纯音乐就照旧只显示歌名。歌词只放在内存里，最多记最近 6 首，不存文件、不上传。有外卖、通知、计时这些提示时提示优先，结束后再回到歌词。需要下面的通知访问授权。",13,false);
-        option("islandBattery","充电与电量提示");
-        option("islandHang","伙伴挂在提示条下面");
-        button("选择挂在提示条下的伙伴",()->chooseIslandPet());
-        button("百变猫猫：自动轮换 / 锁定一只",()->chooseCatLock());
-        button("选择灵动岛通知来源",()->chooseNoticeApps());
-        button("开始灵动岛计时器",()->new AlertDialog.Builder(this).setTitle("桌宠运行期间的计时器")
+        // ---- 灵动岛 ----
+        LinearLayout island=card("island","play","灵动岛",()->onList(new String[]{"island","提示条","islandMedia","音乐","islandLyrics","歌词","delivery","外卖","islandBattery","充电","islandHang","挂着"}));
+        toggle(island,"island","顶部灵动提示条","提示条出现时（通知、充电、计时都算；听音乐、看视频、打字时不挂，照常陪你），选好的伙伴会跑到提示条下面挂着，提示条消失后再落回地面。点提示条可打开通知，长按展开灵动面板。提示条可以点一下隐藏。计时器不是系统闹钟，桌宠被强制关闭后不能保证准时提醒。",null,null);
+        toggle(island,"islandMedia","音乐状态与播放控制","音乐与通知来源需要通知使用权；通知仅显示你选中应用的标题。",P_NOTIFY,null);
+        toggle(island,"islandLyrics","滚动歌词","打开后放歌时灵动岛显示正在唱的那句，长句子会像跑马灯一样滚过去，换句时滑到下一句；暂停就停住，切歌重新找。先读音乐 App 的「状态栏歌词」；读不到就把歌名和歌手发给网易云音乐网页接口查带时间轴的歌词，别的信息都不发。查不到或纯音乐就照旧只显示歌名。歌词只放在内存里，最多记最近 6 首，不存文件、不上传。有外卖、通知、计时这些提示时提示优先。",P_NOTIFY,null);
+        toggle(island,"delivery","外卖提示","灵动岛显示预计送达倒计时。只在本机内存里读美团 / 饿了么的通知，或标题、正文里带送达、骑手、取餐、配送、商家的通知；读到「预计 HH:mm 送达」才显示倒计时，不保存、不上传、不写日志。仅转述通知，不能查询订单或保证外卖真的送达。",P_NOTIFY,null);
+        toggle(island,"islandBattery","充电与电量",null,null,null);
+        LinearLayout hangSub=toggle(island,"islandHang","伙伴挂在提示条下面",null,null,null);
+        chips(hangSub,new String[]{"选择挂着的伙伴"},new Runnable[]{this::chooseIslandPet});
+        chips(island,new String[]{"位置与大小","通知来源","计时器"},new Runnable[]{()->IslandSettings.open(this,false,()->startPets("island-preview")),this::chooseNoticeApps,this::chooseTimer});
+        // ---- 天气与日常 ----
+        LinearLayout daily=card("daily","timer","天气与日常",()->(prefs.getBoolean("weather",false)?shortPlace():"天气关")+" · 小窝"+(prefs.getBoolean("nest",false)?"开":"关")+" · 提醒"+(prefs.getBoolean("timeRemind",false)?"开":"关"));
+        LinearLayout weatherSub=toggle(daily,"weather","天气与季节换装","和电脑版一样：下雨、下雪、起雾、打雷、很热、降温时换成对应的待机，平时按春夏秋冬换装，晚上晴天是晴夜。不申请定位权限：地点自己选省、市、区县，只把那里的经纬度发给天气服务 open-meteo，开着桌宠时最多 30 分钟查一次；查不到就用普通待机。只换平时的待机，不打断摸摸、拖动、贴贴和陪打字。",null,on->updateWeatherStatus());
+        weatherStatus=note(weatherSub,"");
+        chips(weatherSub,new String[]{"选择天气地点"},new Runnable[]{this::chooseWeatherPlace});
+        LinearLayout celebrateSub=toggle(daily,"celebrate","过节、生日、在一起的纪念日","国庆、万圣节、圣诞、春节当天伙伴换上节日动画，时不时庆祝一下；设好生日的伙伴那天会过生日；从第一次打开算起，第 7、30、100、200 天和每满一年大家一起庆祝。",null,null);
+        note(celebrateSub,"和千千在一起第 "+CalendarRules.daysTogether(prefs.getLong("firstDay",today),today)+" 天");
+        chips(celebrateSub,new String[]{"宠物生日"},new Runnable[]{this::chooseBirthday});
+        toggle(daily,"timeRemind","时间提醒","0～5 点每 20 分钟催你睡觉，12 点、18 点左右提醒吃饭，话写在顶部提示条上。",null,null);
+        toggle(daily,"nest","小窝","小窝放在屏幕左下角，晚上 11 点后困了的伙伴走回窝里挤着睡，早上 7 点后或者被摸醒就出来。",null,null);
+        note(daily,"番茄钟：专注时伙伴安静陪着（g老师看书），25 分钟后提醒休息 5 分钟，休息完问要不要继续；也能从通知栏的「🍅 专注」开始。长按伙伴可以「分享这个表情」。");
+        chips(daily,new String[]{"🍅 开始专注 25 分钟","结束专注"},new Runnable[]{()->startPets("focus-start"),()->startPets("focus-stop")});
+        // ---- 美化主题 ----
+        LinearLayout looks=card("theme","heart","美化主题",()->theme==null?"千千猫猫":theme.name);
+        buildThemeCard(looks);
+        // ---- 权限 ----
+        LinearLayout perms=card("perms","hide","权限",()->{int on=0;for(String p:new String[]{P_OVERLAY,P_ACCESS,P_NOTIFY,P_USAGE})if(granted(p))on++;return "4 项里开了 "+on+" 项";});
+        for(String p:new String[]{P_OVERLAY,P_ACCESS,P_NOTIFY,P_USAGE})permissionRow(perms,p);
+        info(perms,"第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。\n\n联网的只有：检查更新（只连 GitHub 上桌宠的发布页）、打开天气后查天气（只发所选地点的经纬度）、打开滚动歌词后查歌词（只发歌名和歌手）。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。");
+        // ---- 测试与更新 ----
+        LinearLayout more=card("more","next","测试与更新",()->{String s=prefs.getString("updateStatus","");return s.isEmpty()?"当前 "+UpdateChecker.current(this):s.length()>24?s.substring(0,24)+"…":s;});
+        chips(more,new String[]{"测试动作 / 功能展示"},new Runnable[]{this::openTests});
+        toggle(more,"autoUpdate","自动检查更新","打开后立即检查；设置页打开或桌宠在屏幕上运行时定时检查。检查成功后间隔 12 小时，失败后约 15 分钟重试；服务器限流时按提示等待。手动检查不受 12 小时间隔限制。安装仍需你确认。\n\n发现新版本会问你要不要下载；下载好后打开系统安装界面，由你点「安装」。第一次需要允许「安装未知应用」。只接受 GitHub 上桌宠发布页的安装包。",null,on->{if(on)checkUpdate(false);});
+        updateStatus=note(more,prefs.getString("updateStatus","还没有检查更新"));
+        chips(more,new String[]{"检查更新"},new Runnable[]{()->checkUpdate(true)});
+        refreshAll();
+    }
+    private void openTests(){
+        new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
+            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "通知检查（外卖 / 音乐歌词，看通知里能读到什么）", "挑衅哥哥（千千猫猫 / 梨梨兔兔轮流）", "两个哥哥打架和好", "送零食（千千猫猫 / 梨梨兔兔轮流）", "煤球猫猫追着玩", "打哈欠会传染", "g老师看书 + 哥哥批改作业", "g老师看书睡着被围观", "g老师摔倒接眼镜", "哥哥和g老师换眼镜", "沙漠狐的小爱好", "两只狐狸比尾巴", "两只狐狸尾巴被子", "叠叠乐（拖一只放到另一只头上）", "百变猫猫换一只", "过节（国庆 / 万圣节 / 圣诞 / 春节）", "过生日", "在一起的纪念日", "时间提醒（睡觉、吃饭）", "回小窝睡觉 → 早上出来", "番茄钟专注", "爬左边", "爬右边", "住到左边", "住到右边", "歌词演示", "切换美化预览", "功能展示：从摇晃到小窝、番茄钟、爬墙、住在屏幕边、歌词、美化全部演一遍"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-inspect","test-tease","test-fight","test-snack","test-chase","test-yawn","test-read","test-watch","test-catch","test-swap","test-hobby","test-tails","test-tailquilt","test-stack","test-cat","test-festival","test-birthday","test-anniversary","test-remind","test-nest","test-focus","test-climb-left","test-climb-right","test-edge-left","test-edge-right","test-lyrics","test-theme","test-show"}[which])).show();
+    }
+    private void chooseTimer(){
+        new AlertDialog.Builder(this).setTitle("桌宠运行期间的计时器")
             .setItems(new String[]{"1 分钟", "5 分钟", "15 分钟", "25 分钟", "取消计时"},(d,i)->{
-                long minutes=new long[]{1,5,15,25,0}[i];prefs.edit().putLong("timerEnd",minutes==0?0:System.currentTimeMillis()+minutes*60000).apply();startPets("start");}).show());
-        text("提示条出现时（通知、充电、计时都算；听音乐、看视频时不挂，照常陪你看视频、跳舞），选好的伙伴会跑到提示条下面挂着，提示条消失后再落回地面；默认是第一只出来的伙伴。点顶部提示条可展开音乐控制和计时器。音乐与通知来源需要下方的通知访问授权；通知仅显示你选中应用的标题。计时器不是系统闹钟，桌宠被强制关闭后不能保证准时提醒。",13,false);
-        option("delivery","外卖通知提示（灵动岛显示预计送达倒计时）");
-        text("外卖提示需单独授予通知访问权限。只在本机内存里读美团 / 饿了么的通知，或标题、正文里带送达、骑手、取餐、配送、商家的通知；读到「预计 HH:mm 送达」才显示倒计时，不保存、不上传、不写日志。仅转述通知，不能查询订单或保证外卖真的送达。",13,false);
-        button("允许音乐与通知访问",()->{
-            stopService(new Intent(this,PetService.class));pendingStart=true;
-            try{startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));}catch(ActivityNotFoundException e){toast("请在系统设置中搜索通知使用权");}
-        });
-        text("提示条可以点一下隐藏；熄屏或收起宠物时停止摇晃检测。",13,false);
-        text("选择陪你的伙伴",21,true);
-        text("最多同时 3 只；点一下摸摸，双击跳起来，拖动放手会落下，长按回到这里。",14,false);
-        Set<String> selected=prefs.getStringSet("selected",new HashSet<>(Arrays.asList("pet0","pet2")));
-        try {
-            Catalog catalog=new Catalog(this);
-            for(Catalog.Pet pet:catalog.pets) {
-                LinearLayout row=new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL); row.setPadding(dp(10),dp(4),dp(10),dp(4));
-                GradientDrawable bg=new GradientDrawable();bg.setColor(Color.WHITE);bg.setCornerRadius(dp(18)); row.setBackground(bg);
-                LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,dp(82));rp.topMargin=dp(8);page.addView(row,rp);
-                PetView view=new PetView(this);view.show(pet.clip("待机"));row.addView(view,new LinearLayout.LayoutParams(dp(70),dp(70)));
-                CheckBox check=new CheckBox(this);check.setText(pet.label);check.setTextSize(15);check.setChecked(selected.contains(pet.id));row.addView(check,new LinearLayout.LayoutParams(0,-2,1)); choices.put(pet.id,check);
-                check.setOnCheckedChangeListener((b,on)->{if(on && selected().size()>3){b.setChecked(false);toast("手机上先让 3 只一起玩哦");} save();});
-                row.setOnClickListener(v->check.setChecked(!check.isChecked()));
-            }
-        } catch(Exception error) { text("素材没有加载成功，请重新安装完整安装包。",16,true); }
-        text("舒舒服服地陪着你",21,true);
-        TextView sizeLabel=text("宠物大小",15,false);
-        size=new SeekBar(this);size.setMax(80);size.setProgress(prefs.getInt("size",88)-56);page.addView(size);
-        size.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onStartTrackingTouch(SeekBar b){} public void onStopTrackingTouch(SeekBar b){save();} public void onProgressChanged(SeekBar b,int value,boolean user){sizeLabel.setText(getString(R.string.pet_size,value+56));}});
-        walking=new Switch(this);walking.setText("让它们自己散步");walking.setChecked(prefs.getBoolean("walking",true));page.addView(walking);walking.setOnCheckedChangeListener((v,on)->save());
-        button("应用选择和大小",()->startPets("start"));
-        button("试试贴贴 ♡",()->startPets("hug"));
-        button("测试动作 / 功能展示",()->new AlertDialog.Builder(this).setTitle("让伙伴演给你看")
-            .setItems(new String[]{"陪我打字", "一起看视频", "一起跳舞", "蹦起来", "气泡台阶跳跃演示", "打字中掉落 → 落稳继续打字", "窄台阶站稳测试", "摇晃与彩虹演示", "灵动提示演示", "吐彩虹", "挂灵动岛", "天气演示（所有天气和四季）", "哥哥扶起来", "哥哥盖被子", "通知检查（外卖 / 音乐歌词，看通知里能读到什么）", "挑衅哥哥（千千猫猫 / 梨梨兔兔轮流）", "两个哥哥打架和好", "送零食（千千猫猫 / 梨梨兔兔轮流）", "煤球猫猫追着玩", "打哈欠会传染", "g老师看书 + 哥哥批改作业", "g老师看书睡着被围观", "g老师摔倒接眼镜", "哥哥和g老师换眼镜", "沙漠狐的小爱好", "两只狐狸比尾巴", "两只狐狸尾巴被子", "叠叠乐（拖一只放到另一只头上）", "百变猫猫换一只", "过节（国庆 / 万圣节 / 圣诞 / 春节）", "过生日", "在一起的纪念日", "时间提醒（睡觉、吃饭）", "回小窝睡觉 → 早上出来", "番茄钟专注", "爬左边", "爬右边", "住到左边", "住到右边", "歌词演示", "功能展示：从摇晃到小窝、番茄钟、爬墙、住在屏幕边、歌词全部演一遍"},(d,which)->startPets(new String[]{"test-type","test-video","test-music","test-jump","test-perch","test-drop","test-narrow","test-shake","test-island","test-rainbow","test-hang","test-weather","test-helpup","test-blanket","test-inspect","test-tease","test-fight","test-snack","test-chase","test-yawn","test-read","test-watch","test-catch","test-swap","test-hobby","test-tails","test-tailquilt","test-stack","test-cat","test-festival","test-birthday","test-anniversary","test-remind","test-nest","test-focus","test-climb-left","test-climb-right","test-edge-left","test-edge-right","test-lyrics","test-show"}[which])).show());
-        text("哥哥狗狗和电脑版一样会照顾大家：有伙伴摔趴趴，它会走过去扶起来；晚上 11 点到早上 6 点，千千猫猫睡着时，它会过去盖被子（一晚一次），盖好后两只一起睡，摸一下才醒。演示会自动把千千猫猫和哥哥狗狗放出来。",13,false);
-        text("和电脑版一样会闹：千千猫猫离哥哥狗狗近时偶尔挑衅它，梨梨兔兔也会挑衅梨梨哥哥，10 分钟里被挑衅超过 3 次哥哥直接投降；长按千千猫猫或梨梨兔兔也能叫它去挑衅。哥哥狗狗和梨梨哥哥贴贴完会打一架，冷静大约 3 分钟后再碰到先和好再贴贴。拖动、摸摸随时能打断。",13,false);
-        text("平时还会：千千猫猫和梨梨兔兔互相送零食；煤球猫猫突然冲过去追着玩；一只打哈欠，旁边的跟着打；g老师偶尔看书，有伙伴挨过来就一起看（哥哥狗狗来是批改作业），看着看着会打瞌睡被围观，摔倒时旁边的伙伴帮忙接眼镜，偶尔和哥哥狗狗换眼镜；沙漠狐玩自己的小爱好，和 99狐狐 比尾巴，晚上两只一起睡时用尾巴当被子。",13,false);
-        text("贴贴沿用电脑版的搭配规则，选两只有对应动画的伙伴就能试。百变猫猫会自动轮换，双击换下一只，也能在上面锁定一只。",13,false);
-        text("第一次需要你允许“显示在其他应用上层”。通知栏可收起或关闭；熄屏时暂停。若后台被手机清理，可在系统的应用电池设置中允许后台运行。",13,false);
-        text("只有检查更新（只连 GitHub 上桌宠的发布页）和打开天气后查天气（只发所选地点的经纬度）时联网。界面互动只看控件位置和输入变化，不读取聊天文字或按键内容。",13,false);
-        text("更新",21,true);
-        Switch autoUpdate=new Switch(this);autoUpdate.setText("自动检查更新");autoUpdate.setChecked(prefs.getBoolean("autoUpdate",false));page.addView(autoUpdate);
-        autoUpdate.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("autoUpdate",on).apply();if(on)checkUpdate(false);});
-        text("打开后立即检查；设置页打开或桌宠在屏幕上运行时定时检查。检查成功后间隔 12 小时，失败后约 15 分钟重试；服务器限流时按提示等待。手动检查不受 12 小时间隔限制。安装仍需你确认。",13,false);
-        updateStatus=text(prefs.getString("updateStatus","还没有检查更新"),13,false);
-        button("检查更新",()->checkUpdate(true));
-        text("发现新版本会问你要不要下载；下载好后打开系统安装界面，由你点「安装」。第一次需要允许「安装未知应用」。只接受 GitHub 上桌宠发布页的安装包。",13,false);
+                long minutes=new long[]{1,5,15,25,0}[i];prefs.edit().putLong("timerEnd",minutes==0?0:System.currentTimeMillis()+minutes*60000).apply();startPets("start");}).show();
     }
     private void updateUsageStatus(){if(interfaceStatus!=null)interfaceStatus.setText(!prefs.getBoolean("interface",false)?"界面互动已关闭":InterfaceCompanion.connected?"界面互动已连接 · 回聊天应用输入，或到其他页面看它跳台阶":"等待你在无障碍设置中开启「界面互动 · 梨间雪桌宠」");if(usageStatus!=null)usageStatus.setText(!prefs.getBoolean("companion",false)?"联动已关闭":(UsageCompanion.allowed(this)||InterfaceCompanion.connected&&prefs.getBoolean("interface",false))?"联动已开启 · 回到其他应用，约 2 秒切换动作":"联动等待授权 · 请允许使用情况访问权限");}
     private void chooseApp(){
@@ -269,12 +265,213 @@ public final class MainActivity extends Activity {
             }).setNegativeButton("返回",null).show();
         }catch(Exception e){toast("素材没有加载成功");}
     }
-    private void option(String key,String title){Switch s=new Switch(this);s.setText(title);s.setChecked(prefs.getBoolean(key,false));page.addView(s);s.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean(key,on).apply());}
-    private TextView text(String s,int sp,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(Color.rgb(102,66,84));if(bold)v.setTypeface(null,android.graphics.Typeface.BOLD);v.setPadding(0,dp(10),0,dp(8));page.addView(v);return v;}
-    private void button(String name,Runnable action){Button b=new Button(this);b.setText(name);b.setAllCaps(false);page.addView(b,new LinearLayout.LayoutParams(-1,dp(54)));b.setOnClickListener(v->action.run());}
-    private void smallButton(LinearLayout row,String name,Runnable action){Button b=new Button(this);b.setText(name);row.addView(b,new LinearLayout.LayoutParams(0,dp(52),1));b.setOnClickListener(v->action.run());}
     private Set<String> selected(){Set<String> ids=new HashSet<>();for(Map.Entry<String,CheckBox> c:choices.entrySet())if(c.getValue().isChecked())ids.add(c.getKey());return ids;}
     private void save(){android.content.SharedPreferences.Editor e=prefs.edit().putStringSet("selected",selected());if(size!=null)e.putInt("size",size.getProgress()+56);if(walking!=null)e.putBoolean("walking",walking.isChecked());e.apply();}
+    // ---- 设置页的小零件（Claude）：都用美化主题的颜色和像素台阶边角 ----
+    private TextView label(String s,float sp,int color,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(color);if(bold)v.setTypeface(null,android.graphics.Typeface.BOLD);return v;}
+    private LinearLayout.LayoutParams top(int margin){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=margin;return p;}
+    private LinearLayout.LayoutParams weight(int left,int right){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(48),1);p.leftMargin=left;p.rightMargin=right;return p;}
+    /** 11×11 像素图标按整数倍放大；主题自带的优先，没有就用默认图标按主题颜色着色。 */
+    private ImageView pixelIcon(String name,float targetDp,int tint){
+        int res=IslandPanel.res(name);
+        android.graphics.Bitmap bmp=theme==null?android.graphics.BitmapFactory.decodeResource(getResources(),res):theme.icon(this,name,res);
+        android.graphics.drawable.BitmapDrawable d=new android.graphics.drawable.BitmapDrawable(getResources(),bmp);d.setFilterBitmap(false);
+        if(tint!=0)d.setColorFilter(new android.graphics.PorterDuffColorFilter(tint,android.graphics.PorterDuff.Mode.SRC_IN));
+        ImageView v=new ImageView(this);v.setImageDrawable(d);v.setScaleType(ImageView.ScaleType.FIT_XY);
+        int k=Math.max(1,Math.round(targetDp*getResources().getDisplayMetrics().density/11f));v.setLayoutParams(new LinearLayout.LayoutParams(11*k,11*k));
+        return v;
+    }
+    private TextView bigButton(String text,Runnable action){
+        TextView b=label(text,19,cAccentText,true);b.setGravity(Gravity.CENTER);b.setMinHeight(dp(60));
+        b.setBackground(new IslandPanel.PixelBox(cAccent,PixelUi.light(cBg)?cRim:0,block,2));b.setOnClickListener(v->action.run());return b;
+    }
+    private TextView outlineButton(String text,Runnable action){
+        TextView b=label(text,15,cPageText,true);b.setGravity(Gravity.CENTER);
+        b.setBackground(new IslandPanel.PixelBox(cPanel,cRim,block,2));b.setOnClickListener(v->action.run());return b;
+    }
+    /** 可折叠卡片：标题下面一行写摘要，点标题展开 / 收起，一次只展开一张，记住上次展开的是哪张。返回放内容的地方。 */
+    private LinearLayout card(String key,String icon,String title,java.util.function.Supplier<String> summary){
+        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setBackground(new IslandPanel.PixelBox(cPanel,cRim,block,2));box.setPadding(dp(14),dp(12),dp(14),dp(12));
+        page.addView(box,top(dp(12)));
+        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);box.addView(header);
+        FrameLayout iconBox=new FrameLayout(this);iconBox.setBackground(new IslandPanel.PixelBox(cCard,0,block,1));
+        ImageView i=pixelIcon(icon,22,0);int k=i.getLayoutParams().width;FrameLayout.LayoutParams at=new FrameLayout.LayoutParams(k,k);at.gravity=Gravity.CENTER;iconBox.addView(i,at);
+        header.addView(iconBox,new LinearLayout.LayoutParams(dp(40),dp(40)));
+        LinearLayout words=new LinearLayout(this);words.setOrientation(LinearLayout.VERTICAL);words.setPadding(dp(12),0,0,0);header.addView(words,new LinearLayout.LayoutParams(0,-2,1));
+        words.addView(label(title,18,cText,true));
+        TextView sum=label("",12,cSub,false);words.addView(sum);
+        View arrow=new View(this);header.addView(arrow,new LinearLayout.LayoutParams(block*6,block*5));
+        LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(0,dp(8),0,0);box.addView(body);
+        cards.put(key,new View[]{body,arrow,sum});
+        header.setOnClickListener(v->{boolean open=body.getVisibility()!=View.VISIBLE;prefs.edit().putString("settingsOpen",open?key:"").apply();applyCards();});
+        refreshers.add(()->sum.setText(summary.get()));
+        applyCards();
+        return body;
+    }
+    private void applyCards(){
+        String open=prefs.getString("settingsOpen","");
+        for(Map.Entry<String,View[]> e:cards.entrySet()){
+            boolean on=e.getKey().equals(open);View[] v=e.getValue();
+            v[0].setVisibility(on?View.VISIBLE:View.GONE);v[2].setVisibility(on?View.GONE:View.VISIBLE);
+            v[1].setBackground(on?new PixelUi.PixelDown(cSub,block):new IslandPanel.PixelChevron(cSub,block));
+        }
+    }
+    /** 一行说明（一直显示）。 */
+    private TextView note(LinearLayout parent,String s){TextView t=label(s,13,cSub,false);t.setPadding(0,dp(6),0,dp(4));parent.addView(t);return t;}
+    /** 「ⓘ 说明」默认收起，点开才显示。 */
+    private void info(LinearLayout parent,String s){
+        TextView open=label("ⓘ 说明",13,cSub,false);open.setPadding(0,dp(8),0,dp(4));parent.addView(open);
+        TextView t=label(s,13,cSub,false);t.setVisibility(View.GONE);parent.addView(t);
+        open.setOnClickListener(v->t.setVisibility(t.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE));
+    }
+    /** 一排按钮（最多三个一排）。 */
+    private void chips(LinearLayout parent,String[] labels,Runnable[] actions){
+        LinearLayout row=null;
+        for(int i=0;i<labels.length;i++){
+            if(i%3==0){row=new LinearLayout(this);parent.addView(row,top(dp(8)));}
+            TextView b=label(labels[i],14,cText,true);b.setGravity(Gravity.CENTER);b.setPadding(dp(6),0,dp(6),0);b.setBackground(new IslandPanel.PixelBox(cCard,0,block,1));
+            Runnable a=actions[i];b.setOnClickListener(v->a.run());
+            LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(44),1);p.leftMargin=i%3==0?0:dp(6);row.addView(b,p);
+        }
+    }
+    private SeekBar slider(LinearLayout parent,int max,int progress){
+        SeekBar s=new SeekBar(this);s.setMax(max);s.setProgress(progress);
+        s.setProgressTintList(android.content.res.ColorStateList.valueOf(cAccent));s.setThumbTintList(android.content.res.ColorStateList.valueOf(cAccent));s.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(cTrack));
+        parent.addView(s,top(dp(4)));return s;
+    }
+    /** 开关一行：文字、可选的「ⓘ」、像素开关；下面是收起的说明和「需要先开启 xx →」。 */
+    private PixelUi.PixelSwitch switchRow(LinearLayout parent,String title,String infoText,String perm,boolean initial,PixelUi.PixelSwitch.Listener listener){
+        View line=new View(this);line.setBackgroundColor(cCard);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,Math.max(1,block/2));lp.topMargin=dp(6);parent.addView(line,lp);
+        LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(48));parent.addView(row);
+        row.addView(label(title,15,cText,false),new LinearLayout.LayoutParams(0,-2,1));
+        TextView more=null;
+        if(infoText!=null){more=label("ⓘ",17,cSub,false);more.setPadding(dp(10),dp(6),dp(12),dp(6));row.addView(more);}
+        PixelUi.PixelSwitch sw=new PixelUi.PixelSwitch(this,cAccent,cTrack,0xFFFFFFFF,cRim,block);sw.set(initial,false);sw.listen(listener);
+        row.addView(sw,new LinearLayout.LayoutParams(dp(54),dp(28)));
+        if(infoText!=null){TextView t=label(infoText,13,cSub,false);t.setVisibility(View.GONE);t.setPadding(0,0,0,dp(6));parent.addView(t);more.setOnClickListener(v->t.setVisibility(t.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE));}
+        if(perm!=null){
+            TextView need=label("需要先开启"+permName(perm)+" →",13,cAccent,false);need.setPadding(0,0,0,dp(6));parent.addView(need);
+            need.setOnClickListener(v->openPermission(perm));
+            refreshers.add(()->need.setVisibility(granted(perm)?View.GONE:View.VISIBLE));
+        }
+        return sw;
+    }
+    /** 存在 prefs 里的开关；返回它的子设置区（只在打开时显示，稍微缩进）。 */
+    private LinearLayout toggle(LinearLayout parent,String key,String title,String infoText,String perm,java.util.function.Consumer<Boolean> after){
+        LinearLayout sub=new LinearLayout(this);sub.setOrientation(LinearLayout.VERTICAL);sub.setPadding(dp(16),0,0,dp(4));
+        boolean on=prefs.getBoolean(key,false);
+        switchRow(parent,title,infoText,perm,on,value->{prefs.edit().putBoolean(key,value).apply();sub.setVisibility(value?View.VISIBLE:View.GONE);if(after!=null)after.accept(value);refreshAll();});
+        parent.addView(sub);sub.setVisibility(on?View.VISIBLE:View.GONE);
+        return sub;
+    }
+    /** 摘要：列出开着的几项（「应用联动开 · 爬墙开」）。 */
+    private String onList(String[] pairs){
+        StringBuilder b=new StringBuilder();
+        for(int i=0;i<pairs.length;i+=2)if(prefs.getBoolean(pairs[i],false)){if(b.length()>0)b.append(" · ");b.append(pairs[i+1]).append("开");}
+        return b.length()==0?"都没开":b.toString();
+    }
+    private String shortPlace(){String p=WeatherCompanion.place(prefs);int i=p.lastIndexOf(" · ");return i>=0?p.substring(i+3):p;}
+    private String mascotClip(Catalog catalog){
+        if(catalog==null)return null;
+        String want=theme==null?"千千猫猫":theme.mascot;
+        for(Catalog.Pet p:catalog.pets)if(p.name.equals(want))return p.clip("待机");
+        Set<String> ids=prefs.getStringSet("selected",new HashSet<>(Arrays.asList("pet0","pet2")));
+        for(Catalog.Pet p:catalog.pets)if(ids.contains(p.id))return p.clip("待机");
+        return catalog.pets.isEmpty()?null:catalog.pets.get(0).clip("待机");
+    }
+    private void refreshAll(){for(Runnable r:refreshers)r.run();}
+    // ---- 权限（Claude）：集中在「权限」卡片，每项显示已开启 / 未开启 ----
+    private String permName(String p){switch(p){case P_OVERLAY:return "悬浮窗";case P_ACCESS:return "无障碍（界面互动）";case P_NOTIFY:return "通知使用权（音乐、歌词、外卖）";default:return "使用情况访问（应用联动）";}}
+    private boolean granted(String p){
+        switch(p){
+            case P_OVERLAY:return Settings.canDrawOverlays(this);
+            case P_ACCESS:{String s=Settings.Secure.getString(getContentResolver(),Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);return s!=null&&s.contains(getPackageName()+"/");}
+            case P_NOTIFY:{String s=Settings.Secure.getString(getContentResolver(),"enabled_notification_listeners");return s!=null&&s.contains(getPackageName()+"/");}
+            default:return UsageCompanion.allowed(this);
+        }
+    }
+    /** 和原来各个「允许 xx」按钮一样跳到系统授权页。 */
+    private void openPermission(String p){
+        switch(p){
+            case P_OVERLAY:try{startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName())));}catch(ActivityNotFoundException e){toast("请在系统设置中允许桌宠显示悬浮窗");}break;
+            case P_ACCESS:stopService(new Intent(this,PetService.class));pendingStart=true;
+                try{startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));}catch(ActivityNotFoundException e){toast("请在系统无障碍设置中开启「界面互动 · 梨间雪桌宠」");}break;
+            case P_NOTIFY:stopService(new Intent(this,PetService.class));pendingStart=true;
+                try{startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));}catch(ActivityNotFoundException e){toast("请在系统设置中搜索通知使用权");}break;
+            default:stopService(new Intent(this,PetService.class));pendingStart=true;
+                try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS,Uri.parse("package:"+getPackageName())));}
+                catch(ActivityNotFoundException e){try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));}catch(ActivityNotFoundException ignored){toast("请在系统设置中搜索使用情况访问权限");}}
+        }
+    }
+    private void permissionRow(LinearLayout parent,String p){
+        LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(52));parent.addView(row);
+        LinearLayout words=new LinearLayout(this);words.setOrientation(LinearLayout.VERTICAL);row.addView(words,new LinearLayout.LayoutParams(0,-2,1));
+        words.addView(label(permName(p),15,cText,false));
+        TextView state=label("",12,cSub,false);words.addView(state);
+        TextView go=label("去开启",14,cText,true);go.setGravity(Gravity.CENTER);go.setPadding(dp(14),0,dp(14),0);go.setBackground(new IslandPanel.PixelBox(cCard,0,block,1));
+        row.addView(go,new LinearLayout.LayoutParams(-2,dp(38)));go.setOnClickListener(v->openPermission(p));
+        refreshers.add(()->{boolean on=granted(p);state.setText(on?"已开启":"未开启");state.setTextColor(on?cAccent:cSub);go.setText(on?"去设置":"去开启");});
+    }
+    private void updatePermissionBar(){
+        List<String> missing=new ArrayList<>();
+        for(String p:new String[]{P_OVERLAY,P_ACCESS,P_NOTIFY,P_USAGE})if(!granted(p))missing.add(permName(p));
+        permissionBar.setVisibility(missing.isEmpty()?View.GONE:View.VISIBLE);
+        permissionText.setText("⚠ 还有 "+missing.size()+" 项权限没开："+String.join("、",missing));
+    }
+    // ---- 美化主题（Claude）：下拉框 + 灵动岛小样 + 导入 / 导出 / 删除 ----
+    private void buildThemeCard(LinearLayout body){
+        List<ThemeStore.Theme> all=ThemeStore.list(this);
+        String[] names=new String[all.size()];int current=0;
+        for(int i=0;i<all.size();i++){ThemeStore.Theme t=all.get(i);names[i]=t.name+(t.builtIn?"（内置）":"（导入）");if(theme!=null&&t.id.equals(theme.id))current=i;}
+        LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);body.addView(row,top(dp(4)));
+        Spinner pick=new Spinner(this,Spinner.MODE_DROPDOWN);pick.setBackground(new IslandPanel.PixelBox(cCard,0,block,1));pick.setPopupBackgroundDrawable(new IslandPanel.PixelBox(cPanel,cRim,block,1));
+        pick.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,names){
+            @Override public View getView(int pos,View convert,ViewGroup parent){TextView v=(TextView)super.getView(pos,convert,parent);v.setTextColor(cText);v.setPadding(dp(12),dp(8),dp(12),dp(8));return v;}
+            @Override public View getDropDownView(int pos,View convert,ViewGroup parent){TextView v=(TextView)super.getView(pos,convert,parent);v.setTextColor(cText);v.setPadding(dp(14),dp(12),dp(14),dp(12));return v;}
+        });
+        pick.setSelection(current,false);
+        pick.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(AdapterView<?> p,View v,int pos,long id){ThemeStore.Theme t=all.get(pos);if(theme!=null&&t.id.equals(theme.id))return;ThemeStore.choose(MainActivity.this,t.id);toast("换成「"+t.name+"」啦");recreate();} // 选中马上生效
+            public void onNothingSelected(AdapterView<?> p){}
+        });
+        row.addView(pick,new LinearLayout.LayoutParams(0,dp(46),1));
+        // 灵动岛小样
+        float density=getResources().getDisplayMetrics().density;int islandBlock=IslandHang.block(density);
+        TextView preview=label("♫ 梨间雪",13,theme==null?Color.WHITE:theme.color("text"),false);preview.setGravity(Gravity.CENTER);preview.setSingleLine(true);
+        IslandBackground art=IslandBackground.load(theme,islandBlock);
+        if(art!=null){preview.setBackground(art);preview.setPadding(art.capWidth(),0,art.capWidth(),0);}
+        LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(dp(140),IslandHang.height(islandBlock));pp.leftMargin=dp(10);row.addView(preview,pp);
+        chips(body,new String[]{"导入美化","导出当前","删除"},new Runnable[]{this::importTheme,this::exportTheme,this::deleteTheme});
+        note(body,"美化包是一个 .zip：theme.json 加三段灵动岛像素图（还可以放面板图标），只换颜色和图片，不会执行任何代码。格式说明在仓库 docs/美化包格式说明.md。");
+    }
+    private void importTheme(){
+        Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+            .putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/zip","application/x-zip-compressed","application/octet-stream"});
+        try{startActivityForResult(pick,IMPORT_THEME);}catch(ActivityNotFoundException e){toast("这台手机打不开文件选择器");}
+    }
+    @Override protected void onActivityResult(int request,int result,Intent data){
+        super.onActivityResult(request,result,data);
+        if(request!=IMPORT_THEME||result!=RESULT_OK||data==null||data.getData()==null)return;
+        try{
+            ThemeStore.Theme t=ThemeStore.importZip(this,data.getData());
+            if(t==null){toast("导入失败：保存后读不出来");return;}
+            ThemeStore.choose(this,t.id);toast("导入好啦，换成「"+t.name+"」");recreate();
+        }catch(ThemeStore.ThemeError e){new AlertDialog.Builder(this).setTitle("导入失败").setMessage(e.getMessage()).setPositiveButton("知道了",null).show();}
+    }
+    private void exportTheme(){
+        if(theme==null){toast("现在的主题读不出来");return;}
+        try{
+            java.io.File f=ThemeStore.export(this,theme);Uri uri=ShareProvider.uriFor(f);
+            Intent send=new Intent(Intent.ACTION_SEND).setType("application/zip").putExtra(Intent.EXTRA_STREAM,uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            send.setClipData(ClipData.newRawUri(theme.name,uri));
+            startActivity(Intent.createChooser(send,"导出美化包（可以选「保存到文件」）").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        }catch(java.io.IOException|RuntimeException e){toast("导出没成功，再试一次吧");}
+    }
+    private void deleteTheme(){
+        if(theme==null||theme.builtIn){toast("内置的主题不能删");return;}
+        String name=theme.name,id=theme.id;
+        new AlertDialog.Builder(this).setTitle("删除「"+name+"」？").setMessage("删掉后会换回千千猫猫。").setPositiveButton("删除",(d,i)->{ThemeStore.delete(this,id);toast("删好啦");recreate();}).setNegativeButton("取消",null).show();
+    }
     private void startPets(String action){
         if(selected().isEmpty()){toast("先选一只伙伴吧");return;} save();
         if(!Settings.canDrawOverlays(this)){
@@ -338,6 +535,6 @@ public final class MainActivity extends Activity {
         else if(UpdateChecker.due(prefs))checkUpdate(false);
         poll.removeCallbacks(watchUpdates);poll.postDelayed(watchUpdates,60000);
         if(updateStatus!=null&&!updateChecking)updateStatus.setText(prefs.getString("updateStatus","还没有检查更新"));
-        updateUsageStatus();if(permission!=null)permission.setText(Settings.canDrawOverlays(this)?"✧ 悬浮窗已允许":"✧ 初次开启需允许悬浮窗");if(pendingStart && Settings.canDrawOverlays(this)){pendingStart=false;startPets("start");}}
+        updateUsageStatus();refreshAll();if(pendingStart && Settings.canDrawOverlays(this)){pendingStart=false;startPets("start");}}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
 }

@@ -136,6 +136,15 @@ function prepare(out) {
   }
   Object.assign(stories, pairStories);
   // 小窝两层：后层在宠物下面，前层盖在宠物上面（Claude）
+  // 内置美化包（Claude）：千千猫猫（默认）和梨梨兔兔，原样跟着 APK 装，app 里按同一套规则读
+  const themes = [];
+  fs.mkdirSync(path.join(out, 'themes'));
+  for (const id of ['qianqian', 'lili-bunny']) {
+    const from = path.join(root, 'android', 'themes', `${id}.zip`);
+    if (!fs.existsSync(from)) throw new Error(`Missing theme pack: ${id}.zip`);
+    fs.copyFileSync(from, path.join(out, 'themes', `${id}.zip`));
+    themes.push(`themes/${id}.zip`);
+  }
   const nest = {};
   fs.mkdirSync(path.join(out, 'nest'));
   for (const [part, file] of Object.entries({ back: '小窝_后.png', front: '小窝_前.png' })) {
@@ -144,7 +153,7 @@ function prepare(out) {
     fs.copyFileSync(from, path.join(out, 'nest', `${part}.png`));
     nest[part] = `nest/${part}.png`;
   }
-  const data = { pets, hugs, island, stories, teases, stacks, nest };
+  const data = { pets, hugs, island, stories, teases, stacks, nest, themes };
   fs.writeFileSync(path.join(out, 'catalog.json'), JSON.stringify(data));
   return data;
 }

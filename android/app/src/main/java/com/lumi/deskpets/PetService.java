@@ -99,7 +99,11 @@ public final class PetService extends Service {
     private String batteryLabel="";
     private boolean islandFromNotice;
     private AlertDialog islandSettings;
-    private IslandPanel islandPanel; // 灵动面板：照千千的设计稿画的像素面板（Claude，2026-10-08）
+    private IslandPanel islandPanel;
+    // 美化主题（Claude）：灵动岛三段图、文字颜色、灵动面板都跟着主题；演示时可以临时换一个
+    private ThemeStore.Theme themeOverride;
+    private String islandThemeId="";
+    private int islandTextColor=android.graphics.Color.WHITE; // 灵动面板：照千千的设计稿画的像素面板（Claude，2026-10-08）
     private boolean islandDragging,islandLongPressed,islandTouching,islandMoved;
     private float islandDownX,islandDownY;
     private int islandStartX,islandStartY;
@@ -192,6 +196,7 @@ public final class PetService extends Service {
         if("test-edge-left".equals(action))edgeDemo(-1);
         if("test-edge-right".equals(action))edgeDemo(1);
         if("test-lyrics".equals(action))lyricDemo();
+        if("test-theme".equals(action))themeDemo();
         if("test-tease".equals(action))teaseDemo();
         if("test-snack".equals(action))snackDemo();
         if("test-chase".equals(action))chaseDemo();
@@ -934,8 +939,8 @@ public final class PetService extends Service {
         show.removeCallbacksAndMessages(null);
         Runnable[] steps={this::bounceParty,()->{hangDemo();tell("灵动岛可在设置中调位置和大小，开启后可以拖动",8000);},this::weatherDemoStart,this::helpUpDemo,this::blanketDemo,this::teaseDemo,this::fightDemoStart,
             this::snackDemo,this::chaseDemo,this::yawnDemo,this::readDemo,this::watchDemo,this::catchDemo,this::swapDemo,this::hobbyDemo,this::tailsDemo,this::tailquiltDemo,this::stackDemo,this::catDemo,
-            this::festivalDemoStart,this::birthdayDemo,this::anniversaryDemo,this::remindDemo,this::nestDemo,this::focusDemo,()->climbDemo(-1),()->climbDemo(1),()->edgeDemo(-1),()->edgeDemo(1),this::lyricDemo};
-        long[] at={0,9000,18000,68000,84000,100000,116000,140000,158000,170000,184000,204000,220000,232000,244000,272000,284000,300000,316000,330000,350000,358000,366000,380000,410000,422000,436000,450000,475000,500000};
+            this::festivalDemoStart,this::birthdayDemo,this::anniversaryDemo,this::remindDemo,this::nestDemo,this::focusDemo,()->climbDemo(-1),()->climbDemo(1),()->edgeDemo(-1),()->edgeDemo(1),this::lyricDemo,this::themeDemo};
+        long[] at={0,9000,18000,68000,84000,100000,116000,140000,158000,170000,184000,204000,220000,232000,244000,272000,284000,300000,316000,330000,350000,358000,366000,380000,410000,422000,436000,450000,475000,500000,525000};
         for(int i=0;i<steps.length;i++)show.postDelayed(steps[i],at[i]);
     }
     // ---- 叠叠乐（Claude）：照电脑版 tryStack / scatter ----
@@ -1108,7 +1113,7 @@ public final class PetService extends Service {
     }
     private void showIsland(String label){
         if(island==null){
-            island=new android.widget.TextView(this);island.setGravity(Gravity.CENTER);island.setTextColor(android.graphics.Color.WHITE);
+            island=new android.widget.TextView(this);island.setGravity(Gravity.CENTER);island.setTextColor(islandTextColor);
             island.setSingleLine(true);island.setEllipsize(android.text.TextUtils.TruncateAt.END);
             island.setOnClickListener(v->{if(!openNotice())openIslandPanel();});island.setOnLongClickListener(v->{openIslandPanel();return true;});
             island.setOnTouchListener(this::touchIsland);
@@ -1128,8 +1133,10 @@ public final class PetService extends Service {
         android.content.SharedPreferences prefs=getSharedPreferences("pets",MODE_PRIVATE);
         float density=getResources().getDisplayMetrics().density;int scale=IslandHang.percent(prefs.getInt("islandScale",100));
         int block=IslandHang.scaledBlock(density,scale,height);
-        if(island.getBackground()==null||block!=islandBlock){
-            islandBlock=block;islandArt=IslandBackground.load(this,catalog,block);
+        ThemeStore.Theme theme=activeTheme();
+        if(island.getBackground()==null||block!=islandBlock||theme==null||!theme.id.equals(islandThemeId)){ // 换了美化主题也重画（Claude）
+            islandBlock=block;islandThemeId=theme==null?"":theme.id;islandArt=IslandBackground.load(theme,block);if(islandArt==null)islandArt=IslandBackground.load(this,catalog,block);
+            islandTextColor=theme==null?android.graphics.Color.WHITE:theme.color("text");if(islandSlide==null)island.setTextColor(islandTextColor);
             if(islandArt!=null){island.setBackground(islandArt);int cap=islandArt.capWidth();island.setPadding(cap,0,cap,0);}
             else{android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable();bg.setColor(0xEE302932);bg.setCornerRadius(100);island.setBackground(bg);int pad=Math.round(18*density*scale/100f);island.setPadding(pad,0,pad,0);}
         }
@@ -1281,15 +1288,14 @@ public final class PetService extends Service {
             public void cancelTimer(){prefs.edit().putLong("timerEnd",0).apply();}
             public void hideTips(){islandDismissed=SystemClock.uptimeMillis()+30000;hideIsland();}
             public void openSettings(){openIslandSettings();}
-            public String petClip(){ // 千千猫猫坐在顶边；没出来就是第一只看得见的伙伴
-                Actor pick=byName(CAT);
-                if(pick==null||pick==hugB)for(Actor a:actors)if(a!=hugB){pick=a;break;}
-                if(pick!=null)return pick.pet.clip("待机");
-                for(Catalog.Pet p:catalog.pets)if(p.name.equals(CAT))return p.clip("待机");
+            public String petClip(){ // 主题的 mascot 坐在顶边（Claude）；素材里没有这只就用第一只看得见的伙伴
+                ThemeStore.Theme theme=activeTheme();String mascot=theme==null?CAT:theme.mascot;
+                for(Catalog.Pet p:catalog.pets)if(p.name.equals(mascot))return p.clip("待机");
+                for(Actor a:actors)if(a!=hugB)return a.pet.clip("待机");
                 return null;
             }
             public void closed(){islandPanel=null;}
-        });
+        },activeTheme());
         if(!islandPanel.show(width,height))islandPanel=null;
     }
     // ---- 外卖通知检查（Claude）：屏幕上一个小窗口，显示可能是外卖的通知能读到的字段；有「刷新」「关闭」 ----
@@ -1719,14 +1725,14 @@ public final class PetService extends Service {
         stopSlide();
         android.widget.TextView view=island;int half=Math.max(1,view.getHeight()/2);
         android.animation.ValueAnimator out=android.animation.ValueAnimator.ofFloat(0,1);out.setDuration(160);
-        out.addUpdateListener(v->{float f=(float)v.getAnimatedValue();view.scrollTo(view.getScrollX(),Math.round(half*f));view.setTextColor(android.graphics.Color.argb(Math.round(255*(1-f)),255,255,255));});
+        out.addUpdateListener(v->{float f=(float)v.getAnimatedValue();view.scrollTo(view.getScrollX(),Math.round(half*f));view.setTextColor((Math.round(255*(1-f))<<24)|(islandTextColor&0xFFFFFF));});
         out.addListener(new android.animation.AnimatorListenerAdapter(){boolean cancelled;
             @Override public void onAnimationCancel(android.animation.Animator a){cancelled=true;}
             @Override public void onAnimationEnd(android.animation.Animator a){
                 if(cancelled||island!=view)return;
                 view.setText(next);
                 android.animation.ValueAnimator in=android.animation.ValueAnimator.ofFloat(1,0);in.setDuration(220);
-                in.addUpdateListener(v->{float f=(float)v.getAnimatedValue();view.scrollTo(view.getScrollX(),-Math.round(half*f));view.setTextColor(android.graphics.Color.argb(Math.round(255*(1-f)),255,255,255));});
+                in.addUpdateListener(v->{float f=(float)v.getAnimatedValue();view.scrollTo(view.getScrollX(),-Math.round(half*f));view.setTextColor((Math.round(255*(1-f))<<24)|(islandTextColor&0xFFFFFF));});
                 islandSlide=in;in.start();
             }});
         islandSlide=out;out.start();
@@ -1734,7 +1740,7 @@ public final class PetService extends Service {
     private void stopSlide(){
         boolean running=islandSlide!=null;
         if(running){islandSlide.cancel();islandSlide=null;}
-        if(island!=null&&running){island.scrollTo(island.getScrollX(),0);island.setTextColor(android.graphics.Color.WHITE);}
+        if(island!=null&&running){island.scrollTo(island.getScrollX(),0);island.setTextColor(islandTextColor);}
     }
     /** 演示用的假歌词（自己写的），按时间一句一句换，有一句特别长用来看跑马灯。 */
     private static final long[] DEMO_TIMES={0,2600,5200,7800,15800,18400};
@@ -1746,5 +1752,22 @@ public final class PetService extends Service {
     }
     private void lyricDemo(){
         lyricDemoStart=SystemClock.uptimeMillis();lyricDemoUntil=lyricDemoStart+21000;islandDismissed=0;
+    }
+
+    // ---- 美化主题（Claude） ----
+    /** 现在的主题：演示时临时换的优先，否则是设置里选的（默认千千猫猫）。 */
+    private ThemeStore.Theme activeTheme(){return themeOverride!=null?themeOverride:ThemeStore.current(this);}
+    /** 演示：每个主题轮流换上灵动岛和灵动面板看 4 秒，最后换回原来的。 */
+    private void themeDemo(){
+        List<ThemeStore.Theme> all=ThemeStore.list(this);
+        for(int i=0;i<=all.size();i++){int k=i;show.postDelayed(()->{
+            if(islandPanel!=null)islandPanel.dismiss();
+            themeOverride=k<all.size()?all.get(k):null;
+            if(themeOverride==null){layoutIsland();return;}
+            islandMessage="演示：美化主题 · "+themeOverride.name+"（"+(k+1)+"/"+all.size()+"）";islandFromNotice=false;islandUntil=SystemClock.uptimeMillis()+3800;islandDismissed=0;
+            showIsland(islandMessage);layoutIsland();
+            show.postDelayed(()->{if(themeOverride!=null&&!destroyed)openIslandPanel();},600);
+        },i*4500L);}
+        show.postDelayed(()->{if(islandPanel!=null)islandPanel.dismiss();},all.size()*4500L);
     }
 }

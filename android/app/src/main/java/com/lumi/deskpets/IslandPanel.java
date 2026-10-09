@@ -32,7 +32,9 @@ final class IslandPanel {
         String petClip();                // 坐在顶边的伙伴的待机 GIF
         void closed();
     }
-    static final int BG=0xFF302932,STROKE=0xFF4E4352,CARD=0xFF3D3440,PINK=0xFFEFA7C0,TEXT=0xFFFFF7FA,SUB=0xFFC9B8C2,TRACK=0xFF241E26;
+    // 颜色都来自美化主题（Claude）：panel 面板底、rim 描边、card 卡片、accent 主色、accentText 主色上的字和图标、text / subtext 文字、track 进度条底、patch 角落色块
+    private final int BG,STROKE,CARD,PINK,PINK_TEXT,TEXT,SUB,TRACK,PATCH;
+    private final ThemeStore.Theme theme;
     private final Context context;
     private final WindowManager windows;
     private final Host host;
@@ -46,8 +48,11 @@ final class IslandPanel {
     private View prev,play,next,timerRow;
     private boolean playingShown,first=true;
 
-    IslandPanel(Context context,WindowManager windows,Host host){
-        this.context=context;this.windows=windows;this.host=host;
+    IslandPanel(Context context,WindowManager windows,Host host,ThemeStore.Theme theme){
+        this.context=context;this.windows=windows;this.host=host;this.theme=theme;
+        int[] c=theme==null?ThemeRules.DEFAULT_COLORS:theme.colors;
+        BG=c[ThemeRules.index("panel")];STROKE=c[ThemeRules.index("rim")];CARD=c[ThemeRules.index("card")];PINK=c[ThemeRules.index("accent")];PINK_TEXT=c[ThemeRules.index("accentText")];
+        TEXT=c[ThemeRules.index("text")];SUB=c[ThemeRules.index("subtext")];TRACK=c[ThemeRules.index("track")];PATCH=c[ThemeRules.index("patch")];
         density=context.getResources().getDisplayMetrics().density;
         block=Math.max(2,Math.round(density*2.5f));
     }
@@ -58,14 +63,14 @@ final class IslandPanel {
         root.setOnClickListener(v->dismiss()); // 点面板外面收起
         int width=Math.min(screenWidth-dp(32),dp(340));
         LinearLayout panel=new LinearLayout(context);panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setBackground(new PixelBox(BG,STROKE,block,2));panel.setPadding(dp(18),dp(16),dp(18),dp(18));
+        panel.setBackground(new PixelBox(BG,STROKE,block,2,PATCH));panel.setPadding(dp(18),dp(16),dp(18),dp(18));
         panel.setClickable(true); // 面板里面点空白处不收起
         // 标题行：爱心 + 灵动面板 + 关闭
         LinearLayout title=new LinearLayout(context);title.setGravity(Gravity.CENTER_VERTICAL);
-        title.addView(icon(R.drawable.ic_panel_heart,15,0));
+        title.addView(icon("heart",15,0));
         TextView name=text("灵动面板",19,TEXT,true);name.setPadding(dp(8),0,0,0);
         title.addView(name,new LinearLayout.LayoutParams(0,-2,1));
-        FrameLayout close=square(CARD,dp(30));inCenter(close,icon(R.drawable.ic_panel_close,13,0));
+        FrameLayout close=square(CARD,dp(30));inCenter(close,icon("close",13,0));
         close.setOnClickListener(v->dismiss());close.setContentDescription("关闭");
         title.addView(close,new LinearLayout.LayoutParams(dp(30),dp(30)));
         panel.addView(title);
@@ -73,20 +78,20 @@ final class IslandPanel {
         LinearLayout card=new LinearLayout(context);card.setOrientation(LinearLayout.VERTICAL);card.setBackground(new PixelBox(CARD,0,block,2));card.setPadding(dp(14),dp(12),dp(14),dp(12));
         card.addView(text("正在播放",12,SUB,false));
         song=text("",17,TEXT,true);song.setSingleLine(true);song.setEllipsize(TextUtils.TruncateAt.END);song.setPadding(0,dp(2),0,dp(8));card.addView(song);
-        progress=new PixelProgress(block);View bar=new View(context);bar.setBackground(progress);card.addView(bar,new LinearLayout.LayoutParams(-1,block*3));
+        progress=new PixelProgress(block,TRACK,PINK);View bar=new View(context);bar.setBackground(progress);card.addView(bar,new LinearLayout.LayoutParams(-1,block*3));
         LinearLayout buttons=new LinearLayout(context);buttons.setGravity(Gravity.CENTER);buttons.setPadding(0,dp(12),0,0);
-        prev=mediaButton(R.drawable.ic_panel_prev,CARD_DARK,0,"上一首",0);
-        play=mediaButton(R.drawable.ic_panel_pause,PINK,BG,"播放 / 暂停",1);playIcon=(ImageView)((FrameLayout)play).getChildAt(0);
-        next=mediaButton(R.drawable.ic_panel_next,CARD_DARK,0,"下一首",2);
+        prev=mediaButton("prev",BG,STROKE,0,"上一首",0);
+        play=mediaButton("pause",PINK,0,PINK_TEXT,"播放 / 暂停",1);playIcon=(ImageView)((FrameLayout)play).getChildAt(0);
+        next=mediaButton("next",BG,STROKE,0,"下一首",2);
         for(View b:new View[]{prev,play,next}){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(54),dp(38));p.leftMargin=p.rightMargin=dp(10);buttons.addView(b,p);}
         card.addView(buttons);
         panel.addView(card,margin(dp(14)));
         // 三行：取消计时器（有计时才显示）、隐藏提示 30 秒、位置大小与拖动
-        timerRow=row(R.drawable.ic_panel_timer,"取消计时器",true,()->{host.cancelTimer();dismiss();});
+        timerRow=row("timer","取消计时器",true,()->{host.cancelTimer();dismiss();});
         timerSub=(TextView)timerRow.getTag();
         panel.addView(timerRow,margin(dp(12)));
-        panel.addView(row(R.drawable.ic_panel_hide,"隐藏提示 30 秒",false,()->{dismiss();host.hideTips();}),margin(dp(10)));
-        panel.addView(row(R.drawable.ic_panel_move,"位置、大小与拖动",false,()->{dismiss();host.openSettings();}),margin(dp(10)));
+        panel.addView(row("hide","隐藏提示 30 秒",false,()->{dismiss();host.hideTips();}),margin(dp(10)));
+        panel.addView(row("move","位置、大小与拖动",false,()->{dismiss();host.openSettings();}),margin(dp(10)));
         // 面板 + 坐在顶边右侧的伙伴
         int petSize=dp(64);
         FrameLayout holder=new FrameLayout(context);
@@ -100,7 +105,6 @@ final class IslandPanel {
         refresh();
         return true;
     }
-    private static final int CARD_DARK=0xFF2E2731;
     void dismiss(){
         tick.removeCallbacksAndMessages(null);
         if(root!=null){if(root.isAttachedToWindow())try{windows.removeView(root);}catch(RuntimeException ignored){}root=null;host.closed();}
@@ -115,7 +119,7 @@ final class IslandPanel {
         song.setTextColor(music?TEXT:SUB);
         progress.set(music&&m.duration>0?Math.min(1f,m.now()/(float)m.duration):0f);
         for(View b:new View[]{prev,play,next}){b.setEnabled(music);b.setAlpha(music?1f:.35f);}
-        if(first||m.playing!=playingShown){playingShown=m.playing;first=false;playIcon.setImageDrawable(pixels(m.playing?R.drawable.ic_panel_pause:R.drawable.ic_panel_play,BG));}
+        if(first||m.playing!=playingShown){playingShown=m.playing;first=false;playIcon.setImageDrawable(pixels(m.playing?"pause":"play",PINK_TEXT));}
         long left=host.timerEnd()-System.currentTimeMillis();
         timerRow.setVisibility(left>0?View.VISIBLE:View.GONE);
         if(left>0)timerSub.setText(String.format(java.util.Locale.ROOT,"%02d:%02d 后提醒",left/60000,(left/1000)%60));
@@ -128,26 +132,33 @@ final class IslandPanel {
     private void inCenter(FrameLayout box,ImageView i){int k=i.getLayoutParams().width;FrameLayout.LayoutParams at=new FrameLayout.LayoutParams(k,k);at.gravity=Gravity.CENTER;box.addView(i,at);}
     private FrameLayout square(int color,int size){FrameLayout f=new FrameLayout(context);f.setBackground(new PixelBox(color,0,block,1));f.setMinimumWidth(size);f.setMinimumHeight(size);f.setClickable(true);return f;}
     /** 11×11 的像素图标，按整数倍最近邻放大到大约 targetDp。 */
-    private ImageView icon(int res,float targetDp,int tint){
-        ImageView v=new ImageView(context);v.setImageDrawable(pixels(res,tint));
+    private ImageView icon(String name,float targetDp,int tint){
+        ImageView v=new ImageView(context);v.setImageDrawable(pixels(name,tint));
         int k=Math.max(1,Math.round(targetDp*density/11f));v.setLayoutParams(new LinearLayout.LayoutParams(11*k,11*k));
         v.setScaleType(ImageView.ScaleType.FIT_XY);
         return v;
     }
-    private Drawable pixels(int res,int tint){
-        BitmapDrawable d=new BitmapDrawable(context.getResources(),BitmapFactory.decodeResource(context.getResources(),res));
+    /** 图标：主题里自带的优先，没有就用默认图标按主题 icon 颜色着色；tint 不为 0 时整个染成这个颜色（主色按钮上）。 */
+    private Drawable pixels(String name,int tint){
+        int res=res(name);
+        Bitmap bmp=theme==null?BitmapFactory.decodeResource(context.getResources(),res):theme.icon(context,name,res);
+        BitmapDrawable d=new BitmapDrawable(context.getResources(),bmp);
         d.setFilterBitmap(false);d.setAntiAlias(false);
         if(tint!=0)d.setColorFilter(new PorterDuffColorFilter(tint,PorterDuff.Mode.SRC_IN));
         return d;
     }
-    private View mediaButton(int res,int color,int tint,String label,int action){
-        FrameLayout b=square(color,dp(38));b.setContentDescription(label);
-        inCenter(b,icon(res,18,tint));
+    static int res(String name){
+        switch(name){case "prev":return R.drawable.ic_panel_prev;case "play":return R.drawable.ic_panel_play;case "pause":return R.drawable.ic_panel_pause;case "next":return R.drawable.ic_panel_next;
+            case "timer":return R.drawable.ic_panel_timer;case "hide":return R.drawable.ic_panel_hide;case "move":return R.drawable.ic_panel_move;case "close":return R.drawable.ic_panel_close;default:return R.drawable.ic_panel_heart;}
+    }
+    private View mediaButton(String name,int color,int stroke,int tint,String label,int action){
+        FrameLayout b=new FrameLayout(context);b.setBackground(new PixelBox(color,stroke,block,1));b.setClickable(true);b.setContentDescription(label);
+        inCenter(b,icon(name,18,tint));
         b.setOnClickListener(v->{host.control(action);tick.removeCallbacksAndMessages(null);tick.postDelayed(this::refresh,400);}); // 放歌按钮不收起面板
         return b;
     }
     /** 一行：左边图标方块、文字（可带一行小字）、右边像素箭头。小字 TextView 放在 tag 里。 */
-    private View row(int res,String label,boolean withSub,Runnable action){
+    private View row(String res,String label,boolean withSub,Runnable action){
         LinearLayout r=new LinearLayout(context);r.setGravity(Gravity.CENTER_VERTICAL);r.setBackground(new PixelBox(CARD,0,block,2));r.setPadding(dp(10),dp(10),dp(14),dp(10));r.setClickable(true);
         FrameLayout box=square(BG,dp(36));inCenter(box,icon(res,22,0));box.setClickable(false);
         r.addView(box,new LinearLayout.LayoutParams(dp(36),dp(36)));
@@ -162,8 +173,10 @@ final class IslandPanel {
 
     /** 像素台阶边角的方块（和灵动岛一样不圆角）：steps 级台阶，每级一个 block；stroke 为 0 就不描边。 */
     static final class PixelBox extends Drawable {
-        private final Paint fill=new Paint(),line=new Paint();private final int block,steps;private final boolean stroked;
-        PixelBox(int fillColor,int strokeColor,int block,int steps){fill.setColor(fillColor);line.setColor(strokeColor);this.block=block;this.steps=steps;stroked=strokeColor!=0;fill.setAntiAlias(false);line.setAntiAlias(false);}
+        private final Paint fill=new Paint(),line=new Paint(),patch=new Paint();private final int block,steps;private final boolean stroked,patched;
+        PixelBox(int fillColor,int strokeColor,int block,int steps){this(fillColor,strokeColor,block,steps,0);}
+        /** patchColor 不为 0 时，在左上角和右下角画两块像素色块（梨梨兔兔的黑色花斑）。 */
+        PixelBox(int fillColor,int strokeColor,int block,int steps,int patchColor){fill.setColor(fillColor);line.setColor(strokeColor);patch.setColor(patchColor);this.block=block;this.steps=steps;stroked=strokeColor!=0;patched=patchColor!=0;fill.setAntiAlias(false);line.setAntiAlias(false);patch.setAntiAlias(false);}
         static Path stepped(Rect r,int b,int steps){
             Path p=new Path();int s=steps*b;
             p.moveTo(r.left+s,r.top);p.lineTo(r.right-s,r.top);
@@ -178,8 +191,17 @@ final class IslandPanel {
         }
         @Override public void draw(Canvas c){
             Rect r=getBounds();
-            if(stroked){c.drawPath(stepped(r,block,steps),line);Rect in=new Rect(r.left+block,r.top+block,r.right-block,r.bottom-block);c.drawPath(stepped(in,block,steps),fill);}
-            else c.drawPath(stepped(r,block,steps),fill);
+            Rect in=stroked?new Rect(r.left+block,r.top+block,r.right-block,r.bottom-block):r;
+            if(stroked)c.drawPath(stepped(r,block,steps),line);
+            Path inside=stepped(in,block,steps);c.drawPath(inside,fill);
+            if(patched){ // 色块贴着里边，超出面板的部分剪掉
+                c.save();c.clipPath(inside);
+                int w=Math.max(block*6,Math.round(in.width()*.14f)/block*block),h=Math.max(block*4,block*10);
+                c.drawPath(stepped(new Rect(in.left-block,in.top-block,in.left+w,in.top+h),block,2),patch);
+                c.drawPath(stepped(new Rect(in.right-w-block*4,in.bottom-h+block*2,in.right+block,in.bottom+block),block,2),patch);
+                c.drawRect(in.right-block*6,in.bottom-h-block*2,in.right+block,in.bottom,patch);
+                c.restore();
+            }
         }
         @Override public void setAlpha(int a){fill.setAlpha(a);line.setAlpha(a);}
         @Override public void setColorFilter(ColorFilter f){fill.setColorFilter(f);line.setColorFilter(f);}
@@ -188,7 +210,7 @@ final class IslandPanel {
     /** 像素进度条：深色底槽、粉色已播部分、粉色小方块滑块。 */
     static final class PixelProgress extends Drawable {
         private final Paint track=new Paint(),done=new Paint();private final int block;private float value;
-        PixelProgress(int block){this.block=block;track.setColor(TRACK);done.setColor(PINK);}
+        PixelProgress(int block,int trackColor,int doneColor){this.block=block;track.setColor(trackColor);done.setColor(doneColor);}
         void set(float v){if(Math.abs(v-value)>.001f){value=v;invalidateSelf();}}
         @Override public void draw(Canvas c){
             Rect r=getBounds();int cy=r.centerY(),h=block*2;
