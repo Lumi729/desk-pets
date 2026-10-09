@@ -7,6 +7,16 @@ const { PAIRS, replyFor, isTeaseAnim } = require('../renderer/teases');
 const assets = path.join(__dirname, '..', '桌宠素材');
 const has = (pet, anim) => fs.existsSync(path.join(assets, pet, `${anim}.gif`));
 
+test('phone climbing and peeking clips never enter desktop random click actions', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../renderer/pets.js'), 'utf8');
+  const core = source.match(/const CORE = (\[[\s\S]*?\]);/)[1];
+  const actions = source.match(/const actionsOf = ([^;]+);/)[1];
+  const actionsOf = require('node:vm').runInNewContext(`const CORE=${core}; const Teases={isTeaseAnim}; (${actions})`, { isTeaseAnim });
+  const phone = ['沿左边向上爬', '沿右边向上爬', '沿左边向下爬', '沿右边向下爬', '左边探头', '右边探头'];
+  const clips = Object.fromEntries([...phone, '打招呼', '待机', '互动_扶眼镜1'].map(name => [name, true]));
+  assert.deepStrictEqual(Array.from(actionsOf(clips)), ['打招呼']);
+});
+
 test('every tease and reply animation exists', () => {
   for (const [teaser, { target, replies }] of Object.entries(PAIRS)) {
     for (const [tease, steps] of Object.entries(replies)) {
