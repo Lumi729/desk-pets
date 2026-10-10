@@ -91,6 +91,8 @@ final class LyricRules {
     }
     /** 状态栏歌词会一句一句变：同一首歌里看到过两句不一样的，才算真的在显示歌词。 */
     static boolean changing(int distinctLines){return distinctLines>=2;}
+    /** 只有音乐 App 正在放、而且有真正的歌名时才去网易云查歌词（B站视频、「媒体播放」这种占位标题不查）。 */
+    static boolean shouldLookUp(String pkg,String title){return musicApp(pkg)&&title!=null&&!title.trim().isEmpty()&&!"媒体播放".equals(title.trim());}
     /** 常见音乐 App（状态栏歌词只看它们的通知）。 */
     static boolean musicApp(String pkg){
         return "com.netease.cloudmusic".equals(pkg)||"com.tencent.qqmusic".equals(pkg)||"com.kugou.android".equals(pkg)||"cn.kuwo.player".equals(pkg)||"com.miui.player".equals(pkg)||"com.heytap.music".equals(pkg)||"com.android.bbkmusic".equals(pkg)||"com.huawei.music".equals(pkg);

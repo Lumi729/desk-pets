@@ -10,6 +10,9 @@ final class ThemeRules {
     static final String DEFAULT_ID="qianqian";
     static final int VERSION=1;
     static final int MAX_IMAGE=512*1024,MAX_PACK=2*1024*1024;
+    /** 图片宽、高都不能超过这么多像素（Claude，2026-10-10）：压缩后不到 512 KB 的 PNG 也可能解码成几百 MB，打开就闪退。 */
+    static final int MAX_PIXELS=512;
+    static boolean tooLarge(int width,int height){return width>MAX_PIXELS||height>MAX_PIXELS;}
     static final List<String> ICONS=Collections.unmodifiableList(Arrays.asList("prev","play","pause","next","timer","hide","move","close","heart"));
     static final List<String> ISLAND=Collections.unmodifiableList(Arrays.asList("island_left.png","island_middle.png","island_right.png"));
     /** 颜色键和千千猫猫的默认值（美化包缺哪个就用这里的补上）。patch 可选，默认不画。 */

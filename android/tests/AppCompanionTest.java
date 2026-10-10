@@ -246,6 +246,12 @@ public final class AppCompanionTest {
         equal(ThemeRules.recolor(0xFFFFF7FA,0xFF2C2C2A),0xFF2C2C2A);equal(ThemeRules.recolor(0x80FFFFFF,0xFF2C2C2A),0x802C2C2A);
         equal(ThemeRules.recolor(0xFFEFA7C0,0xFF2C2C2A),0xFFEFA7C0);equal(ThemeRules.recolor(0,0xFF2C2C2A),0); // 粉色和透明不动
         equal(ThemeRules.COLOR_KEYS.length,ThemeRules.DEFAULT_COLORS.length);equal(ThemeRules.DEFAULT_COLORS[ThemeRules.index("accent")],0xFFEFA7C0);
+        // 2026-10-10 修复（Claude）：超大像素图、骑手到店不算取餐、只给音乐 App 查歌词
+        equal(ThemeRules.tooLarge(512,512),false);equal(ThemeRules.tooLarge(513,10),true);equal(ThemeRules.tooLarge(10,4000),true);
+        equal(DeliveryRules.hint("骑手已到达商家，等待出餐"),"");equal(DeliveryRules.hint("骑手已到店取货"),"");
+        equal(DeliveryRules.hint("骑手已到达您的楼下，请取餐").isEmpty(),false);
+        equal(LyricRules.shouldLookUp("com.netease.cloudmusic","晴天"),true);equal(LyricRules.shouldLookUp("tv.danmaku.bili","某个视频"),false);
+        equal(LyricRules.shouldLookUp("com.netease.cloudmusic","媒体播放"),false);equal(LyricRules.shouldLookUp("com.netease.cloudmusic"," "),false);
         // 挑衅（Claude）：和 teases.js 的 replyFor 一样，10 分钟里第 4 次就投降
         java.util.Map<String,java.util.List<String>> replies=new java.util.LinkedHashMap<>();
         replies.put("就这",java.util.List.of("委屈"));replies.put("来打我呀",java.util.List.of("跺脚","@chase"));

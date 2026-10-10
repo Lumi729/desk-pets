@@ -1,6 +1,6 @@
-# 梨间雪 · 安卓尝鲜版 0.24-preview
+# 梨间雪 · 安卓尝鲜版 0.27-preview
 
-安装包：[Android 0.24-preview 发布页](https://github.com/Lumi729/desk-pets/releases/tag/android-v0.24-preview)。本次发布署名：Claude，2026-10-09。新增美化主题（千千猫猫 / 梨梨兔兔，可导入导出），设置页照设计稿重排成可折叠卡片；手机效果待实测。
+安装包：[Android 0.27-preview 发布页](https://github.com/Lumi729/desk-pets/releases/tag/android-v0.27-preview)。本次发布署名：Claude，2026-10-10。修 8 个问题：超大像素美化图闪退、骑手到店误报取餐、视频也去查歌词、没运行时收起 / 结束专注会先放出宠物、素材读不出时崩溃、导入美化文件失效时设置页崩、坏主题每帧重读、换主题时歌词文字颜色不更新；手机效果待实测。
 
 原生 Android 悬浮桌宠，Android 8.0 及以上。安装 APK 后打开「梨间雪桌宠」，选择伙伴，点「让桌宠出来玩」，按照手机提示允许「显示在其他应用上层」，返回应用即可开启。通知权限用于显示收起和关闭按钮。
 

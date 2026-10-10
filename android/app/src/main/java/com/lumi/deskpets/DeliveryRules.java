@@ -9,6 +9,8 @@ final class DeliveryRules {
         // Discounts, estimates, pickup invitations and questions must not become arrival claims.
         if(text.contains("预计")||text.contains("即将")||text.contains("还有")||text.contains("未送达")||text.contains("尚未")||text.contains("优惠")||text.contains("红包")||text.contains("吗")||text.contains("?"))return "";
         if(text.contains("已送达")||text.contains("已放至")||text.contains("已放在")||text.contains("已存入"))return "外卖通知：请查看取餐信息";
+        // 「骑手已到达商家，等待出餐」是骑手到店取货，不是送到你这里（Claude，2026-10-10）
+        if(text.contains("到店")||text.contains("商家")||text.contains("取货")||text.contains("出餐"))return "";
         if(text.contains("骑手已到")||text.contains("骑手到达")||text.contains("请取餐"))return "外卖通知：骑手提醒你取餐";
         return "";
     }

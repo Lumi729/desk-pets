@@ -161,8 +161,10 @@ public final class PetService extends Service {
         int landing(){return perch==null?floor():Math.min(floor(),perch.top-unit);}
         void play(String next,long duration){action=next;until=SystemClock.uptimeMillis()+duration;view.show(pet.clip(next));}
     }
+    /** 服务在不在运行（设置页用来判断：没运行时「收起 / 继续」「结束专注」不去启动它）。 */
+    static volatile boolean running;
     @Override public void onCreate(){
-        super.onCreate();windows=(WindowManager)getSystemService(WINDOW_SERVICE);
+        super.onCreate();running=true;windows=(WindowManager)getSystemService(WINDOW_SERVICE);
         getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel("pets","桌宠陪伴",NotificationManager.IMPORTANCE_LOW));
         screenOn=getSystemService(PowerManager.class).isInteractive();
         IntentFilter filter=new IntentFilter();filter.addAction(Intent.ACTION_SCREEN_OFF);filter.addAction(Intent.ACTION_SCREEN_ON);
@@ -174,7 +176,13 @@ public final class PetService extends Service {
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         String action=intent==null?"stop":intent.getAction();
         if("stop".equals(action)){stopSelf();return START_NOT_STICKY;}
-        if(!Settings.canDrawOverlays(this)||catalog==null){stopSelf();return START_NOT_STICKY;}
+        // 先进前台再停：用 startForegroundService 启动后不调 startForeground 就停，系统会让应用崩溃（Claude，2026-10-10）
+        if(!Settings.canDrawOverlays(this)||catalog==null){try{startForeground(7,notification());}catch(RuntimeException ignored){}stopSelf();return START_NOT_STICKY;}
+        // 本来没在运行时点「收起 / 继续」「结束专注」：不放出宠物，直接结束
+        if(actors.isEmpty()&&("toggle".equals(action)||"focus-stop".equals(action))){
+            if("focus-stop".equals(action))getSharedPreferences("pets",MODE_PRIVATE).edit().remove("focusEnd").remove("restEnd").apply();
+            try{startForeground(7,notification());}catch(RuntimeException ignored){}stopSelf();return START_NOT_STICKY;
+        }
         startForeground(7,notification());
         if(actors.isEmpty()||"start".equals(action)||"hug".equals(action)||(action!=null&&action.startsWith("test-")))
             rebuild(castFor(action)); // 演示要的宠物自动放出来
@@ -1362,7 +1370,7 @@ public final class PetService extends Service {
     private void refreshVisibility(){observeApps=screenOn&&!paused;InterfaceCompanion.visible=observeApps;if(!observeApps){motion.enabled(false);hideIsland();hideNest();if(islandPanel!=null)islandPanel.dismiss();if(islandSettings!=null)islandSettings.dismiss();media.clear();companionMode="none";InterfaceCompanion.clear();}for(Actor a:actors){boolean visible=screenOn&&!paused&&a!=hugB;a.view.setVisibility(visible?View.VISIBLE:View.GONE);a.view.animate(visible);}}
     private void clearActors(){hideIsland();hideNest();hugA=hugB=null;storyKind=null;storyPet=storyDog=null;sceneA=sceneB=null;sceneSteps.clear();sceneStep=null;fightDemo=false;stack.clear();clock.removeCallbacksAndMessages(null);for(Actor a:actors){a.view.animate(false);if(a.view.isAttachedToWindow())windows.removeView(a.view);}actors.clear();}
     @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);hideIsland();hideNest();for(Actor a:actors){if(a.nest!=0){a.nest=0;a.sleeping=false;}a.climb=a.home!=0?1:0;a.climbSide=a.home;a.view.setTranslationX(0);}endHug();cancelStory();cancelScene();if(!stack.isEmpty())scatter(SystemClock.uptimeMillis());InterfaceCompanion.clear();keyboardFloor=-1;surfaces=Collections.emptyList();demoUntil=typingDemoUntil=0;measure();for(Actor a:actors){a.perch=a.target=null;a.hopStart=0;a.hang=0;a.rainbowAfter=false;a.y=a.floor();a.ballEnd=0;a.dragging=a.falling=false;position(a);}}
-    @Override public void onDestroy(){destroyed=true;if(lyrics!=null)lyrics.shutdown();closeInspector();hideNest();show.removeCallbacksAndMessages(null);if(islandPanel!=null)islandPanel.dismiss();if(islandSettings!=null)islandSettings.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
+    @Override public void onDestroy(){running=false;destroyed=true;if(lyrics!=null)lyrics.shutdown();closeInspector();hideNest();show.removeCallbacksAndMessages(null);if(islandPanel!=null)islandPanel.dismiss();if(islandSettings!=null)islandSettings.dismiss();motion.enabled(false);hideIsland();observeApps=false;InterfaceCompanion.visible=false;InterfaceCompanion.clear();usageClock.removeCallbacksAndMessages(null);usageThread.quitSafely();clock.removeCallbacksAndMessages(null);clearActors();unregisterReceiver(screen);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent i){return null;}
 
     // ---- 过节 / 生日 / 在一起多少天（Claude）：照电脑版 lib/calendar.js、lib/diary.js、pets.js 的 maybeCelebrate ----
@@ -1704,7 +1712,8 @@ public final class PetService extends Service {
         // 路线一：音乐 App 的状态栏歌词（这首歌开始以后发来的才算）
         if(media.pkg.equals(DeliveryCompanion.tickerPkg)&&!DeliveryCompanion.tickerLyric.isEmpty()&&DeliveryCompanion.tickerAt>=lyricTitleAt-1500){
             lyricStatus=song+"：用的是状态栏歌词";return prefix+DeliveryCompanion.tickerLyric;}
-        // 路线二：按歌名、歌手查带时间轴的歌词，按播放进度找这句
+        // 路线二：按歌名、歌手查带时间轴的歌词，按播放进度找这句（只查音乐 App 的真歌名，Claude 2026-10-10）
+        if(!LyricRules.shouldLookUp(media.pkg,media.title)){lyricStatus=song+"：不是音乐 App 在放（或没有歌名），不查歌词";return "";}
         LyricFetcher.Song found=lyrics.get(media.title,media.artist,media.duration);
         if(found==null||found.lines.isEmpty()){
             lyricStatus=song+"："+(found==null||lyrics.pending(media.title,media.artist)&&found.failed?"正在查歌词…":found.status)+"（先显示歌名）";return "";}
@@ -1731,10 +1740,14 @@ public final class PetService extends Service {
         out.addListener(new android.animation.AnimatorListenerAdapter(){boolean cancelled;
             @Override public void onAnimationCancel(android.animation.Animator a){cancelled=true;}
             @Override public void onAnimationEnd(android.animation.Animator a){
-                if(cancelled||island!=view)return;
+                if(cancelled||island!=view){if(islandSlide==out)islandSlide=null;return;}
                 view.setText(next);
                 android.animation.ValueAnimator in=android.animation.ValueAnimator.ofFloat(1,0);in.setDuration(220);
                 in.addUpdateListener(v->{float f=(float)v.getAnimatedValue();view.scrollTo(view.getScrollX(),-Math.round(half*f));view.setTextColor((Math.round(255*(1-f))<<24)|(islandTextColor&0xFFFFFF));});
+                in.addListener(new android.animation.AnimatorListenerAdapter(){@Override public void onAnimationEnd(android.animation.Animator a){
+                    if(islandSlide==in)islandSlide=null; // 动画放完就清掉，换主题时文字颜色才会更新（Claude，2026-10-10）
+                    if(island==view){view.scrollTo(view.getScrollX(),0);view.setTextColor(islandTextColor);}
+                }});
                 islandSlide=in;in.start();
             }});
         islandSlide=out;out.start();

@@ -57,14 +57,21 @@ final class ThemeStore {
     }
 
     private static Theme cached;
+    private static String failedId; // 读不出来的主题 id，避免反复重读
     /** 现在用的主题（prefs "theme"，默认千千猫猫）；读不出来就退回千千猫猫。 */
     static synchronized Theme current(Context c){
-        String id=c.getSharedPreferences("pets",Context.MODE_PRIVATE).getString("theme",ThemeRules.DEFAULT_ID);
+        android.content.SharedPreferences prefs=c.getSharedPreferences("pets",Context.MODE_PRIVATE);
+        String id=prefs.getString("theme",ThemeRules.DEFAULT_ID);
         if(cached!=null&&cached.id.equals(id))return cached;
-        Theme t=load(c,id);if(t==null)t=load(c,ThemeRules.DEFAULT_ID);
+        if(id.equals(failedId))return cached; // 上次就读不出来：不要每帧（50ms）再解析一遍
+        Theme t=load(c,id);
+        if(t==null&&!id.equals(ThemeRules.DEFAULT_ID)){ // 选中的美化包坏了 / 丢了：设置改回千千猫猫（Claude，2026-10-10）
+            prefs.edit().putString("theme",ThemeRules.DEFAULT_ID).apply();id=ThemeRules.DEFAULT_ID;t=load(c,id);
+        }
+        failedId=t==null?id:null;
         cached=t;return t;
     }
-    static synchronized void forget(){cached=null;}
+    static synchronized void forget(){cached=null;failedId=null;}
     static void choose(Context c,String id){c.getSharedPreferences("pets",Context.MODE_PRIVATE).edit().putString("theme",id).apply();forget();}
     static boolean isBuiltIn(String id){return Arrays.asList(BUILT_IN).contains(id);}
     private static File dir(Context c){File d=new File(c.getFilesDir(),"themes");if(!d.isDirectory())d.mkdirs();return d;}
@@ -94,6 +101,7 @@ final class ThemeStore {
         byte[] zip;
         try(InputStream in=c.getContentResolver().openInputStream(uri)){if(in==null)throw new ThemeError("打不开这个文件");zip=read(in,ThemeRules.MAX_PACK);}
         catch(IOException e){throw new ThemeError(e.getMessage()!=null&&e.getMessage().startsWith("太大")?"美化包超过 2 MB 了":"读不了这个文件");}
+        catch(RuntimeException e){throw new ThemeError("读不了这个文件");} // 云盘 / 文件管理器的地址失效会抛 SecurityException
         Theme t=parse(zip,false);
         if(isBuiltIn(t.id))throw new ThemeError("id「"+t.id+"」和内置主题重名了，请换一个 id");
         try(OutputStream out=new FileOutputStream(new File(dir(c),t.id+".zip"))){write(t,out);}
@@ -143,6 +151,7 @@ final class ThemeStore {
             if(!f.getKey().endsWith(".png"))continue;
             BitmapFactory.Options o=new BitmapFactory.Options();o.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(f.getValue(),0,f.getValue().length,o);
             if(o.outWidth<=0||o.outHeight<=0||!"image/png".equals(o.outMimeType))throw new ThemeError(f.getKey()+" 不是能读的 PNG 图片");
+            if(ThemeRules.tooLarge(o.outWidth,o.outHeight))throw new ThemeError(f.getKey()+" 太大了（"+o.outWidth+"×"+o.outHeight+"），宽和高都不能超过 "+ThemeRules.MAX_PIXELS+" 像素"); // 压缩后很小但像素超大的图，整张解码会闪退
             if(ThemeRules.ISLAND.contains(f.getKey())){if(height<0)height=o.outHeight;else if(height!=o.outHeight)throw new ThemeError("灵动岛三张图要一样高");}
         }
         try{

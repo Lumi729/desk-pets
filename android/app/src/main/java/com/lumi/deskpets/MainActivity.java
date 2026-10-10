@@ -459,6 +459,7 @@ public final class MainActivity extends Activity {
             if(t==null){toast("导入失败：保存后读不出来");return;}
             ThemeStore.choose(this,t.id);toast("导入好啦，换成「"+t.name+"」");recreate();
         }catch(ThemeStore.ThemeError e){new AlertDialog.Builder(this).setTitle("导入失败").setMessage(e.getMessage()).setPositiveButton("知道了",null).show();}
+        catch(RuntimeException e){new AlertDialog.Builder(this).setTitle("导入失败").setMessage("读不了这个文件").setPositiveButton("知道了",null).show();}
     }
     private void exportTheme(){
         if(theme==null){toast("现在的主题读不出来");return;}
@@ -475,6 +476,12 @@ public final class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("删除「"+name+"」？").setMessage("删掉后会换回千千猫猫。").setPositiveButton("删除",(d,i)->{ThemeStore.delete(this,id);toast("删好啦");recreate();}).setNegativeButton("取消",null).show();
     }
     private void startPets(String action){
+        // 伙伴本来就没出来：「收起 / 继续」「结束专注」不用先把它们放出来再收起（Claude，2026-10-10）
+        if(!PetService.running&&("toggle".equals(action)||"focus-stop".equals(action))){
+            if("focus-stop".equals(action)){prefs.edit().remove("focusEnd").remove("restEnd").apply();toast("专注结束啦");}
+            else toast("伙伴们还没出来哦，点「让桌宠出来玩」");
+            return;
+        }
         if(selected().isEmpty()){toast("先选一只伙伴吧");return;} save();
         if(!Settings.canDrawOverlays(this)){
             pendingStart=true;
